@@ -1,0 +1,8 @@
+dist
+build
+coverage
+node_modules
+.vite
+.cache
+*.min.js
+*.map
