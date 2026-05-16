@@ -1,7 +1,6 @@
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useRef, useState } from "react"
 import type { FaderCustomization, MidiFaderConfig } from "../../../shared/controller-config.ts"
-import { styles } from "../styles"
 import type { MidiCommand } from "../types"
 
 export type FaderStripProps = {
@@ -128,3 +127,141 @@ export function FaderStrip({ fader, config, feedbackValue, sendCommand, isMobile
     </div>
   )
 }
+
+const styles = stylex.create({
+faderStrip: {
+    display: "grid",
+    gridTemplateRows: {
+      default: "166px auto auto auto",
+      "@media (max-width: 760px)": "132px auto auto auto",
+    },
+    justifyItems: "center",
+    alignItems: "center",
+    gap: {
+      default: "7px",
+      "@media (max-width: 760px)": "5px",
+    },
+    minWidth: 0,
+    overflow: "hidden",
+    borderRadius: {
+      default: "14px",
+      "@media (max-width: 760px)": "10px",
+    },
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    padding: {
+      default: "12px 4px 10px",
+      "@media (max-width: 760px)": "9px 1px 8px",
+    },
+    cursor: "context-menu",
+    touchAction: "none",
+  },
+faderSliderArea: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    minWidth: 0,
+    height: "100%",
+    paddingTop: {
+      default: "10px",
+      "@media (max-width: 760px)": "8px",
+    },
+    paddingBottom: {
+      default: "10px",
+      "@media (max-width: 760px)": "8px",
+    },
+    touchAction: "none",
+  },
+verticalSliderTrack: {
+    position: "relative",
+    width: {
+      default: "42px",
+      "@media (max-width: 760px)": "32px",
+    },
+    height: {
+      default: "128px",
+      "@media (max-width: 760px)": "98px",
+    },
+    borderRadius: "999px",
+    backgroundColor: "transparent",
+    touchAction: "none",
+    overflow: "visible",
+    outline: "none",
+  },
+verticalSliderRail: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: "50%",
+    width: "8px",
+    transform: "translateX(-50%)",
+    borderRadius: "999px",
+    backgroundColor: "rgba(148, 163, 184, 0.22)",
+    pointerEvents: "none",
+  },
+verticalSliderFill: {
+    position: "absolute",
+    bottom: 0,
+    left: "50%",
+    width: "8px",
+    transform: "translateX(-50%)",
+    borderRadius: "999px",
+    backgroundColor: "#8b5cf6",
+    pointerEvents: "none",
+  },
+verticalSliderThumb: {
+    position: "absolute",
+    left: "50%",
+    zIndex: 2,
+    transform: "translate(-50%, 50%)",
+    width: {
+      default: "28px",
+      "@media (max-width: 760px)": "24px",
+    },
+    height: {
+      default: "18px",
+      "@media (max-width: 760px)": "16px",
+    },
+    borderRadius: "7px",
+    backgroundColor: "#e5e7eb",
+    borderWidth: "2px",
+    borderStyle: "solid",
+    borderColor: "#111827",
+    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.35)",
+    touchAction: "none",
+  },
+faderValue: {
+    color: "#ddd6fe",
+    fontSize: {
+      default: "0.72rem",
+      "@media (max-width: 760px)": "0.58rem",
+    },
+    fontWeight: 900,
+    lineHeight: 1,
+  },
+faderName: {
+    color: "#e5e7eb",
+    fontSize: {
+      default: "0.72rem",
+      "@media (max-width: 760px)": "0.5rem",
+    },
+    textAlign: "center",
+    lineHeight: 1.05,
+    maxWidth: "100%",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+faderCc: {
+    color: "#94a3b8",
+    fontSize: {
+      default: "0.62rem",
+      "@media (max-width: 760px)": "0.48rem",
+    },
+    lineHeight: 1,
+  },
+})

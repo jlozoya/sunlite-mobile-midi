@@ -2,7 +2,6 @@ import * as stylex from "@stylexjs/stylex"
 import { useEffect, useMemo, useState } from "react"
 import { Button, Input, Label, TextField } from "react-aria-components"
 import { FADERS, PAD_GRID, SCENE_BUTTONS, type ButtonCustomization, type ControllerCustomization, type FaderCustomization } from "../../../shared/controller-config.ts"
-import { styles } from "../styles"
 import type { EditableControl } from "../types"
 
 export type ControllerConfigModalProps = {
@@ -178,3 +177,118 @@ function normalizeStandardButtonCustomization(current: ButtonCustomization, labe
     initialActive: false,
   }
 }
+
+const styles = stylex.create({
+fieldGroup: {
+    display: "grid",
+    gap: "6px",
+    color: "#cbd5e1",
+    fontSize: "0.84rem",
+    fontWeight: 800,
+  },
+textInput: {
+    width: "100%",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(255, 255, 255, 0.14)",
+    borderRadius: "12px",
+    backgroundColor: "#050814",
+    color: "#f8fafc",
+    padding: "10px 11px",
+    outline: "none",
+  },
+modalBackdrop: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 100,
+    display: "grid",
+    placeItems: "center",
+    backgroundColor: "rgba(2, 6, 23, 0.74)",
+    padding: "20px",
+  },
+modalPanel: {
+    width: "min(100%, 720px)",
+    maxHeight: "min(92vh, 760px)",
+    overflow: "auto",
+    borderRadius: "24px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(255, 255, 255, 0.14)",
+    backgroundColor: "#111827",
+    boxShadow: "0 30px 80px rgba(0, 0, 0, 0.5)",
+    padding: "18px",
+  },
+modalHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "14px",
+    marginBottom: "16px",
+  },
+modalTitle: {
+    margin: 0,
+    fontSize: "1.25rem",
+  },
+iconButton: {
+    width: "36px",
+    height: "36px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(255, 255, 255, 0.14)",
+    borderRadius: "12px",
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    color: "#f8fafc",
+    cursor: "pointer",
+    fontSize: "1.3rem",
+    lineHeight: 1,
+  },
+modalGrid: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "1fr",
+      "@media (min-width: 720px)": "repeat(2, minmax(0, 1fr))",
+    },
+    gap: "12px",
+  },
+modalActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: "10px",
+    marginTop: "18px",
+  },
+helpBox: {
+    gridColumn: "1 / -1",
+    display: "grid",
+    gap: "6px",
+    borderRadius: "14px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(14, 165, 233, 0.28)",
+    backgroundColor: "rgba(14, 165, 233, 0.08)",
+    color: "#bae6fd",
+    padding: "12px",
+    fontSize: "0.86rem",
+    lineHeight: 1.45,
+  },
+sectionDescription: {
+    margin: 0,
+    color: "#94a3b8",
+    fontSize: "0.9rem",
+    lineHeight: 1.5,
+  },
+setupButton: {
+    borderWidth: 0,
+    borderRadius: "14px",
+    backgroundColor: "#8b5cf6",
+    color: "#ffffff",
+    cursor: "pointer",
+    fontWeight: 800,
+    padding: "12px 14px",
+  },
+setupButtonSecondary: {
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(167, 139, 250, 0.5)",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+  },
+})

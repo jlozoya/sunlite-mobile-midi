@@ -2,7 +2,6 @@ import * as stylex from "@stylexjs/stylex"
 import { useState } from "react"
 import { FADERS, PAD_GRID, SCENE_BUTTONS, type ControllerCustomization } from "../../../shared/controller-config.ts"
 import { getFeedbackBehavior, getFeedbackColor } from "../controller/ledFeedback"
-import { styles } from "../styles"
 import type { EditableControl, MidiCommand } from "../types"
 import { ControllerConfigModal } from "./ControllerConfigModal"
 import { FaderStrip } from "./FaderStrip"
@@ -109,3 +108,112 @@ export function ApcController({ padStates, ccValues, lastCommand, customization,
     </section>
   )
 }
+
+const styles = stylex.create({
+apcPanel: {
+    width: "100%",
+    minWidth: 0,
+    marginTop: "16px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    borderRadius: "26px",
+    backgroundColor: "#111827",
+    boxShadow: "0 20px 60px rgba(0, 0, 0, 0.34)",
+    padding: {
+      default: "clamp(10px, 1.2vw, 18px)",
+      "@media (max-width: 760px)": "8px",
+    },
+    boxSizing: "border-box",
+    overflow: "hidden",
+  },
+warningText: {
+    margin: "12px 0 0",
+    borderRadius: "14px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(245, 158, 11, 0.38)",
+    backgroundColor: "rgba(245, 158, 11, 0.1)",
+    color: "#fde68a",
+    padding: "10px 12px",
+    fontSize: "0.86rem",
+    lineHeight: 1.45,
+  },
+apcSurface: {
+    width: "100%",
+    minWidth: 0,
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      "@media (min-width: 900px)": "minmax(352px, 1fr) clamp(72px, 6.4vw, 112px)",
+    },
+    gap: {
+      default: "clamp(6px, 0.9vw, 14px)",
+      "@media (max-width: 760px)": "6px",
+    },
+    borderRadius: "22px",
+    backgroundColor: "#050814",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    overflowX: "auto",
+    overscrollBehaviorX: "contain",
+    padding: {
+      default: "clamp(8px, 1vw, 14px)",
+      "@media (max-width: 760px)": "6px",
+    },
+    boxSizing: "border-box",
+  },
+padMatrix: {
+    minWidth: 0,
+    display: "grid",
+    gridTemplateColumns: {
+      default: "repeat(8, minmax(44px, 1fr))",
+      "@media (max-width: 760px)": "repeat(8, minmax(36px, 1fr))",
+    },
+    gap: {
+      default: "clamp(4px, 0.6vw, 8px)",
+      "@media (max-width: 760px)": "4px",
+    },
+  },
+sceneColumn: {
+    minWidth: 0,
+    display: "grid",
+    gridTemplateColumns: {
+      default: "repeat(4, minmax(54px, 1fr))",
+      "@media (min-width: 900px)": "1fr",
+    },
+    gap: {
+      default: "clamp(4px, 0.6vw, 8px)",
+      "@media (max-width: 760px)": "4px",
+    },
+  },
+faderBank: {
+    gridColumn: "1 / -1",
+    display: "grid",
+    gridTemplateColumns: {
+      default: "repeat(9, minmax(44px, 1fr))",
+      "@media (max-width: 760px)": "repeat(9, minmax(36px, 1fr))",
+    },
+    gap: {
+      default: "10px",
+      "@media (max-width: 760px)": "4px",
+    },
+    width: "100%",
+    minWidth: 0,
+    overflowX: "visible",
+    overscrollBehaviorX: "contain",
+    marginTop: "10px",
+  },
+lastCommandBar: {
+    display: "grid",
+    gap: "4px",
+    marginTop: "12px",
+    borderRadius: "14px",
+    backgroundColor: "rgba(8, 10, 18, 0.7)",
+    padding: "10px 12px",
+    color: "#cbd5e1",
+    fontSize: "0.82rem",
+    overflowWrap: "anywhere",
+  },
+})

@@ -4,7 +4,6 @@ import type { ButtonCustomization, MidiPadConfig, PadColor } from "../../../shar
 import { getButtonFrameStyle, getLedLayerStyle, type ApcLedFeedbackBehavior } from "../controller/ledFeedback"
 import { sendStandardButtonNoteOff, sendStandardButtonNoteOn } from "../controller/midiCommands"
 import { useMidiButtonPress } from "../hooks/useMidiButtonPress"
-import { styles } from "../styles"
 import type { MidiCommand } from "../types"
 
 export type PadButtonProps = {
@@ -45,3 +44,66 @@ export function PadButton({ pad, config, feedbackColor, feedbackBehavior, isMobi
     </Button>
   )
 }
+
+const styles = stylex.create({
+padButton: {
+    position: "relative",
+    overflow: "hidden",
+    aspectRatio: "1 / 1",
+    minWidth: "36px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    borderRadius: {
+      default: "12px",
+      "@media (max-width: 760px)": "8px",
+    },
+    backgroundColor: "#1f2937",
+    color: "#f8fafc",
+    cursor: "pointer",
+    display: "grid",
+    alignContent: "center",
+    justifyItems: "center",
+    gap: "3px",
+    padding: "4px",
+    textAlign: "center",
+    touchAction: "manipulation",
+    userSelect: "none",
+  },
+padButtonLit: {
+    boxShadow: "0 0 22px rgba(255, 255, 255, 0.18)",
+  },
+padLedLayer: {
+    position: "absolute",
+    inset: 0,
+    borderRadius: "inherit",
+    pointerEvents: "none",
+    zIndex: 0,
+  },
+padLabel: {
+    position: "relative",
+    zIndex: 1,
+    color: "#f8fafc",
+    textShadow: "0 1px 3px rgba(0, 0, 0, 0.85)",
+    fontSize: {
+      default: "0.7rem",
+      "@media (max-width: 760px)": "0.56rem",
+    },
+    fontWeight: 900,
+    lineHeight: 1.05,
+    overflow: "hidden",
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical",
+  },
+padMeta: {
+    position: "relative",
+    zIndex: 1,
+    color: "rgba(255, 255, 255, 0.92)",
+    textShadow: "0 1px 3px rgba(0, 0, 0, 0.85)",
+    fontSize: {
+      default: "0.62rem",
+      "@media (max-width: 760px)": "0.5rem",
+    },
+  },
+})

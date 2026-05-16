@@ -4,7 +4,6 @@ import type { ButtonCustomization, MidiSceneButtonConfig, PadColor } from "../..
 import { getButtonFrameStyle, getLedLayerStyle, type ApcLedFeedbackBehavior } from "../controller/ledFeedback"
 import { sendStandardButtonNoteOff, sendStandardButtonNoteOn } from "../controller/midiCommands"
 import { useMidiButtonPress } from "../hooks/useMidiButtonPress"
-import { styles } from "../styles"
 import type { MidiCommand } from "../types"
 
 export type SceneButtonProps = {
@@ -44,3 +43,49 @@ export function SceneButton({ button, config, feedbackColor, feedbackBehavior, i
     </Button>
   )
 }
+
+const styles = stylex.create({
+sceneLaunchButton: {
+    position: "relative",
+    overflow: "hidden",
+    minWidth: "54px",
+    minHeight: {
+      default: "54px",
+      "@media (min-width: 900px)": "44px",
+    },
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(14, 165, 233, 0.42)",
+    borderRadius: "12px",
+    backgroundColor: "rgba(14, 165, 233, 0.14)",
+    color: "#f8fafc",
+    cursor: "pointer",
+    display: "grid",
+    placeItems: "center",
+    gap: "2px",
+    fontWeight: 900,
+    padding: "8px",
+  },
+padButtonLit: {
+    boxShadow: "0 0 22px rgba(255, 255, 255, 0.18)",
+  },
+padLedLayer: {
+    position: "absolute",
+    inset: 0,
+    borderRadius: "inherit",
+    pointerEvents: "none",
+    zIndex: 0,
+  },
+sceneLabel: {
+    position: "relative",
+    zIndex: 1,
+    color: "#f8fafc",
+    textShadow: "0 1px 3px rgba(0, 0, 0, 0.85)",
+  },
+sceneMeta: {
+    position: "relative",
+    zIndex: 1,
+    color: "rgba(255, 255, 255, 0.92)",
+    textShadow: "0 1px 3px rgba(0, 0, 0, 0.85)",
+  },
+})
