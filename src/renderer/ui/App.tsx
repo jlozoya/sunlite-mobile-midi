@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { Button, Input, Label, Slider, SliderOutput, SliderThumb, SliderTrack, TextField } from "react-aria-components"
 import {
   FADERS,
@@ -34,7 +34,7 @@ type EditableControl =
 
 export function App() {
   const { status, error: statusError, isLoading, refreshStatus } = useServerStatus()
-  const { connectionState, lastCommand, serverMidiLabel, padVelocities, ccValues, controllerCustomization, setControllerCustomization, sendCommand } = useControllerSocket()
+  const { connectionState, lastCommand, serverMidiLabel, padStates, ccValues, controllerCustomization, setControllerCustomization, sendCommand } = useControllerSocket()
   const [setupMessage, setSetupMessage] = useState<string | null>(null)
   const [setupBusy, setSetupBusy] = useState<"install" | "open" | "refresh" | null>(null)
 
@@ -225,7 +225,7 @@ export function App() {
 
       {isControllerReady ? (
         <ApcController
-          padVelocities={padVelocities}
+          padStates={padStates}
           ccValues={ccValues}
           sendCommand={sendCommand}
           lastCommand={lastCommand}
@@ -251,7 +251,7 @@ export function App() {
 }
 
 type ApcControllerProps = {
-  padVelocities: Record<number, number>
+  padStates: Record<number, { velocity: number; behaviorChannel: number }>
   ccValues: Record<number, number>
   lastCommand: string
   customization: ControllerCustomization
@@ -263,7 +263,7 @@ type ApcControllerProps = {
   sendCommand: (command: MidiCommand) => void
 }
 
-function ApcController({ padVelocities, ccValues, lastCommand, customization, onSaveCustomization, isMobileView, feedbackReady, feedbackWarning, midiChannel, sendCommand }: ApcControllerProps) {
+function ApcController({ padStates, ccValues, lastCommand, customization, onSaveCustomization, isMobileView, feedbackReady, feedbackWarning, midiChannel, sendCommand }: ApcControllerProps) {
   const [editingControl, setEditingControl] = useState<EditableControl | null>(null)
   const [activeButtons, setActiveButtons] = useState<Record<string, boolean>>({})
   const activeButtonTimersRef = useRef<Record<string, number>>({})
@@ -344,8 +344,9 @@ function ApcController({ padVelocities, ccValues, lastCommand, customization, on
         <div {...stylex.props(styles.padMatrix)}>
           {PAD_GRID.map((pad) => {
             const config = customization.pads[String(pad.note)]
-            const feedbackVelocity = padVelocities[pad.note]
-            const feedbackColor = getFeedbackColor(feedbackVelocity)
+            const feedbackState = padStates[pad.note]
+            const feedbackColor = getFeedbackColor(feedbackState?.velocity)
+            const feedbackBehavior = getFeedbackBehavior(feedbackState?.behaviorChannel)
             const isActive = feedbackColor !== null
             return (
               <PadButton
@@ -354,6 +355,7 @@ function ApcController({ padVelocities, ccValues, lastCommand, customization, on
                 config={config}
                 isActive={isActive}
                 feedbackColor={feedbackColor}
+                feedbackBehavior={feedbackBehavior}
                 isMobileView={isMobileView}
                 sendCommand={sendCommand}
                 setButtonActive={setButtonActive}
@@ -368,15 +370,18 @@ function ApcController({ padVelocities, ccValues, lastCommand, customization, on
         <div {...stylex.props(styles.sceneColumn)}>
           {SCENE_BUTTONS.map((button) => {
             const config = customization.sceneButtons[String(button.note)]
-            const feedbackVelocity = padVelocities[button.note]
-            const feedbackColor = getFeedbackColor(feedbackVelocity)
+            const feedbackState = padStates[button.note]
+            const feedbackColor = getFeedbackColor(feedbackState?.velocity)
+            const feedbackBehavior = getFeedbackBehavior(feedbackState?.behaviorChannel)
             const isActive = feedbackColor !== null
             const color = feedbackColor ?? "off"
 
             return (
               <Button
                 key={button.id}
-                {...stylex.props(styles.sceneLaunchButton, padColorStyles[color])}
+                {...stylex.props(styles.sceneLaunchButton, isActive && styles.padButtonLit)}
+                style={getButtonFrameStyle(color)}
+                data-led-behavior={feedbackBehavior.behavior}
                 onPressStart={() => sendStandardButtonNoteOn(button.note, sendCommand)}
                 onPressEnd={() => sendStandardButtonNoteOff(button.note, sendCommand)}
                 onContextMenu={(event) => {
@@ -385,8 +390,9 @@ function ApcController({ padVelocities, ccValues, lastCommand, customization, on
                   setEditingControl({ kind: "scene", id: button.id, note: button.note })
                 }}
               >
-                <span>{config?.label ?? button.label}</span>
-                <small>N {button.note}</small>
+                <span {...stylex.props(styles.padLedLayer)} style={getLedLayerStyle(color, feedbackBehavior)} aria-hidden="true" />
+                <span {...stylex.props(styles.sceneLabel)}>{config?.label ?? button.label}</span>
+                <small {...stylex.props(styles.sceneMeta)}>N {button.note}</small>
               </Button>
             )
           })}
@@ -433,6 +439,7 @@ type PadButtonProps = {
   config: ButtonCustomization | undefined
   isActive: boolean
   feedbackColor: PadColor | null
+  feedbackBehavior: ApcLedFeedbackBehavior
   isMobileView: boolean
   sendCommand: ApcControllerProps["sendCommand"]
   setButtonActive: (id: string, active: boolean) => void
@@ -441,14 +448,16 @@ type PadButtonProps = {
   onEdit: () => void
 }
 
-function PadButton({ pad, config, feedbackColor, isMobileView, sendCommand, onEdit }: PadButtonProps) {
+function PadButton({ pad, config, feedbackColor, feedbackBehavior, isMobileView, sendCommand, onEdit }: PadButtonProps) {
   const label = config?.label ?? pad.label
   const color = feedbackColor ?? "off"
   const isLit = color !== "off"
 
   return (
     <Button
-      {...stylex.props(styles.padButton, isLit && styles.padButtonLit, padColorStyles[color])}
+      {...stylex.props(styles.padButton, isLit && styles.padButtonLit)}
+      style={getButtonFrameStyle(color)}
+      data-led-behavior={feedbackBehavior.behavior}
       onPressStart={() => sendStandardButtonNoteOn(pad.note, sendCommand)}
       onPressEnd={() => sendStandardButtonNoteOff(pad.note, sendCommand)}
       onContextMenu={(event) => {
@@ -457,6 +466,7 @@ function PadButton({ pad, config, feedbackColor, isMobileView, sendCommand, onEd
         onEdit()
       }}
     >
+      <span {...stylex.props(styles.padLedLayer)} style={getLedLayerStyle(color, feedbackBehavior)} aria-hidden="true" />
       <span {...stylex.props(styles.padLabel)}>{label}</span>
       <small {...stylex.props(styles.padMeta)}>N {pad.note}</small>
     </Button>
@@ -704,6 +714,81 @@ function sendStandardButtonNoteOn(note: number, sendCommand: (command: MidiComma
 
 function sendStandardButtonNoteOff(note: number, sendCommand: (command: MidiCommand) => void) {
   sendCommand({ type: "noteoff", note, velocity: 0 })
+}
+
+type ApcLedFeedbackBehavior = {
+  behavior: string
+  style: CSSProperties
+}
+
+const APC_LED_BRIGHTNESS: Record<number, number> = {
+  0: 0.1,
+  1: 0.25,
+  2: 0.5,
+  3: 0.65,
+  4: 0.75,
+  5: 0.9,
+  6: 1,
+}
+
+const LED_BACKGROUND_COLORS: Record<PadColor, string> = {
+  off: "rgba(15, 23, 42, 0)",
+  red: "rgba(239, 68, 68, 0.82)",
+  amber: "rgba(245, 158, 11, 0.82)",
+  yellow: "rgba(234, 179, 8, 0.86)",
+  green: "rgba(16, 185, 129, 0.82)",
+  cyan: "rgba(6, 182, 212, 0.82)",
+  blue: "rgba(59, 130, 246, 0.82)",
+  purple: "rgba(139, 92, 246, 0.82)",
+  white: "rgba(248, 250, 252, 0.9)",
+}
+
+const LED_BORDER_COLORS: Record<PadColor, string> = {
+  off: "rgba(255, 255, 255, 0.12)",
+  red: "rgba(248, 113, 113, 0.78)",
+  amber: "rgba(251, 191, 36, 0.78)",
+  yellow: "rgba(250, 204, 21, 0.78)",
+  green: "rgba(52, 211, 153, 0.78)",
+  cyan: "rgba(34, 211, 238, 0.78)",
+  blue: "rgba(96, 165, 250, 0.78)",
+  purple: "rgba(167, 139, 250, 0.78)",
+  white: "rgba(255, 255, 255, 0.95)",
+}
+
+function getFeedbackBehavior(channel: number | undefined): ApcLedFeedbackBehavior {
+  const normalizedChannel = typeof channel === "number" ? Math.max(0, Math.min(15, Math.round(channel))) : 6
+  const opacity = APC_LED_BRIGHTNESS[normalizedChannel] ?? 1
+
+  if (normalizedChannel >= 7 && normalizedChannel <= 10) {
+    const durations: Record<number, string> = { 7: "0.22s", 8: "0.45s", 9: "0.9s", 10: "1.8s" }
+    return {
+      behavior: `pulse-${normalizedChannel}`,
+      style: { opacity, animation: `apc-led-pulse ${durations[normalizedChannel]} ease-in-out infinite` },
+    }
+  }
+
+  if (normalizedChannel >= 11 && normalizedChannel <= 15) {
+    const durations: Record<number, string> = { 11: "0.12s", 12: "0.22s", 13: "0.45s", 14: "0.9s", 15: "1.8s" }
+    return {
+      behavior: `blink-${normalizedChannel}`,
+      style: { opacity, animation: `apc-led-blink ${durations[normalizedChannel]} steps(1, end) infinite` },
+    }
+  }
+
+  return { behavior: `solid-${normalizedChannel}`, style: { opacity } }
+}
+
+function getLedLayerStyle(color: PadColor, behavior: ApcLedFeedbackBehavior): CSSProperties {
+  return {
+    ...behavior.style,
+    backgroundColor: LED_BACKGROUND_COLORS[color],
+  }
+}
+
+function getButtonFrameStyle(color: PadColor): CSSProperties {
+  return {
+    borderColor: LED_BORDER_COLORS[color],
+  }
 }
 
 function getFeedbackColor(value: number | undefined): PadColor | null {
@@ -1153,6 +1238,8 @@ const styles = stylex.create({
     },
   },
   padButton: {
+    position: "relative",
+    overflow: "hidden",
     aspectRatio: "1 / 1",
     minWidth: 0,
     borderWidth: "1px",
@@ -1163,7 +1250,7 @@ const styles = stylex.create({
       "@media (max-width: 760px)": "8px",
     },
     backgroundColor: "#1f2937",
-    color: "#e5e7eb",
+    color: "#f8fafc",
     cursor: "pointer",
     display: "grid",
     alignContent: "center",
@@ -1177,7 +1264,18 @@ const styles = stylex.create({
   padButtonLit: {
     boxShadow: "0 0 22px rgba(255, 255, 255, 0.18)",
   },
+  padLedLayer: {
+    position: "absolute",
+    inset: 0,
+    borderRadius: "inherit",
+    pointerEvents: "none",
+    zIndex: 0,
+  },
   padLabel: {
+    position: "relative",
+    zIndex: 1,
+    color: "#f8fafc",
+    textShadow: "0 1px 3px rgba(0, 0, 0, 0.85)",
     fontSize: {
       default: "0.7rem",
       "@media (max-width: 760px)": "0.56rem",
@@ -1190,7 +1288,10 @@ const styles = stylex.create({
     WebkitBoxOrient: "vertical",
   },
   padMeta: {
-    color: "rgba(255, 255, 255, 0.68)",
+    position: "relative",
+    zIndex: 1,
+    color: "rgba(255, 255, 255, 0.92)",
+    textShadow: "0 1px 3px rgba(0, 0, 0, 0.85)",
     fontSize: {
       default: "0.62rem",
       "@media (max-width: 760px)": "0.5rem",
@@ -1205,6 +1306,8 @@ const styles = stylex.create({
     gap: "8px",
   },
   sceneLaunchButton: {
+    position: "relative",
+    overflow: "hidden",
     minHeight: {
       default: "54px",
       "@media (min-width: 900px)": "auto",
@@ -1214,13 +1317,25 @@ const styles = stylex.create({
     borderColor: "rgba(14, 165, 233, 0.42)",
     borderRadius: "12px",
     backgroundColor: "rgba(14, 165, 233, 0.14)",
-    color: "#bae6fd",
+    color: "#f8fafc",
     cursor: "pointer",
     display: "grid",
     placeItems: "center",
     gap: "2px",
     fontWeight: 900,
     padding: "8px",
+  },
+  sceneLabel: {
+    position: "relative",
+    zIndex: 1,
+    color: "#f8fafc",
+    textShadow: "0 1px 3px rgba(0, 0, 0, 0.85)",
+  },
+  sceneMeta: {
+    position: "relative",
+    zIndex: 1,
+    color: "rgba(255, 255, 255, 0.92)",
+    textShadow: "0 1px 3px rgba(0, 0, 0, 0.85)",
   },
   faderBank: {
     gridColumn: "1 / -1",

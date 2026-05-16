@@ -35,6 +35,16 @@ export type MidiInputMessage =
   | { kind: "noteoff"; note: number; velocity: number; channel: number }
   | { kind: "cc"; controller: number; value: number; channel: number }
 
+export type MidiPadFeedback = {
+  velocity: number
+  behaviorChannel: number
+}
+
+export type MidiFeedbackState = {
+  padStates: Record<number, MidiPadFeedback>
+  ccValues: Record<number, number>
+}
+
 export type SocketMessage =
   | {
       type: "server-ready"
@@ -62,6 +72,10 @@ export type SocketMessage =
   | {
       event: "midi-input"
       message: MidiInputMessage
+    }
+  | {
+      event: "midi-feedback-state"
+      state: MidiFeedbackState
     }
   | {
       event: "feedback-disabled"

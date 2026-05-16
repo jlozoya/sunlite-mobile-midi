@@ -1,8 +1,8 @@
 {
-  "name": "sunlite-mobile-midi-react",
+  "name": "sunlite-mobile-midi",
   "version": "0.1.0",
   "private": true,
-  "description": "Installable mobile MIDI controller for Sunlite Suite 2.",
+  "description": "Installable and update-ready mobile MIDI controller for Sunlite Suite 2.",
   "author": "",
   "type": "module",
   "main": "dist/main/main.js",
@@ -14,7 +14,9 @@
     "build": "bun run build:main && bun run build:renderer",
     "start": "bun run build && electron dist/main/main.js",
     "pack": "bun run build && electron-builder --dir",
-    "dist": "bun run build && electron-builder"
+    "dist": "bun run build && electron-builder",
+    "dist:win": "bun run build && electron-builder --win",
+    "release:win": "bun run build && electron-builder --win --publish never"
   },
   "dependencies": {
     "@stylexjs/stylex": "^0.9.3",
@@ -24,7 +26,8 @@
     "react": "^19.1.0",
     "react-aria-components": "^1.8.0",
     "react-dom": "^19.1.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
@@ -42,26 +45,43 @@
     "vite-plugin-stylex": "^0.13.0"
   },
   "build": {
-    "appId": "com.sunlite.mobilemidi",
+    "appId": "com.lozoya.sunlite.mobilemidi",
     "productName": "Sunlite Mobile MIDI",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "resources"
     },
     "files": [
       "dist/**/*",
       "package.json"
     ],
     "win": {
+      "icon": "resources/icon.ico",
       "target": [
-        "nsis",
-        "portable"
-      ]
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "publisherName": "Lozoya"
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "Sunlite Mobile MIDI",
+      "deleteAppDataOnUninstall": false
     },
     "extraResources": [
       {
@@ -70,6 +90,21 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "resources/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "resources/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://example.com/sunlite-mobile-midi/updates"
       }
     ]
   }

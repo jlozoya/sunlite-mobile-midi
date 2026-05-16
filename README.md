@@ -129,3 +129,16 @@ bun run start
 ## Firewall
 
 The phone must be on the same Wi-Fi network as the PC. Windows Firewall must allow this app / Node / Electron to accept private network connections.
+
+## Installable Windows build
+
+Create an installer:
+
+```powershell
+bun install
+bun run dist:win
+```
+
+The installer, portable build, and update metadata are generated in `release/`.
+
+For update hosting details, see `UPDATE_SETUP.md`.

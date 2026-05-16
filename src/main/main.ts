@@ -1,4 +1,5 @@
 import { app as electronApp, BrowserWindow, shell } from "electron"
+import { autoUpdater } from "electron-updater"
 import { spawn } from "node:child_process"
 import fs from "node:fs"
 import easymidi from "easymidi"
@@ -22,6 +23,63 @@ const MIDI_OUTPUT_NAME = process.env.MIDI_OUTPUT_NAME || DEFAULT_MIDI_OUTPUT_NAM
 const MIDI_INPUT_NAME = process.env.MIDI_INPUT_NAME || DEFAULT_MIDI_INPUT_NAME
 
 const rendererDir = path.resolve(__dirname, "../renderer")
+
+function getRuntimeResourcePath(fileName: string): string {
+  if (electronApp.isPackaged) {
+    return path.join(process.resourcesPath, fileName)
+  }
+
+  return path.resolve(__dirname, "../../resources", fileName)
+}
+
+function getWindowIconPath(): string {
+  return getRuntimeResourcePath(process.platform === "win32" ? "icon.ico" : "icon.png")
+}
+
+function configureAutoUpdates() {
+  if (!electronApp.isPackaged) {
+    return
+  }
+
+  const updateFeedUrl = process.env.SUNLITE_UPDATE_FEED_URL
+
+  if (updateFeedUrl) {
+    autoUpdater.setFeedURL({
+      provider: "generic",
+      url: updateFeedUrl,
+    })
+  }
+
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on("checking-for-update", () => {
+    console.info("Checking for Sunlite Mobile MIDI updates")
+  })
+
+  autoUpdater.on("update-available", (info) => {
+    console.info(`Sunlite Mobile MIDI update available: ${info.version}`)
+  })
+
+  autoUpdater.on("update-not-available", () => {
+    console.info("Sunlite Mobile MIDI is up to date")
+  })
+
+  autoUpdater.on("error", (error) => {
+    console.warn("Sunlite Mobile MIDI update check failed", error)
+  })
+
+  autoUpdater.on("update-downloaded", (info) => {
+    console.info(`Sunlite Mobile MIDI update downloaded: ${info.version}. It will install on app quit.`)
+  })
+
+  setTimeout(() => {
+    void autoUpdater.checkForUpdatesAndNotify().catch((error: unknown) => {
+      console.warn("Sunlite Mobile MIDI update check failed", error)
+    })
+  }, 3000)
+}
+
 
 type MidiConnection = {
   outputName: string
@@ -91,10 +149,185 @@ let controllerCustomization: ControllerCustomization = DEFAULT_CONTROLLER_CUSTOM
 let feedbackDisabledReason: string | null = null
 
 type MidiGuardEvent = { at: number; fingerprint: string }
+type MidiPadFeedback = {
+  velocity: number
+  behaviorChannel: number
+}
+
+type MidiFeedbackState = {
+  padStates: Record<number, MidiPadFeedback>
+  ccValues: Record<number, number>
+}
+
 const MIDI_LOOP_GUARD_WINDOW_MS = 1000
 const MIDI_LOOP_GUARD_MAX_TOTAL_MESSAGES = 24
 const MIDI_LOOP_GUARD_MAX_REPEATED_MESSAGES = 8
 let midiGuardEvents: MidiGuardEvent[] = []
+let midiFeedbackState: MidiFeedbackState = { padStates: {}, ccValues: {} }
+
+function cloneMidiFeedbackState(): MidiFeedbackState {
+  return {
+    padStates: Object.fromEntries(
+      Object.entries(midiFeedbackState.padStates).map(([note, state]) => [note, { ...state }]),
+    ),
+    ccValues: { ...midiFeedbackState.ccValues },
+  }
+}
+
+function getMidiFeedbackStatePath(): string {
+  return path.join(electronApp.getPath("userData"), "midi-feedback-state.json")
+}
+
+function normalizeStoredMidiFeedbackState(value: unknown): MidiFeedbackState {
+  if (!value || typeof value !== "object") {
+    return { padStates: {}, ccValues: {} }
+  }
+
+  const source = value as Partial<MidiFeedbackState> & { padVelocities?: Record<string, unknown> }
+
+  function normalizeMidiNumberRecord(record: unknown): Record<number, number> {
+    if (!record || typeof record !== "object") {
+      return {}
+    }
+
+    const normalized: Record<number, number> = {}
+
+    for (const [key, rawValue] of Object.entries(record as Record<string, unknown>)) {
+      const midiKey = clampMidiValue(key)
+      const midiValue = clampMidiValue(rawValue)
+      normalized[midiKey] = midiValue
+    }
+
+    return normalized
+  }
+
+  function normalizePadStates(record: unknown): Record<number, MidiPadFeedback> {
+    if (!record || typeof record !== "object") {
+      return {}
+    }
+
+    const normalized: Record<number, MidiPadFeedback> = {}
+
+    for (const [key, rawValue] of Object.entries(record as Record<string, unknown>)) {
+      const note = clampMidiValue(key)
+
+      if (rawValue && typeof rawValue === "object") {
+        const item = rawValue as Partial<MidiPadFeedback>
+        const velocity = clampMidiValue(item.velocity)
+
+        if (velocity > 0) {
+          normalized[note] = {
+            velocity,
+            behaviorChannel: clampApcLedBehaviorChannel(item.behaviorChannel),
+          }
+        }
+
+        continue
+      }
+
+      const legacyVelocity = clampMidiValue(rawValue)
+      if (legacyVelocity > 0) {
+        normalized[note] = { velocity: legacyVelocity, behaviorChannel: 6 }
+      }
+    }
+
+    return normalized
+  }
+
+  const padStates = normalizePadStates(source.padStates ?? source.padVelocities)
+
+  return {
+    padStates,
+    ccValues: normalizeMidiNumberRecord(source.ccValues),
+  }
+}
+
+function clampApcLedBehaviorChannel(value: unknown): number {
+  const numericValue = Number(value)
+
+  if (Number.isNaN(numericValue)) {
+    return 6
+  }
+
+  return Math.max(0, Math.min(15, Math.round(numericValue)))
+}
+
+function loadMidiFeedbackState(): MidiFeedbackState {
+  const statePath = getMidiFeedbackStatePath()
+
+  try {
+    if (!fs.existsSync(statePath)) {
+      midiFeedbackState = { padStates: {}, ccValues: {} }
+      return cloneMidiFeedbackState()
+    }
+
+    const raw = fs.readFileSync(statePath, "utf8")
+    midiFeedbackState = normalizeStoredMidiFeedbackState(JSON.parse(raw))
+    return cloneMidiFeedbackState()
+  } catch {
+    midiFeedbackState = { padStates: {}, ccValues: {} }
+    return cloneMidiFeedbackState()
+  }
+}
+
+function saveMidiFeedbackState() {
+  const statePath = getMidiFeedbackStatePath()
+
+  try {
+    fs.mkdirSync(path.dirname(statePath), { recursive: true })
+    fs.writeFileSync(statePath, JSON.stringify(cloneMidiFeedbackState(), null, 2), "utf8")
+  } catch {
+    // Ignore persistence failures; live MIDI feedback should continue working.
+  }
+}
+
+function updateMidiFeedbackState(kind: "noteon" | "noteoff" | "cc", message: Record<string, unknown>): MidiFeedbackState {
+  if (kind === "noteon") {
+    const note = clampMidiValue(message.note)
+    const velocity = clampMidiValue(message.velocity)
+    const behaviorChannel = clampApcLedBehaviorChannel(message.channel)
+
+    if (velocity <= 0) {
+      const nextPadStates = { ...midiFeedbackState.padStates }
+      delete nextPadStates[note]
+      midiFeedbackState = { ...midiFeedbackState, padStates: nextPadStates }
+      saveMidiFeedbackState()
+      return cloneMidiFeedbackState()
+    }
+
+    midiFeedbackState = {
+      ...midiFeedbackState,
+      padStates: {
+        ...midiFeedbackState.padStates,
+        [note]: { velocity, behaviorChannel },
+      },
+    }
+    saveMidiFeedbackState()
+    return cloneMidiFeedbackState()
+  }
+
+  if (kind === "noteoff") {
+    const note = clampMidiValue(message.note)
+    const nextPadStates = { ...midiFeedbackState.padStates }
+    delete nextPadStates[note]
+    midiFeedbackState = { ...midiFeedbackState, padStates: nextPadStates }
+    saveMidiFeedbackState()
+    return cloneMidiFeedbackState()
+  }
+
+  const controller = clampMidiValue(message.controller)
+  const value = clampMidiValue(message.value)
+  midiFeedbackState = {
+    ...midiFeedbackState,
+    ccValues: { ...midiFeedbackState.ccValues, [controller]: value },
+  }
+  saveMidiFeedbackState()
+  return cloneMidiFeedbackState()
+}
+
+function broadcastMidiFeedbackState() {
+  broadcastToAll({ event: "midi-feedback-state", state: cloneMidiFeedbackState() })
+}
 
 
 function getControllerConfigPath(): string {
@@ -406,18 +639,27 @@ function refreshMidiConnection() {
 
     if (input) {
       input.on("noteon", (message) => {
-        if (!shouldAcceptMidiFeedback("noteon", midiMessageToRecord(message))) return
+        const record = midiMessageToRecord(message)
+        if (!shouldAcceptMidiFeedback("noteon", record)) return
+        updateMidiFeedbackState("noteon", record)
         broadcastToAll({ event: "midi-input", message: { kind: "noteon", ...message } })
+        broadcastMidiFeedbackState()
       })
 
       input.on("noteoff", (message) => {
-        if (!shouldAcceptMidiFeedback("noteoff", midiMessageToRecord(message))) return
+        const record = midiMessageToRecord(message)
+        if (!shouldAcceptMidiFeedback("noteoff", record)) return
+        updateMidiFeedbackState("noteoff", record)
         broadcastToAll({ event: "midi-input", message: { kind: "noteoff", ...message } })
+        broadcastMidiFeedbackState()
       })
 
       input.on("cc", (message) => {
-        if (!shouldAcceptMidiFeedback("cc", midiMessageToRecord(message))) return
+        const record = midiMessageToRecord(message)
+        if (!shouldAcceptMidiFeedback("cc", record)) return
+        updateMidiFeedbackState("cc", record)
         broadcastToAll({ event: "midi-input", message: { kind: "cc", ...message } })
+        broadcastMidiFeedbackState()
       })
     }
 
@@ -615,6 +857,7 @@ function handleCommand(payload: IncomingCommand) {
 
 async function startControllerServer(): Promise<ServerStatus> {
   loadControllerCustomization()
+  loadMidiFeedbackState()
   const appServer = express()
   const httpServer = http.createServer(appServer)
   const wss = new WebSocketServer({ server: httpServer })
@@ -663,6 +906,17 @@ async function startControllerServer(): Promise<ServerStatus> {
     }
   })
 
+  appServer.get("/api/midi-feedback/state", (_request, response) => {
+    response.json({ ok: true, state: cloneMidiFeedbackState() })
+  })
+
+  appServer.post("/api/midi-feedback/clear", (_request, response) => {
+    midiFeedbackState = { padStates: {}, ccValues: {} }
+    saveMidiFeedbackState()
+    broadcastMidiFeedbackState()
+    response.json({ ok: true, state: cloneMidiFeedbackState() })
+  })
+
   appServer.get("*", (_request, response) => {
     response.sendFile(path.join(rendererDir, "index.html"))
   })
@@ -672,6 +926,9 @@ async function startControllerServer(): Promise<ServerStatus> {
   wss.on("connection", (socket) => {
     refreshMidiConnection()
     safeSend(socket, { event: "controller-config", config: controllerCustomization })
+    safeSend(socket, { event: "midi-feedback-state", state: cloneMidiFeedbackState() })
+    setTimeout(() => safeSend(socket, { event: "midi-feedback-state", state: cloneMidiFeedbackState() }), 350)
+    setTimeout(() => safeSend(socket, { event: "midi-feedback-state", state: cloneMidiFeedbackState() }), 1200)
 
     if (midiConnection) {
       safeSend(socket, {
@@ -767,6 +1024,7 @@ async function createWindow(status: ServerStatus) {
     minWidth: 420,
     minHeight: 680,
     title: "Sunlite Mobile MIDI",
+    icon: getWindowIconPath(),
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
@@ -787,6 +1045,7 @@ electronApp.whenReady().then(async () => {
   try {
     const status = await startControllerServer()
     await createWindow(status)
+    configureAutoUpdates()
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown startup error"
     console.error(message)
@@ -795,6 +1054,7 @@ electronApp.whenReady().then(async () => {
       width: 760,
       height: 420,
       title: "Sunlite Mobile MIDI - Startup Error",
+      icon: getWindowIconPath(),
       autoHideMenuBar: true,
     })
 
