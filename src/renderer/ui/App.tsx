@@ -1,6 +1,6 @@
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
-import { Button, Input, Label, Slider, SliderOutput, SliderThumb, SliderTrack, TextField } from "react-aria-components"
+import { Button, Input, Label, TextField } from "react-aria-components"
 import {
   FADERS,
   MIDI_BUTTON_MESSAGE_TYPES,
@@ -486,6 +486,27 @@ function FaderStrip({ fader, config, feedbackValue, sendCommand, isMobileView, o
   const resolvedConfig = config ?? { label: fader.label, controller: fader.controller, minValue: 0, maxValue: 127, defaultValue: fader.defaultValue }
   const standardController = fader.controller
   const [value, setValue] = useState(resolvedConfig.defaultValue)
+  const trackRef = useRef<HTMLDivElement | null>(null)
+
+  const minValue = resolvedConfig.minValue
+  const maxValue = resolvedConfig.maxValue
+  const valueRange = Math.max(1, maxValue - minValue)
+  const percent = Math.max(0, Math.min(1, (value - minValue) / valueRange))
+
+  const updateValue = (nextValue: number) => {
+    const midiValue = Math.max(minValue, Math.min(maxValue, Math.round(nextValue)))
+    setValue(midiValue)
+    sendCommand({ type: "cc", controller: standardController, value: midiValue })
+  }
+
+  const updateValueFromPointer = (clientY: number) => {
+    const track = trackRef.current
+    if (!track) return
+
+    const rect = track.getBoundingClientRect()
+    const nextPercent = Math.max(0, Math.min(1, 1 - (clientY - rect.top) / rect.height))
+    updateValue(minValue + nextPercent * valueRange)
+  }
 
   useEffect(() => {
     setValue(resolvedConfig.defaultValue)
@@ -493,9 +514,9 @@ function FaderStrip({ fader, config, feedbackValue, sendCommand, isMobileView, o
 
   useEffect(() => {
     if (typeof feedbackValue === "number") {
-      setValue(feedbackValue)
+      setValue(Math.max(minValue, Math.min(maxValue, feedbackValue)))
     }
-  }, [feedbackValue])
+  }, [feedbackValue, maxValue, minValue])
 
   return (
     <div
@@ -506,28 +527,71 @@ function FaderStrip({ fader, config, feedbackValue, sendCommand, isMobileView, o
         onEdit()
       }}
     >
-      <Slider
-        aria-label={resolvedConfig.label}
-        orientation="vertical"
-        value={value}
-        minValue={resolvedConfig.minValue}
-        maxValue={resolvedConfig.maxValue}
-        onChange={(nextValue) => {
-          const midiValue = Number(nextValue)
-          setValue(midiValue)
-          sendCommand({ type: "cc", controller: standardController, value: midiValue })
-        }}
-      >
-        <SliderTrack {...stylex.props(styles.verticalSliderTrack)}>
-          {({ state }) => (
-            <>
-              <div {...stylex.props(styles.verticalSliderFill)} style={{ height: `${state.getThumbPercent(0) * 100}%` }} />
-              <SliderThumb {...stylex.props(styles.verticalSliderThumb)} />
-            </>
-          )}
-        </SliderTrack>
-        <SliderOutput {...stylex.props(styles.faderValue)} />
-      </Slider>
+      <div {...stylex.props(styles.faderSliderArea)}>
+        <div
+          {...stylex.props(styles.verticalSliderTrack)}
+          ref={trackRef}
+          role="slider"
+          tabIndex={0}
+          aria-label={resolvedConfig.label}
+          aria-orientation="vertical"
+          aria-valuemin={minValue}
+          aria-valuemax={maxValue}
+          aria-valuenow={value}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.currentTarget.setPointerCapture(event.pointerId)
+            updateValueFromPointer(event.clientY)
+          }}
+          onPointerMove={(event) => {
+            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+            event.preventDefault()
+            updateValueFromPointer(event.clientY)
+          }}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId)
+            }
+          }}
+          onPointerCancel={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId)
+            }
+          }}
+          onKeyDown={(event) => {
+            const step = event.shiftKey ? 10 : 1
+            if (event.key === "ArrowUp" || event.key === "ArrowRight") {
+              event.preventDefault()
+              updateValue(value + step)
+            }
+            if (event.key === "ArrowDown" || event.key === "ArrowLeft") {
+              event.preventDefault()
+              updateValue(value - step)
+            }
+            if (event.key === "PageUp") {
+              event.preventDefault()
+              updateValue(value + 10)
+            }
+            if (event.key === "PageDown") {
+              event.preventDefault()
+              updateValue(value - 10)
+            }
+            if (event.key === "Home") {
+              event.preventDefault()
+              updateValue(minValue)
+            }
+            if (event.key === "End") {
+              event.preventDefault()
+              updateValue(maxValue)
+            }
+          }}
+        >
+          <div {...stylex.props(styles.verticalSliderRail)} aria-hidden="true" />
+          <div {...stylex.props(styles.verticalSliderFill)} style={{ height: `${percent * 100}%` }} aria-hidden="true" />
+          <div {...stylex.props(styles.verticalSliderThumb)} style={{ bottom: `${percent * 100}%` }} aria-hidden="true" />
+        </div>
+      </div>
+      <span {...stylex.props(styles.faderValue)}>{value}</span>
       <strong {...stylex.props(styles.faderName)}>{resolvedConfig.label}</strong>
       <small {...stylex.props(styles.faderCc)}>CC {standardController}</small>
     </div>
@@ -944,13 +1008,17 @@ const padColorStyles = stylex.create({
 
 const styles = stylex.create({
   app: {
-    width: "min(100%, 1280px)",
-    margin: "0 auto",
+    width: "100%",
+    maxWidth: "none",
+    minWidth: "360px",
+    margin: 0,
     padding: {
       default: "18px",
       "@media (max-width: 760px)": "8px",
     },
     paddingBottom: "48px",
+    boxSizing: "border-box",
+    overflowX: "hidden",
   },
   header: {
     position: "sticky",
@@ -1172,6 +1240,8 @@ const styles = stylex.create({
     minHeight: "180px",
   },
   apcPanel: {
+    width: "100%",
+    minWidth: 0,
     marginTop: "16px",
     borderWidth: "1px",
     borderStyle: "solid",
@@ -1180,9 +1250,11 @@ const styles = stylex.create({
     backgroundColor: "#111827",
     boxShadow: "0 20px 60px rgba(0, 0, 0, 0.34)",
     padding: {
-      default: "18px",
-      "@media (max-width: 760px)": "10px",
+      default: "clamp(10px, 1.2vw, 18px)",
+      "@media (max-width: 760px)": "8px",
     },
+    boxSizing: "border-box",
+    overflow: "hidden",
   },
   apcHeader: {
     display: "flex",
@@ -1213,35 +1285,47 @@ const styles = stylex.create({
     borderColor: "rgba(245, 158, 11, 0.34)",
   },
   apcSurface: {
+    width: "100%",
+    minWidth: 0,
     display: "grid",
     gridTemplateColumns: {
       default: "minmax(0, 1fr)",
-      "@media (min-width: 900px)": "minmax(0, 1fr) 112px",
+      "@media (min-width: 900px)": "minmax(352px, 1fr) clamp(72px, 6.4vw, 112px)",
     },
-    gap: "14px",
+    gap: {
+      default: "clamp(6px, 0.9vw, 14px)",
+      "@media (max-width: 760px)": "6px",
+    },
     borderRadius: "22px",
     backgroundColor: "#050814",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "rgba(255, 255, 255, 0.08)",
+    overflowX: "auto",
+    overscrollBehaviorX: "contain",
     padding: {
-      default: "14px",
-      "@media (max-width: 760px)": "8px",
+      default: "clamp(8px, 1vw, 14px)",
+      "@media (max-width: 760px)": "6px",
     },
+    boxSizing: "border-box",
   },
   padMatrix: {
+    minWidth: 0,
     display: "grid",
-    gridTemplateColumns: "repeat(8, minmax(34px, 1fr))",
+    gridTemplateColumns: {
+      default: "repeat(8, minmax(44px, 1fr))",
+      "@media (max-width: 760px)": "repeat(8, minmax(36px, 1fr))",
+    },
     gap: {
-      default: "8px",
-      "@media (max-width: 760px)": "5px",
+      default: "clamp(4px, 0.6vw, 8px)",
+      "@media (max-width: 760px)": "4px",
     },
   },
   padButton: {
     position: "relative",
     overflow: "hidden",
     aspectRatio: "1 / 1",
-    minWidth: 0,
+    minWidth: "36px",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "rgba(255, 255, 255, 0.12)",
@@ -1298,19 +1382,24 @@ const styles = stylex.create({
     },
   },
   sceneColumn: {
+    minWidth: 0,
     display: "grid",
     gridTemplateColumns: {
-      default: "repeat(4, minmax(0, 1fr))",
+      default: "repeat(4, minmax(54px, 1fr))",
       "@media (min-width: 900px)": "1fr",
     },
-    gap: "8px",
+    gap: {
+      default: "clamp(4px, 0.6vw, 8px)",
+      "@media (max-width: 760px)": "4px",
+    },
   },
   sceneLaunchButton: {
     position: "relative",
     overflow: "hidden",
+    minWidth: "54px",
     minHeight: {
       default: "54px",
-      "@media (min-width: 900px)": "auto",
+      "@media (min-width: 900px)": "44px",
     },
     borderWidth: "1px",
     borderStyle: "solid",
@@ -1340,68 +1429,154 @@ const styles = stylex.create({
   faderBank: {
     gridColumn: "1 / -1",
     display: "grid",
-    gridTemplateColumns: "repeat(9, minmax(48px, 1fr))",
+    gridTemplateColumns: {
+      default: "repeat(9, minmax(44px, 1fr))",
+      "@media (max-width: 760px)": "repeat(9, minmax(36px, 1fr))",
+    },
     gap: {
       default: "10px",
-      "@media (max-width: 760px)": "6px",
+      "@media (max-width: 760px)": "4px",
     },
+    width: "100%",
+    minWidth: 0,
+    overflowX: "visible",
+    overscrollBehaviorX: "contain",
     marginTop: "10px",
   },
   faderStrip: {
     display: "grid",
-    gridTemplateRows: "160px auto auto",
+    gridTemplateRows: {
+      default: "166px auto auto auto",
+      "@media (max-width: 760px)": "132px auto auto auto",
+    },
     justifyItems: "center",
-    gap: "7px",
-    borderRadius: "14px",
+    alignItems: "center",
+    gap: {
+      default: "7px",
+      "@media (max-width: 760px)": "5px",
+    },
+    minWidth: 0,
+    overflow: "hidden",
+    borderRadius: {
+      default: "14px",
+      "@media (max-width: 760px)": "10px",
+    },
     backgroundColor: "rgba(255, 255, 255, 0.04)",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "rgba(255, 255, 255, 0.08)",
-    padding: "10px 4px",
+    padding: {
+      default: "12px 4px 10px",
+      "@media (max-width: 760px)": "9px 1px 8px",
+    },
     cursor: "context-menu",
+    touchAction: "none",
+  },
+  faderSliderArea: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    minWidth: 0,
+    height: "100%",
+    paddingTop: {
+      default: "10px",
+      "@media (max-width: 760px)": "8px",
+    },
+    paddingBottom: {
+      default: "10px",
+      "@media (max-width: 760px)": "8px",
+    },
+    touchAction: "none",
   },
   verticalSliderTrack: {
     position: "relative",
+    width: {
+      default: "42px",
+      "@media (max-width: 760px)": "32px",
+    },
+    height: {
+      default: "128px",
+      "@media (max-width: 760px)": "98px",
+    },
+    borderRadius: "999px",
+    backgroundColor: "transparent",
+    touchAction: "none",
+    overflow: "visible",
+    outline: "none",
+  },
+  verticalSliderRail: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: "50%",
     width: "8px",
-    height: "150px",
+    transform: "translateX(-50%)",
     borderRadius: "999px",
     backgroundColor: "rgba(148, 163, 184, 0.22)",
+    pointerEvents: "none",
   },
   verticalSliderFill: {
     position: "absolute",
     bottom: 0,
-    left: 0,
-    right: 0,
+    left: "50%",
+    width: "8px",
+    transform: "translateX(-50%)",
     borderRadius: "999px",
     backgroundColor: "#8b5cf6",
+    pointerEvents: "none",
   },
   verticalSliderThumb: {
-    width: "28px",
-    height: "18px",
+    position: "absolute",
+    left: "50%",
+    zIndex: 2,
+    transform: "translate(-50%, 50%)",
+    width: {
+      default: "28px",
+      "@media (max-width: 760px)": "24px",
+    },
+    height: {
+      default: "18px",
+      "@media (max-width: 760px)": "16px",
+    },
     borderRadius: "7px",
     backgroundColor: "#e5e7eb",
     borderWidth: "2px",
     borderStyle: "solid",
     borderColor: "#111827",
     boxShadow: "0 4px 12px rgba(0, 0, 0, 0.35)",
+    touchAction: "none",
   },
   faderValue: {
     color: "#ddd6fe",
-    fontSize: "0.72rem",
+    fontSize: {
+      default: "0.72rem",
+      "@media (max-width: 760px)": "0.58rem",
+    },
     fontWeight: 900,
+    lineHeight: 1,
   },
   faderName: {
     color: "#e5e7eb",
     fontSize: {
       default: "0.72rem",
-      "@media (max-width: 760px)": "0.58rem",
+      "@media (max-width: 760px)": "0.5rem",
     },
     textAlign: "center",
-    lineHeight: 1.1,
+    lineHeight: 1.05,
+    maxWidth: "100%",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
   faderCc: {
     color: "#94a3b8",
-    fontSize: "0.62rem",
+    fontSize: {
+      default: "0.62rem",
+      "@media (max-width: 760px)": "0.48rem",
+    },
+    lineHeight: 1,
   },
   warningText: {
     margin: "12px 0 0",

@@ -1,5 +1,5 @@
 import { app as electronApp, BrowserWindow, shell } from "electron"
-import { autoUpdater } from "electron-updater"
+import electronUpdater from "electron-updater"
 import { spawn } from "node:child_process"
 import fs from "node:fs"
 import easymidi from "easymidi"
@@ -11,6 +11,28 @@ import { fileURLToPath } from "node:url"
 import QRCode from "qrcode"
 import { DEFAULT_CONTROLLER_CUSTOMIZATION, mergeControllerCustomization, type ControllerCustomization } from "../shared/controller-config.js"
 import { WebSocketServer, type WebSocket } from "ws"
+
+
+type AutoUpdaterLike = {
+  autoDownload: boolean
+  autoInstallOnAppQuit: boolean
+  setFeedURL: (options: { provider: "generic"; url: string }) => void
+  on: (event: string, listener: (...args: unknown[]) => void) => void
+  checkForUpdatesAndNotify: () => Promise<unknown>
+}
+
+const { autoUpdater } = electronUpdater as unknown as { autoUpdater: AutoUpdaterLike }
+
+function getUpdateInfoVersion(info: unknown): string {
+  if (info && typeof info === "object" && "version" in info) {
+    const version = (info as { version?: unknown }).version
+    if (typeof version === "string") {
+      return version
+    }
+  }
+
+  return "unknown"
+}
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -57,20 +79,20 @@ function configureAutoUpdates() {
     console.info("Checking for Sunlite Mobile MIDI updates")
   })
 
-  autoUpdater.on("update-available", (info) => {
-    console.info(`Sunlite Mobile MIDI update available: ${info.version}`)
+  autoUpdater.on("update-available", (info: unknown) => {
+    console.info(`Sunlite Mobile MIDI update available: ${getUpdateInfoVersion(info)}`)
   })
 
   autoUpdater.on("update-not-available", () => {
     console.info("Sunlite Mobile MIDI is up to date")
   })
 
-  autoUpdater.on("error", (error) => {
+  autoUpdater.on("error", (error: unknown) => {
     console.warn("Sunlite Mobile MIDI update check failed", error)
   })
 
-  autoUpdater.on("update-downloaded", (info) => {
-    console.info(`Sunlite Mobile MIDI update downloaded: ${info.version}. It will install on app quit.`)
+  autoUpdater.on("update-downloaded", (info: unknown) => {
+    console.info(`Sunlite Mobile MIDI update downloaded: ${getUpdateInfoVersion(info)}. It will install on app quit.`)
   })
 
   setTimeout(() => {
