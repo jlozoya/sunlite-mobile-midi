@@ -197,7 +197,7 @@ export function App() {
                   <div {...stylex.props(styles.setupStepCopy)}>
                     <strong>Setup complete</strong>
                     <span>
-                      MIDI to Sunlite <strong>{status.midiOutputName}</strong> is ready. {status.feedbackReady ? <>Feedback from Sunlite <strong>{status.midiInputName}</strong> is enabled. </> : <>MIDI feedback is disabled or missing; colors will use local button state/configuration. </>}
+                      MIDI to Sunlite <strong>{status.midiOutputName}</strong> is ready. {status.feedbackReady ? <>Feedback from Sunlite <strong>{status.midiInputName}</strong> is enabled. </> : <>MIDI feedback is disabled or missing; buttons stay unlit until Sunlite MIDI OUT is configured. </>}
                       In Sunlite, use MIDI channel <strong>{status.midiChannel}</strong>.
                     </span>
                   </div>
@@ -332,10 +332,10 @@ function ApcController({ padVelocities, ccValues, lastCommand, customization, on
         <div>
           <h2 {...stylex.props(styles.apcTitle)}>APC-style performance grid</h2>
           <p {...stylex.props(styles.sectionDescription)}>
-            8×8 pads, 8 scene-launch buttons, and 9 vertical faders. On desktop, right-click any pad/scene/fader to edit its MIDI configuration, label, and colors.
+            8×8 pads, 8 scene-launch buttons, and 9 vertical faders. On desktop, right-click any pad/scene/fader to edit its text. Button color and lit/off state come only from Sunlite MIDI OUT feedback.
           </p>
         </div>
-        <div {...stylex.props(styles.feedbackBadge, !feedbackReady && styles.feedbackBadgeWarning)}>{feedbackReady ? "MIDI feedback enabled" : "Manual color mode"}</div>
+        <div {...stylex.props(styles.feedbackBadge, !feedbackReady && styles.feedbackBadgeWarning)}>{feedbackReady ? "MIDI feedback enabled" : "Feedback disabled"}</div>
       </div>
 
       {feedbackWarning ? <p {...stylex.props(styles.warningText)}>{feedbackWarning}</p> : null}
@@ -344,9 +344,9 @@ function ApcController({ padVelocities, ccValues, lastCommand, customization, on
         <div {...stylex.props(styles.padMatrix)}>
           {PAD_GRID.map((pad) => {
             const config = customization.pads[String(pad.note)]
-            const feedbackVelocity = padVelocities[config?.midiNumber ?? pad.note]
+            const feedbackVelocity = padVelocities[pad.note]
             const feedbackColor = getFeedbackColor(feedbackVelocity)
-            const isActive = Boolean(activeButtons[`pad-${pad.note}`]) || feedbackColor !== null
+            const isActive = feedbackColor !== null
             return (
               <PadButton
                 key={pad.id}
@@ -368,18 +368,17 @@ function ApcController({ padVelocities, ccValues, lastCommand, customization, on
         <div {...stylex.props(styles.sceneColumn)}>
           {SCENE_BUTTONS.map((button) => {
             const config = customization.sceneButtons[String(button.note)]
-            const feedbackVelocity = padVelocities[config?.midiNumber ?? button.note]
+            const feedbackVelocity = padVelocities[button.note]
             const feedbackColor = getFeedbackColor(feedbackVelocity)
-            const isActive = Boolean(activeButtons[`scene-${button.note}`]) || feedbackColor !== null
-            const color = feedbackColor ?? (isActive ? config?.onColor ?? "white" : config?.offColor ?? "blue")
+            const isActive = feedbackColor !== null
+            const color = feedbackColor ?? "off"
 
             return (
               <Button
                 key={button.id}
                 {...stylex.props(styles.sceneLaunchButton, padColorStyles[color])}
-                onPress={() => triggerButton(config, sendCommand, `scene-${button.note}`, isActive, setButtonActive, setButtonActiveFor, toggleButtonActive)}
-                onPressStart={() => startButtonPress(config, sendCommand, `scene-${button.note}`, setButtonActive)}
-                onPressEnd={() => endButtonPress(config, sendCommand, `scene-${button.note}`, setButtonActive)}
+                onPressStart={() => sendStandardButtonNoteOn(button.note, sendCommand)}
+                onPressEnd={() => sendStandardButtonNoteOff(button.note, sendCommand)}
                 onContextMenu={(event) => {
                   if (isMobileView) return
                   event.preventDefault()
@@ -387,7 +386,7 @@ function ApcController({ padVelocities, ccValues, lastCommand, customization, on
                 }}
               >
                 <span>{config?.label ?? button.label}</span>
-                <small>{formatButtonMidiMeta(config)}</small>
+                <small>N {button.note}</small>
               </Button>
             )
           })}
@@ -399,7 +398,7 @@ function ApcController({ padVelocities, ccValues, lastCommand, customization, on
               key={fader.id}
               fader={fader}
               config={customization.faders[String(fader.controller)]}
-              feedbackValue={ccValues[customization.faders[String(fader.controller)]?.controller ?? fader.controller]}
+              feedbackValue={ccValues[fader.controller]}
               sendCommand={sendCommand}
               isMobileView={isMobileView}
               onEdit={() => setEditingControl({ kind: "fader", id: fader.id, controller: fader.controller })}
@@ -442,37 +441,24 @@ type PadButtonProps = {
   onEdit: () => void
 }
 
-function PadButton({ pad, config, isActive, feedbackColor, isMobileView, sendCommand, setButtonActive, setButtonActiveFor, toggleButtonActive, onEdit }: PadButtonProps) {
-  const resolvedConfig = config ?? {
-    label: pad.label,
-    offColor: pad.defaultColor ?? "off",
-    onColor: "green",
-    messageType: "note" as const,
-    midiNumber: pad.note,
-    onValue: 127,
-    offValue: 0,
-    mode: "trigger" as const,
-    offDelayMs: 0,
-    initialActive: false,
-  }
-  const color = feedbackColor ?? (isActive ? resolvedConfig.onColor : resolvedConfig.offColor)
+function PadButton({ pad, config, feedbackColor, isMobileView, sendCommand, onEdit }: PadButtonProps) {
+  const label = config?.label ?? pad.label
+  const color = feedbackColor ?? "off"
   const isLit = color !== "off"
-  const id = `pad-${pad.note}`
 
   return (
     <Button
       {...stylex.props(styles.padButton, isLit && styles.padButtonLit, padColorStyles[color])}
-      onPress={() => triggerButton(resolvedConfig, sendCommand, id, isActive, setButtonActive, setButtonActiveFor, toggleButtonActive)}
-      onPressStart={() => startButtonPress(resolvedConfig, sendCommand, id, setButtonActive)}
-      onPressEnd={() => endButtonPress(resolvedConfig, sendCommand, id, setButtonActive)}
+      onPressStart={() => sendStandardButtonNoteOn(pad.note, sendCommand)}
+      onPressEnd={() => sendStandardButtonNoteOff(pad.note, sendCommand)}
       onContextMenu={(event) => {
         if (isMobileView) return
         event.preventDefault()
         onEdit()
       }}
     >
-      <span {...stylex.props(styles.padLabel)}>{resolvedConfig.label}</span>
-      <small {...stylex.props(styles.padMeta)}>{formatButtonMidiMeta(resolvedConfig)}</small>
+      <span {...stylex.props(styles.padLabel)}>{label}</span>
+      <small {...stylex.props(styles.padMeta)}>N {pad.note}</small>
     </Button>
   )
 }
@@ -488,11 +474,12 @@ type FaderStripProps = {
 
 function FaderStrip({ fader, config, feedbackValue, sendCommand, isMobileView, onEdit }: FaderStripProps) {
   const resolvedConfig = config ?? { label: fader.label, controller: fader.controller, minValue: 0, maxValue: 127, defaultValue: fader.defaultValue }
+  const standardController = fader.controller
   const [value, setValue] = useState(resolvedConfig.defaultValue)
 
   useEffect(() => {
     setValue(resolvedConfig.defaultValue)
-  }, [resolvedConfig.defaultValue, resolvedConfig.controller])
+  }, [resolvedConfig.defaultValue, standardController])
 
   useEffect(() => {
     if (typeof feedbackValue === "number") {
@@ -518,7 +505,7 @@ function FaderStrip({ fader, config, feedbackValue, sendCommand, isMobileView, o
         onChange={(nextValue) => {
           const midiValue = Number(nextValue)
           setValue(midiValue)
-          sendCommand({ type: "cc", controller: resolvedConfig.controller, value: midiValue })
+          sendCommand({ type: "cc", controller: standardController, value: midiValue })
         }}
       >
         <SliderTrack {...stylex.props(styles.verticalSliderTrack)}>
@@ -532,7 +519,7 @@ function FaderStrip({ fader, config, feedbackValue, sendCommand, isMobileView, o
         <SliderOutput {...stylex.props(styles.faderValue)} />
       </Slider>
       <strong {...stylex.props(styles.faderName)}>{resolvedConfig.label}</strong>
-      <small {...stylex.props(styles.faderCc)}>CC {resolvedConfig.controller}</small>
+      <small {...stylex.props(styles.faderCc)}>CC {standardController}</small>
     </div>
   )
 }
@@ -557,33 +544,42 @@ function ControllerConfigModal({ control, customization, midiChannel, onClose, o
 
   function save() {
     if (control.kind === "pad" && buttonDraft) {
+      const current = customization.pads[String(control.note)] ?? buttonDraft
       onSave({
         ...customization,
         pads: {
           ...customization.pads,
-          [String(control.note)]: buttonDraft,
+          [String(control.note)]: normalizeStandardButtonCustomization(current, buttonDraft.label, control.note),
         },
       })
       return
     }
 
     if (control.kind === "scene" && buttonDraft) {
+      const current = customization.sceneButtons[String(control.note)] ?? buttonDraft
       onSave({
         ...customization,
         sceneButtons: {
           ...customization.sceneButtons,
-          [String(control.note)]: buttonDraft,
+          [String(control.note)]: normalizeStandardButtonCustomization(current, buttonDraft.label, control.note),
         },
       })
       return
     }
 
     if (control.kind === "fader" && faderDraft) {
+      const current = customization.faders[String(control.controller)] ?? faderDraft
       onSave({
         ...customization,
         faders: {
           ...customization.faders,
-          [String(control.controller)]: faderDraft,
+          [String(control.controller)]: {
+            ...current,
+            label: faderDraft.label,
+            controller: control.controller,
+            minValue: 0,
+            maxValue: 127,
+          },
         },
       })
     }
@@ -607,22 +603,9 @@ function ControllerConfigModal({ control, customization, midiChannel, onClose, o
               <Input {...stylex.props(styles.textInput)} />
             </TextField>
 
-            <NativeSelect<MidiButtonMessageType> label="MIDI message" value={buttonDraft.messageType} options={MIDI_BUTTON_MESSAGE_TYPES} onChange={(messageType) => setButtonDraft({ ...buttonDraft, messageType })} />
-            <NumberField label={buttonDraft.messageType === "cc" ? "CC number" : buttonDraft.messageType === "program" ? "Program number" : "Note number"} value={buttonDraft.midiNumber} min={0} max={127} onChange={(midiNumber) => setButtonDraft({ ...buttonDraft, midiNumber })} />
-            <NativeSelect<MidiButtonMode> label="Button mode" value={buttonDraft.mode} options={MIDI_BUTTON_MODES} onChange={(mode) => setButtonDraft({ ...buttonDraft, mode })} />
-            <label {...stylex.props(styles.checkboxField)}>
-              <input type="checkbox" checked={buttonDraft.initialActive} onChange={(event) => setButtonDraft({ ...buttonDraft, initialActive: event.currentTarget.checked })} />
-              <span>Start active when the controller opens</span>
-            </label>
-            <NumberField label={buttonDraft.messageType === "cc" ? "On value" : "On velocity"} value={buttonDraft.onValue} min={0} max={127} onChange={(onValue) => setButtonDraft({ ...buttonDraft, onValue })} />
-            <NumberField label={buttonDraft.messageType === "cc" ? "Off value" : "Off velocity"} value={buttonDraft.offValue} min={0} max={127} onChange={(offValue) => setButtonDraft({ ...buttonDraft, offValue })} />
-            <NumberField label="Note Off delay ms" value={buttonDraft.offDelayMs} min={0} max={5000} onChange={(offDelayMs) => setButtonDraft({ ...buttonDraft, offDelayMs })} />
-            <ColorSelect label="Off color" value={buttonDraft.offColor} onChange={(offColor) => setButtonDraft({ ...buttonDraft, offColor })} />
-            <ColorSelect label="On color" value={buttonDraft.onColor} onChange={(onColor) => setButtonDraft({ ...buttonDraft, onColor })} />
-
             <div {...stylex.props(styles.helpBox)}>
-              <strong>Suggested Sunlite mapping</strong>
-              <span>For scene activation, use message type <strong>note</strong>, mode <strong>trigger</strong>, on velocity <strong>127</strong>, and link it to <strong>Button activation</strong>. Use <strong>Start active</strong> only for buttons that should appear lit before any MIDI feedback arrives.</span>
+              <strong>Standard APC Mini mapping</strong>
+              <span>This app uses the fixed APC-style note for this button. Color and lit/off state are controlled only by MIDI OUT feedback from Sunlite. Configure Sunlite to send feedback to <strong>Sunlite Mobile Out</strong>.</span>
             </div>
           </div>
         ) : null}
@@ -633,13 +616,9 @@ function ControllerConfigModal({ control, customization, midiChannel, onClose, o
               <Label>Fader text</Label>
               <Input {...stylex.props(styles.textInput)} />
             </TextField>
-            <NumberField label="CC number" value={faderDraft.controller} min={0} max={127} onChange={(controller) => setFaderDraft({ ...faderDraft, controller })} />
-            <NumberField label="Minimum value" value={faderDraft.minValue} min={0} max={127} onChange={(minValue) => setFaderDraft({ ...faderDraft, minValue })} />
-            <NumberField label="Maximum value" value={faderDraft.maxValue} min={0} max={127} onChange={(maxValue) => setFaderDraft({ ...faderDraft, maxValue })} />
-            <NumberField label="Default value" value={faderDraft.defaultValue} min={0} max={127} onChange={(defaultValue) => setFaderDraft({ ...faderDraft, defaultValue })} />
             <div {...stylex.props(styles.helpBox)}>
-              <strong>Suggested Sunlite mapping</strong>
-              <span>Use CC controls for Dimmer, Speed, RGBW, size, phasing, or other continuous parameters.</span>
+              <strong>Standard APC Mini mapping</strong>
+              <span>This fader keeps its fixed APC-style CC number. Only the displayed text is editable here.</span>
             </div>
           </div>
         ) : null}
@@ -668,6 +647,7 @@ function getEditableControlTarget(control: EditableControl, customization: Contr
         offValue: 0,
         mode: "trigger" as const,
         offDelayMs: 0,
+        initialActive: false,
       },
     }
   }
@@ -686,6 +666,7 @@ function getEditableControlTarget(control: EditableControl, customization: Contr
         offValue: 0,
         mode: "trigger" as const,
         offDelayMs: 0,
+        initialActive: false,
       },
     }
   }
@@ -703,69 +684,26 @@ function getEditableControlTarget(control: EditableControl, customization: Contr
   }
 }
 
-function triggerButton(
-  config: ButtonCustomization | undefined,
-  sendCommand: (command: MidiCommand) => void,
-  id: string,
-  isActive: boolean,
-  setButtonActive: (id: string, active: boolean) => void,
-  setButtonActiveFor: (id: string, active: boolean, durationMs: number) => void,
-  toggleButtonActive: (id: string) => void,
-) {
-  if (!config || config.mode === "momentary") return
-
-  if (config.mode === "toggle") {
-    const nextActive = !isActive
-    sendButtonValue(config, nextActive ? config.onValue : config.offValue, nextActive, sendCommand)
-    toggleButtonActive(id)
-    return
-  }
-
-  sendButtonValue(config, config.onValue, true, sendCommand)
-  setButtonActive(id, true)
-
-  if (config.offDelayMs > 0) {
-    window.setTimeout(() => {
-      sendButtonValue(config, config.offValue, false, sendCommand)
-      setButtonActive(id, false)
-    }, config.offDelayMs)
+function normalizeStandardButtonCustomization(current: ButtonCustomization, label: string, note: number): ButtonCustomization {
+  return {
+    ...current,
+    label,
+    messageType: "note",
+    midiNumber: note,
+    onValue: 127,
+    offValue: 0,
+    mode: "momentary",
+    offDelayMs: 0,
+    initialActive: false,
   }
 }
 
-function startButtonPress(config: ButtonCustomization | undefined, sendCommand: (command: MidiCommand) => void, id: string, setButtonActive: (id: string, active: boolean) => void) {
-  if (!config || config.mode !== "momentary") return
-  sendButtonValue(config, config.onValue, true, sendCommand)
-  setButtonActive(id, true)
+function sendStandardButtonNoteOn(note: number, sendCommand: (command: MidiCommand) => void) {
+  sendCommand({ type: "noteon", note, velocity: 127 })
 }
 
-function endButtonPress(config: ButtonCustomization | undefined, sendCommand: (command: MidiCommand) => void, id: string, setButtonActive: (id: string, active: boolean) => void) {
-  if (!config || config.mode !== "momentary") return
-  sendButtonValue(config, config.offValue, false, sendCommand)
-  setButtonActive(id, false)
-}
-
-function sendButtonValue(config: ButtonCustomization, value: number, isOn: boolean, sendCommand: (command: MidiCommand) => void) {
-  if (config.messageType === "cc") {
-    sendCommand({ type: "cc", controller: config.midiNumber, value })
-    return
-  }
-
-  if (config.messageType === "program") {
-    if (isOn) sendCommand({ type: "program", number: config.midiNumber })
-    return
-  }
-
-  if (!isOn) {
-    sendCommand({ type: "noteoff", note: config.midiNumber, velocity: value })
-    return
-  }
-
-  if (config.mode === "trigger" && config.offDelayMs > 0) {
-    sendCommand({ type: "note", note: config.midiNumber, velocity: value, offDelayMs: config.offDelayMs })
-    return
-  }
-
-  sendCommand({ type: "noteon", note: config.midiNumber, velocity: value })
+function sendStandardButtonNoteOff(note: number, sendCommand: (command: MidiCommand) => void) {
+  sendCommand({ type: "noteoff", note, velocity: 0 })
 }
 
 function getFeedbackColor(value: number | undefined): PadColor | null {
@@ -785,8 +723,6 @@ function getFeedbackColor(value: number | undefined): PadColor | null {
 
 function formatButtonMidiMeta(config: ButtonCustomization | undefined): string {
   if (!config) return "MIDI"
-  if (config.messageType === "cc") return `CC ${config.midiNumber}`
-  if (config.messageType === "program") return `P ${config.midiNumber}`
   return `N ${config.midiNumber}`
 }
 
