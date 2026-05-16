@@ -89,3 +89,15 @@ export type SocketMessage =
       type: "error"
       message: string
     }
+
+export type MidiCommand =
+  | { type: "note"; note: number; velocity?: number; offDelayMs?: number }
+  | { type: "noteon"; note: number; velocity?: number }
+  | { type: "noteoff"; note: number; velocity?: number }
+  | { type: "cc"; controller: number; value: number }
+  | { type: "program"; number: number }
+
+export type EditableControl =
+  | { kind: "pad"; id: string; note: number }
+  | { kind: "scene"; id: string; note: number }
+  | { kind: "fader"; id: string; controller: number }

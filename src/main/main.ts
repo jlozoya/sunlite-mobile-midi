@@ -186,6 +186,7 @@ const MIDI_LOOP_GUARD_MAX_TOTAL_MESSAGES = 24
 const MIDI_LOOP_GUARD_MAX_REPEATED_MESSAGES = 8
 let midiGuardEvents: MidiGuardEvent[] = []
 let midiFeedbackState: MidiFeedbackState = { padStates: {}, ccValues: {} }
+let midiFeedbackBroadcastTimer: NodeJS.Timeout | null = null
 
 function cloneMidiFeedbackState(): MidiFeedbackState {
   return {
@@ -349,6 +350,20 @@ function updateMidiFeedbackState(kind: "noteon" | "noteoff" | "cc", message: Rec
 
 function broadcastMidiFeedbackState() {
   broadcastToAll({ event: "midi-feedback-state", state: cloneMidiFeedbackState() })
+}
+
+function queueMidiFeedbackStateBroadcast() {
+  if (midiFeedbackBroadcastTimer) {
+    clearTimeout(midiFeedbackBroadcastTimer)
+  }
+
+  // Sunlite often emits several LED feedback messages in a very short burst.
+  // Broadcasting once after the burst prevents intermediate states from
+  // visually overriding each other in the renderer.
+  midiFeedbackBroadcastTimer = setTimeout(() => {
+    midiFeedbackBroadcastTimer = null
+    broadcastMidiFeedbackState()
+  }, 35)
 }
 
 
@@ -665,7 +680,7 @@ function refreshMidiConnection() {
         if (!shouldAcceptMidiFeedback("noteon", record)) return
         updateMidiFeedbackState("noteon", record)
         broadcastToAll({ event: "midi-input", message: { kind: "noteon", ...message } })
-        broadcastMidiFeedbackState()
+        queueMidiFeedbackStateBroadcast()
       })
 
       input.on("noteoff", (message) => {
@@ -673,7 +688,7 @@ function refreshMidiConnection() {
         if (!shouldAcceptMidiFeedback("noteoff", record)) return
         updateMidiFeedbackState("noteoff", record)
         broadcastToAll({ event: "midi-input", message: { kind: "noteoff", ...message } })
-        broadcastMidiFeedbackState()
+        queueMidiFeedbackStateBroadcast()
       })
 
       input.on("cc", (message) => {
@@ -681,7 +696,7 @@ function refreshMidiConnection() {
         if (!shouldAcceptMidiFeedback("cc", record)) return
         updateMidiFeedbackState("cc", record)
         broadcastToAll({ event: "midi-input", message: { kind: "cc", ...message } })
-        broadcastMidiFeedbackState()
+        queueMidiFeedbackStateBroadcast()
       })
     }
 
