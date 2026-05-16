@@ -21,13 +21,13 @@
   "dependencies": {
     "@stylexjs/stylex": "^0.9.3",
     "easymidi": "^3.1.0",
+    "electron-updater": "^6.3.9",
     "express": "^4.19.2",
     "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-aria-components": "^1.8.0",
     "react-dom": "^19.1.0",
-    "ws": "^8.18.0",
-    "electron-updater": "^6.3.9"
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
@@ -70,8 +70,7 @@
             "x64"
           ]
         }
-      ],
-      "publisherName": "Lozoya"
+      ]
     },
     "nsis": {
       "oneClick": false,
