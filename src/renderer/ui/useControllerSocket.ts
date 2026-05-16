@@ -21,15 +21,34 @@ export function useControllerSocket() {
   const [ccValues, setCcValues] = useState<Record<number, number>>({})
   const [controllerCustomization, setControllerCustomization] = useState<ControllerCustomization>(DEFAULT_CONTROLLER_CUSTOMIZATION)
 
+  const clearNoteFeedback = useCallback((note: number) => {
+    setPadVelocities((current) => {
+      if (!(note in current)) return current
+
+      const next = { ...current }
+      delete next[note]
+      return next
+    })
+  }, [])
+
+  const setPersistentNoteFeedback = useCallback((note: number, velocity: number) => {
+    if (velocity <= 0) {
+      clearNoteFeedback(note)
+      return
+    }
+
+    setPadVelocities((current) => ({ ...current, [note]: velocity }))
+  }, [clearNoteFeedback])
+
   const handleMidiInput = useCallback((message: MidiInputMessage) => {
     if (message.kind === "noteon") {
-      setPadVelocities((current) => ({ ...current, [message.note]: message.velocity }))
+      setPersistentNoteFeedback(message.note, message.velocity)
       setLastCommand(`MIDI IN note ${message.note} velocity ${message.velocity}`)
       return
     }
 
     if (message.kind === "noteoff") {
-      setPadVelocities((current) => ({ ...current, [message.note]: 0 }))
+      clearNoteFeedback(message.note)
       setLastCommand(`MIDI IN note ${message.note} off`)
       return
     }
@@ -38,7 +57,7 @@ export function useControllerSocket() {
       setCcValues((current) => ({ ...current, [message.controller]: message.value }))
       setLastCommand(`MIDI IN CC ${message.controller} value ${message.value}`)
     }
-  }, [])
+  }, [clearNoteFeedback, setPersistentNoteFeedback])
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws"

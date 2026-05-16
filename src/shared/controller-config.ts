@@ -34,6 +34,7 @@ export type ButtonCustomization = {
   offValue: number
   mode: MidiButtonMode
   offDelayMs: number
+  initialActive: boolean
 }
 
 export type SceneButtonCustomization = ButtonCustomization
@@ -53,39 +54,46 @@ export type ControllerCustomization = {
 }
 
 const NAMED_PAD_LABELS: Record<number, string> = {
-  36: "Blackout",
-  37: "Full On",
-  38: "Scene 1",
-  39: "Scene 2",
-  40: "Scene 3",
-  41: "Scene 4",
-  42: "Strobe",
-  43: "Move 1",
-  44: "Move 2",
-  45: "Chase",
+  56: "Blackout",
+  57: "Full On",
+  58: "Scene 1",
+  59: "Scene 2",
+  60: "Scene 3",
+  61: "Scene 4",
+  62: "Strobe",
+  63: "Move 1",
+  48: "Move 2",
+  49: "Chase",
 }
 
 const NAMED_PAD_COLORS: Record<number, PadColor> = {
-  36: "red",
-  37: "amber",
-  38: "purple",
-  39: "purple",
-  40: "purple",
-  41: "purple",
-  42: "yellow",
-  43: "cyan",
-  44: "cyan",
-  45: "green",
+  56: "red",
+  57: "amber",
+  58: "purple",
+  59: "purple",
+  60: "purple",
+  61: "purple",
+  62: "yellow",
+  63: "cyan",
+  48: "cyan",
+  49: "green",
+}
+
+function getApcPadNote(row: number, column: number): number {
+  return (7 - row) * 8 + column
 }
 
 export const PAD_GRID: MidiPadConfig[] = Array.from({ length: 64 }, (_, index) => {
-  const note = 36 + index
+  const row = Math.floor(index / 8)
+  const column = index % 8
+  const note = getApcPadNote(row, column)
+
   return {
-    id: `pad-${note}`,
-    label: NAMED_PAD_LABELS[note] ?? `Pad ${index + 1}`,
+    id: `pad-r${row + 1}-c${column + 1}`,
+    label: NAMED_PAD_LABELS[note] ?? `Pad ${note}`,
     note,
-    row: Math.floor(index / 8),
-    column: index % 8,
+    row,
+    column,
     defaultColor: NAMED_PAD_COLORS[note] ?? "off",
   }
 })
@@ -93,19 +101,19 @@ export const PAD_GRID: MidiPadConfig[] = Array.from({ length: 64 }, (_, index) =
 export const SCENE_BUTTONS: MidiSceneButtonConfig[] = Array.from({ length: 8 }, (_, index) => ({
   id: `scene-launch-${index + 1}`,
   label: `Scene ${index + 1}`,
-  note: 100 + index,
+  note: 112 + index,
 }))
 
 export const FADERS: MidiFaderConfig[] = [
-  { id: "fader-1", label: "Dimmer", controller: 1, defaultValue: 127 },
-  { id: "fader-2", label: "Speed", controller: 2, defaultValue: 64 },
-  { id: "fader-3", label: "Red", controller: 3, defaultValue: 0 },
-  { id: "fader-4", label: "Green", controller: 4, defaultValue: 0 },
-  { id: "fader-5", label: "Blue", controller: 5, defaultValue: 0 },
-  { id: "fader-6", label: "White", controller: 6, defaultValue: 0 },
-  { id: "fader-7", label: "FX 1", controller: 7, defaultValue: 0 },
-  { id: "fader-8", label: "FX 2", controller: 8, defaultValue: 0 },
-  { id: "fader-9", label: "Master", controller: 9, defaultValue: 127 },
+  { id: "fader-1", label: "Fader 1", controller: 48, defaultValue: 0 },
+  { id: "fader-2", label: "Fader 2", controller: 49, defaultValue: 0 },
+  { id: "fader-3", label: "Fader 3", controller: 50, defaultValue: 0 },
+  { id: "fader-4", label: "Fader 4", controller: 51, defaultValue: 0 },
+  { id: "fader-5", label: "Fader 5", controller: 52, defaultValue: 0 },
+  { id: "fader-6", label: "Fader 6", controller: 53, defaultValue: 0 },
+  { id: "fader-7", label: "Fader 7", controller: 54, defaultValue: 0 },
+  { id: "fader-8", label: "Fader 8", controller: 55, defaultValue: 0 },
+  { id: "fader-9", label: "Master", controller: 56, defaultValue: 127 },
 ]
 
 export const PAD_COLOR_OPTIONS: PadColor[] = ["off", "red", "amber", "yellow", "green", "cyan", "blue", "purple", "white"]
@@ -123,6 +131,7 @@ function defaultButtonCustomization(label: string, midiNumber: number, offColor:
     offValue: 0,
     mode: "trigger",
     offDelayMs: 0,
+    initialActive: false,
   }
 }
 
@@ -201,6 +210,7 @@ function mergeButtonCustomization(customization: Partial<ButtonCustomization>, c
     offValue: clampMidiNumber(customization.offValue ?? current.offValue),
     mode: isMidiButtonMode(customization.mode) ? customization.mode : current.mode,
     offDelayMs: clampDelay(customization.offDelayMs ?? current.offDelayMs),
+    initialActive: typeof customization.initialActive === "boolean" ? customization.initialActive : current.initialActive,
   }
 }
 

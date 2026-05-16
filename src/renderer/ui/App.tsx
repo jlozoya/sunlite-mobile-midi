@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Button, Input, Label, Slider, SliderOutput, SliderThumb, SliderTrack, TextField } from "react-aria-components"
 import {
   FADERS,
@@ -266,12 +266,63 @@ type ApcControllerProps = {
 function ApcController({ padVelocities, ccValues, lastCommand, customization, onSaveCustomization, isMobileView, feedbackReady, feedbackWarning, midiChannel, sendCommand }: ApcControllerProps) {
   const [editingControl, setEditingControl] = useState<EditableControl | null>(null)
   const [activeButtons, setActiveButtons] = useState<Record<string, boolean>>({})
+  const activeButtonTimersRef = useRef<Record<string, number>>({})
+
+  useEffect(() => {
+    const nextActiveButtons: Record<string, boolean> = {}
+
+    for (const pad of PAD_GRID) {
+      nextActiveButtons[`pad-${pad.note}`] = Boolean(customization.pads[String(pad.note)]?.initialActive)
+    }
+
+    for (const button of SCENE_BUTTONS) {
+      nextActiveButtons[`scene-${button.note}`] = Boolean(customization.sceneButtons[String(button.note)]?.initialActive)
+    }
+
+    for (const timer of Object.values(activeButtonTimersRef.current)) {
+      window.clearTimeout(timer)
+    }
+
+    activeButtonTimersRef.current = {}
+    setActiveButtons(nextActiveButtons)
+  }, [customization])
+
+  useEffect(() => () => {
+    for (const timer of Object.values(activeButtonTimersRef.current)) {
+      window.clearTimeout(timer)
+    }
+
+    activeButtonTimersRef.current = {}
+  }, [])
+
+  function clearActiveButtonTimer(id: string) {
+    const timer = activeButtonTimersRef.current[id]
+
+    if (timer) {
+      window.clearTimeout(timer)
+      delete activeButtonTimersRef.current[id]
+    }
+  }
 
   function setButtonActive(id: string, active: boolean) {
+    clearActiveButtonTimer(id)
     setActiveButtons((current) => ({ ...current, [id]: active }))
   }
 
+  function setButtonActiveFor(id: string, active: boolean, durationMs: number) {
+    clearActiveButtonTimer(id)
+    setActiveButtons((current) => ({ ...current, [id]: active }))
+
+    if (durationMs > 0) {
+      activeButtonTimersRef.current[id] = window.setTimeout(() => {
+        setActiveButtons((current) => ({ ...current, [id]: false }))
+        delete activeButtonTimersRef.current[id]
+      }, durationMs)
+    }
+  }
+
   function toggleButtonActive(id: string) {
+    clearActiveButtonTimer(id)
     setActiveButtons((current) => ({ ...current, [id]: !current[id] }))
   }
 
@@ -293,16 +344,20 @@ function ApcController({ padVelocities, ccValues, lastCommand, customization, on
         <div {...stylex.props(styles.padMatrix)}>
           {PAD_GRID.map((pad) => {
             const config = customization.pads[String(pad.note)]
-            const isActive = Boolean(activeButtons[`pad-${pad.note}`]) || Boolean(padVelocities[config?.midiNumber ?? pad.note])
+            const feedbackVelocity = padVelocities[config?.midiNumber ?? pad.note]
+            const feedbackColor = getFeedbackColor(feedbackVelocity)
+            const isActive = Boolean(activeButtons[`pad-${pad.note}`]) || feedbackColor !== null
             return (
               <PadButton
                 key={pad.id}
                 pad={pad}
                 config={config}
                 isActive={isActive}
+                feedbackColor={feedbackColor}
                 isMobileView={isMobileView}
                 sendCommand={sendCommand}
                 setButtonActive={setButtonActive}
+                setButtonActiveFor={setButtonActiveFor}
                 toggleButtonActive={toggleButtonActive}
                 onEdit={() => setEditingControl({ kind: "pad", id: pad.id, note: pad.note })}
               />
@@ -313,14 +368,16 @@ function ApcController({ padVelocities, ccValues, lastCommand, customization, on
         <div {...stylex.props(styles.sceneColumn)}>
           {SCENE_BUTTONS.map((button) => {
             const config = customization.sceneButtons[String(button.note)]
-            const isActive = Boolean(activeButtons[`scene-${button.note}`]) || Boolean(padVelocities[config?.midiNumber ?? button.note])
-            const color = isActive ? config?.onColor ?? "white" : config?.offColor ?? "blue"
+            const feedbackVelocity = padVelocities[config?.midiNumber ?? button.note]
+            const feedbackColor = getFeedbackColor(feedbackVelocity)
+            const isActive = Boolean(activeButtons[`scene-${button.note}`]) || feedbackColor !== null
+            const color = feedbackColor ?? (isActive ? config?.onColor ?? "white" : config?.offColor ?? "blue")
 
             return (
               <Button
                 key={button.id}
                 {...stylex.props(styles.sceneLaunchButton, padColorStyles[color])}
-                onPress={() => triggerButton(config, sendCommand, `scene-${button.note}`, isActive, setButtonActive, toggleButtonActive)}
+                onPress={() => triggerButton(config, sendCommand, `scene-${button.note}`, isActive, setButtonActive, setButtonActiveFor, toggleButtonActive)}
                 onPressStart={() => startButtonPress(config, sendCommand, `scene-${button.note}`, setButtonActive)}
                 onPressEnd={() => endButtonPress(config, sendCommand, `scene-${button.note}`, setButtonActive)}
                 onContextMenu={(event) => {
@@ -376,14 +433,16 @@ type PadButtonProps = {
   pad: MidiPadConfig
   config: ButtonCustomization | undefined
   isActive: boolean
+  feedbackColor: PadColor | null
   isMobileView: boolean
   sendCommand: ApcControllerProps["sendCommand"]
   setButtonActive: (id: string, active: boolean) => void
+  setButtonActiveFor: (id: string, active: boolean, durationMs: number) => void
   toggleButtonActive: (id: string) => void
   onEdit: () => void
 }
 
-function PadButton({ pad, config, isActive, isMobileView, sendCommand, setButtonActive, toggleButtonActive, onEdit }: PadButtonProps) {
+function PadButton({ pad, config, isActive, feedbackColor, isMobileView, sendCommand, setButtonActive, setButtonActiveFor, toggleButtonActive, onEdit }: PadButtonProps) {
   const resolvedConfig = config ?? {
     label: pad.label,
     offColor: pad.defaultColor ?? "off",
@@ -394,15 +453,16 @@ function PadButton({ pad, config, isActive, isMobileView, sendCommand, setButton
     offValue: 0,
     mode: "trigger" as const,
     offDelayMs: 0,
+    initialActive: false,
   }
-  const color = isActive ? resolvedConfig.onColor : resolvedConfig.offColor
+  const color = feedbackColor ?? (isActive ? resolvedConfig.onColor : resolvedConfig.offColor)
   const isLit = color !== "off"
   const id = `pad-${pad.note}`
 
   return (
     <Button
       {...stylex.props(styles.padButton, isLit && styles.padButtonLit, padColorStyles[color])}
-      onPress={() => triggerButton(resolvedConfig, sendCommand, id, isActive, setButtonActive, toggleButtonActive)}
+      onPress={() => triggerButton(resolvedConfig, sendCommand, id, isActive, setButtonActive, setButtonActiveFor, toggleButtonActive)}
       onPressStart={() => startButtonPress(resolvedConfig, sendCommand, id, setButtonActive)}
       onPressEnd={() => endButtonPress(resolvedConfig, sendCommand, id, setButtonActive)}
       onContextMenu={(event) => {
@@ -550,6 +610,10 @@ function ControllerConfigModal({ control, customization, midiChannel, onClose, o
             <NativeSelect<MidiButtonMessageType> label="MIDI message" value={buttonDraft.messageType} options={MIDI_BUTTON_MESSAGE_TYPES} onChange={(messageType) => setButtonDraft({ ...buttonDraft, messageType })} />
             <NumberField label={buttonDraft.messageType === "cc" ? "CC number" : buttonDraft.messageType === "program" ? "Program number" : "Note number"} value={buttonDraft.midiNumber} min={0} max={127} onChange={(midiNumber) => setButtonDraft({ ...buttonDraft, midiNumber })} />
             <NativeSelect<MidiButtonMode> label="Button mode" value={buttonDraft.mode} options={MIDI_BUTTON_MODES} onChange={(mode) => setButtonDraft({ ...buttonDraft, mode })} />
+            <label {...stylex.props(styles.checkboxField)}>
+              <input type="checkbox" checked={buttonDraft.initialActive} onChange={(event) => setButtonDraft({ ...buttonDraft, initialActive: event.currentTarget.checked })} />
+              <span>Start active when the controller opens</span>
+            </label>
             <NumberField label={buttonDraft.messageType === "cc" ? "On value" : "On velocity"} value={buttonDraft.onValue} min={0} max={127} onChange={(onValue) => setButtonDraft({ ...buttonDraft, onValue })} />
             <NumberField label={buttonDraft.messageType === "cc" ? "Off value" : "Off velocity"} value={buttonDraft.offValue} min={0} max={127} onChange={(offValue) => setButtonDraft({ ...buttonDraft, offValue })} />
             <NumberField label="Note Off delay ms" value={buttonDraft.offDelayMs} min={0} max={5000} onChange={(offDelayMs) => setButtonDraft({ ...buttonDraft, offDelayMs })} />
@@ -558,7 +622,7 @@ function ControllerConfigModal({ control, customization, midiChannel, onClose, o
 
             <div {...stylex.props(styles.helpBox)}>
               <strong>Suggested Sunlite mapping</strong>
-              <span>For scene activation, use message type <strong>note</strong>, mode <strong>trigger</strong>, on velocity <strong>127</strong>, and link it to <strong>Button activation</strong>.</span>
+              <span>For scene activation, use message type <strong>note</strong>, mode <strong>trigger</strong>, on velocity <strong>127</strong>, and link it to <strong>Button activation</strong>. Use <strong>Start active</strong> only for buttons that should appear lit before any MIDI feedback arrives.</span>
             </div>
           </div>
         ) : null}
@@ -639,7 +703,15 @@ function getEditableControlTarget(control: EditableControl, customization: Contr
   }
 }
 
-function triggerButton(config: ButtonCustomization | undefined, sendCommand: (command: MidiCommand) => void, id: string, isActive: boolean, setButtonActive: (id: string, active: boolean) => void, toggleButtonActive: (id: string) => void) {
+function triggerButton(
+  config: ButtonCustomization | undefined,
+  sendCommand: (command: MidiCommand) => void,
+  id: string,
+  isActive: boolean,
+  setButtonActive: (id: string, active: boolean) => void,
+  setButtonActiveFor: (id: string, active: boolean, durationMs: number) => void,
+  toggleButtonActive: (id: string) => void,
+) {
   if (!config || config.mode === "momentary") return
 
   if (config.mode === "toggle") {
@@ -694,6 +766,21 @@ function sendButtonValue(config: ButtonCustomization, value: number, isOn: boole
   }
 
   sendCommand({ type: "noteon", note: config.midiNumber, velocity: value })
+}
+
+function getFeedbackColor(value: number | undefined): PadColor | null {
+  if (typeof value !== "number" || value <= 0) return null
+
+  // APC-style LED feedback uses note-on velocity as a color/status value.
+  // Keep the received state until Sunlite sends velocity 0 or Note Off.
+  if (value <= 5) return "green"
+  if (value <= 13) return "red"
+  if (value <= 21) return "amber"
+  if (value <= 29) return "yellow"
+  if (value <= 45) return "blue"
+  if (value <= 61) return "purple"
+  if (value <= 90) return "cyan"
+  return "white"
 }
 
 function formatButtonMidiMeta(config: ButtonCustomization | undefined): string {
@@ -1292,6 +1379,20 @@ const styles = stylex.create({
     display: "grid",
     gap: "6px",
     color: "#cbd5e1",
+    fontSize: "0.84rem",
+    fontWeight: 800,
+  },
+  checkboxField: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(255, 255, 255, 0.14)",
+    borderRadius: "12px",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    color: "#cbd5e1",
+    padding: "10px 11px",
     fontSize: "0.84rem",
     fontWeight: 800,
   },
