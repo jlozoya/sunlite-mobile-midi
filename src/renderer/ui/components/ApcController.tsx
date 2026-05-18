@@ -1,6 +1,11 @@
 import * as stylex from "@stylexjs/stylex"
 import { useState } from "react"
-import { FADERS, PAD_GRID, SCENE_BUTTONS, type ControllerCustomization } from "../../../shared/controller-config.ts"
+import {
+  FADERS,
+  PAD_GRID,
+  SCENE_BUTTONS,
+  type ControllerCustomization,
+} from "../../../shared/controller-config.ts"
 import { getFeedbackBehavior, getFeedbackColor } from "../controller/ledFeedback"
 import type { EditableControl, MidiCommand } from "../types"
 import { ControllerConfigModal } from "./ControllerConfigModal"
@@ -21,12 +26,25 @@ export type ApcControllerProps = {
   sendCommand: (command: MidiCommand) => void
 }
 
-export function ApcController({ padStates, ccValues, lastCommand, customization, onSaveCustomization, isMobileView, feedbackReady, feedbackWarning, midiChannel, sendCommand }: ApcControllerProps) {
+export function ApcController({
+  padStates,
+  ccValues,
+  lastCommand,
+  customization,
+  onSaveCustomization,
+  isMobileView,
+  feedbackReady,
+  feedbackWarning,
+  midiChannel,
+  sendCommand,
+}: ApcControllerProps) {
   const [editingControl, setEditingControl] = useState<EditableControl | null>(null)
 
   return (
     <section {...stylex.props(styles.apcPanel)}>
-      {feedbackWarning ? <p {...stylex.props(styles.warningText)}>{feedbackWarning}</p> : null}
+      {feedbackWarning ? (
+        <p {...stylex.props(styles.warningText)}>{feedbackWarning}</p>
+      ) : null}
 
       <div {...stylex.props(styles.apcSurface)}>
         <div {...stylex.props(styles.padMatrix)}>
@@ -45,7 +63,9 @@ export function ApcController({ padStates, ccValues, lastCommand, customization,
                 feedbackBehavior={feedbackBehavior}
                 isMobileView={isMobileView}
                 sendCommand={sendCommand}
-                onEdit={() => setEditingControl({ kind: "pad", id: pad.id, note: pad.note })}
+                onEdit={() =>
+                  setEditingControl({ kind: "pad", id: pad.id, note: pad.note })
+                }
               />
             )
           })}
@@ -67,7 +87,9 @@ export function ApcController({ padStates, ccValues, lastCommand, customization,
                 feedbackBehavior={feedbackBehavior}
                 isMobileView={isMobileView}
                 sendCommand={sendCommand}
-                onEdit={() => setEditingControl({ kind: "scene", id: button.id, note: button.note })}
+                onEdit={() =>
+                  setEditingControl({ kind: "scene", id: button.id, note: button.note })
+                }
               />
             )
           })}
@@ -82,7 +104,13 @@ export function ApcController({ padStates, ccValues, lastCommand, customization,
               feedbackValue={ccValues[fader.controller]}
               sendCommand={sendCommand}
               isMobileView={isMobileView}
-              onEdit={() => setEditingControl({ kind: "fader", id: fader.id, controller: fader.controller })}
+              onEdit={() =>
+                setEditingControl({
+                  kind: "fader",
+                  id: fader.id,
+                  controller: fader.controller,
+                })
+              }
             />
           ))}
         </div>
@@ -110,7 +138,7 @@ export function ApcController({ padStates, ccValues, lastCommand, customization,
 }
 
 const styles = stylex.create({
-apcPanel: {
+  apcPanel: {
     width: "100%",
     minWidth: 0,
     marginTop: "16px",
@@ -127,7 +155,7 @@ apcPanel: {
     boxSizing: "border-box",
     overflow: "hidden",
   },
-warningText: {
+  warningText: {
     margin: "12px 0 0",
     borderRadius: "14px",
     borderWidth: "1px",
@@ -139,7 +167,7 @@ warningText: {
     fontSize: "0.86rem",
     lineHeight: 1.45,
   },
-apcSurface: {
+  apcSurface: {
     width: "100%",
     minWidth: 0,
     display: "grid",
@@ -164,7 +192,7 @@ apcSurface: {
     },
     boxSizing: "border-box",
   },
-padMatrix: {
+  padMatrix: {
     minWidth: 0,
     display: "grid",
     gridTemplateColumns: {
@@ -176,7 +204,7 @@ padMatrix: {
       "@media (max-width: 760px)": "4px",
     },
   },
-sceneColumn: {
+  sceneColumn: {
     minWidth: 0,
     display: "grid",
     gridTemplateColumns: {
@@ -188,7 +216,7 @@ sceneColumn: {
       "@media (max-width: 760px)": "4px",
     },
   },
-faderBank: {
+  faderBank: {
     gridColumn: "1 / -1",
     display: "grid",
     gridTemplateColumns: {
@@ -205,7 +233,7 @@ faderBank: {
     overscrollBehaviorX: "contain",
     marginTop: "10px",
   },
-lastCommandBar: {
+  lastCommandBar: {
     display: "grid",
     gap: "4px",
     marginTop: "12px",

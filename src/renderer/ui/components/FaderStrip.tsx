@@ -1,6 +1,9 @@
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useRef, useState } from "react"
-import type { FaderCustomization, MidiFaderConfig } from "../../../shared/controller-config.ts"
+import type {
+  FaderCustomization,
+  MidiFaderConfig,
+} from "../../../shared/controller-config.ts"
 import type { MidiCommand } from "../types"
 
 export type FaderStripProps = {
@@ -12,8 +15,21 @@ export type FaderStripProps = {
   onEdit: () => void
 }
 
-export function FaderStrip({ fader, config, feedbackValue, sendCommand, isMobileView, onEdit }: FaderStripProps) {
-  const resolvedConfig = config ?? { label: fader.label, controller: fader.controller, minValue: 0, maxValue: 127, defaultValue: fader.defaultValue }
+export function FaderStrip({
+  fader,
+  config,
+  feedbackValue,
+  sendCommand,
+  isMobileView,
+  onEdit,
+}: FaderStripProps) {
+  const resolvedConfig = config ?? {
+    label: fader.label,
+    controller: fader.controller,
+    minValue: 0,
+    maxValue: 127,
+    defaultValue: fader.defaultValue,
+  }
   const standardController = fader.controller
   const [value, setValue] = useState(resolvedConfig.defaultValue)
   const trackRef = useRef<HTMLDivElement | null>(null)
@@ -117,8 +133,16 @@ export function FaderStrip({ fader, config, feedbackValue, sendCommand, isMobile
           }}
         >
           <div {...stylex.props(styles.verticalSliderRail)} aria-hidden="true" />
-          <div {...stylex.props(styles.verticalSliderFill)} style={{ height: `${percent * 100}%` }} aria-hidden="true" />
-          <div {...stylex.props(styles.verticalSliderThumb)} style={{ bottom: `${percent * 100}%` }} aria-hidden="true" />
+          <div
+            {...stylex.props(styles.verticalSliderFill)}
+            style={{ height: `${percent * 100}%` }}
+            aria-hidden="true"
+          />
+          <div
+            {...stylex.props(styles.verticalSliderThumb)}
+            style={{ bottom: `${percent * 100}%` }}
+            aria-hidden="true"
+          />
         </div>
       </div>
       <span {...stylex.props(styles.faderValue)}>{value}</span>
@@ -129,7 +153,7 @@ export function FaderStrip({ fader, config, feedbackValue, sendCommand, isMobile
 }
 
 const styles = stylex.create({
-faderStrip: {
+  faderStrip: {
     display: "grid",
     gridTemplateRows: {
       default: "166px auto auto auto",
@@ -158,7 +182,7 @@ faderStrip: {
     cursor: "context-menu",
     touchAction: "none",
   },
-faderSliderArea: {
+  faderSliderArea: {
     position: "relative",
     display: "flex",
     alignItems: "center",
@@ -176,7 +200,7 @@ faderSliderArea: {
     },
     touchAction: "none",
   },
-verticalSliderTrack: {
+  verticalSliderTrack: {
     position: "relative",
     width: {
       default: "42px",
@@ -192,7 +216,7 @@ verticalSliderTrack: {
     overflow: "visible",
     outline: "none",
   },
-verticalSliderRail: {
+  verticalSliderRail: {
     position: "absolute",
     top: 0,
     bottom: 0,
@@ -203,7 +227,7 @@ verticalSliderRail: {
     backgroundColor: "rgba(148, 163, 184, 0.22)",
     pointerEvents: "none",
   },
-verticalSliderFill: {
+  verticalSliderFill: {
     position: "absolute",
     bottom: 0,
     left: "50%",
@@ -213,7 +237,7 @@ verticalSliderFill: {
     backgroundColor: "#8b5cf6",
     pointerEvents: "none",
   },
-verticalSliderThumb: {
+  verticalSliderThumb: {
     position: "absolute",
     left: "50%",
     zIndex: 2,
@@ -234,7 +258,7 @@ verticalSliderThumb: {
     boxShadow: "0 4px 12px rgba(0, 0, 0, 0.35)",
     touchAction: "none",
   },
-faderValue: {
+  faderValue: {
     color: "#ddd6fe",
     fontSize: {
       default: "0.72rem",
@@ -243,7 +267,7 @@ faderValue: {
     fontWeight: 900,
     lineHeight: 1,
   },
-faderName: {
+  faderName: {
     color: "#e5e7eb",
     fontSize: {
       default: "0.72rem",
@@ -256,7 +280,7 @@ faderName: {
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
-faderCc: {
+  faderCc: {
     color: "#94a3b8",
     fontSize: {
       default: "0.62rem",

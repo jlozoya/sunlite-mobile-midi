@@ -9,7 +9,16 @@ import { useServerStatus } from "./useServerStatus"
 
 export function App() {
   const { status, error: statusError, isLoading, refreshStatus } = useServerStatus()
-  const { connectionState, lastCommand, serverMidiLabel, padStates, ccValues, controllerCustomization, setControllerCustomization, sendCommand } = useControllerSocket()
+  const {
+    connectionState,
+    lastCommand,
+    serverMidiLabel,
+    padStates,
+    ccValues,
+    controllerCustomization,
+    setControllerCustomization,
+    sendCommand,
+  } = useControllerSocket()
   const [setupMessage, setSetupMessage] = useState<string | null>(null)
   const [setupBusy, setSetupBusy] = useState<"install" | "open" | "refresh" | null>(null)
 
@@ -18,9 +27,19 @@ export function App() {
     setSetupMessage(null)
 
     try {
-      const endpoint = action === "install" ? "/api/loopmidi/install" : action === "open" ? "/api/loopmidi/open" : "/api/midi/refresh"
+      const endpoint =
+        action === "install"
+          ? "/api/loopmidi/install"
+          : action === "open"
+            ? "/api/loopmidi/open"
+            : "/api/midi/refresh"
       const response = await fetch(endpoint, { method: "POST" })
-      const payload = (await response.json()) as { ok?: boolean; message?: string; code?: number | null; skipped?: boolean }
+      const payload = (await response.json()) as {
+        ok?: boolean
+        message?: string
+        code?: number | null
+        skipped?: boolean
+      }
 
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.message ?? `Setup action failed: ${response.status}`)
@@ -37,7 +56,9 @@ export function App() {
               : "loopMIDI installer was launched. Finish the installer, then refresh MIDI ports.",
         )
       } else if (action === "open") {
-        setSetupMessage("loopMIDI was opened. Create two ports named Sunlite Mobile In and Sunlite Mobile Out, then refresh MIDI ports.")
+        setSetupMessage(
+          "loopMIDI was opened. Create two ports named Sunlite Mobile In and Sunlite Mobile Out, then refresh MIDI ports.",
+        )
       } else {
         setSetupMessage("MIDI ports refreshed.")
       }
@@ -58,8 +79,12 @@ export function App() {
     })
 
     if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { message?: string } | null
-      throw new Error(payload?.message ?? `Failed to save controller config: ${response.status}`)
+      const payload = (await response.json().catch(() => null)) as {
+        message?: string
+      } | null
+      throw new Error(
+        payload?.message ?? `Failed to save controller config: ${response.status}`,
+      )
     }
 
     const saved = (await response.json()) as ControllerCustomization
@@ -67,7 +92,11 @@ export function App() {
   }
 
   const isOnline = connectionState === "online"
-  const statusLabel = isOnline ? "Online" : connectionState === "connecting" ? "Connecting" : "Offline"
+  const statusLabel = isOnline
+    ? "Online"
+    : connectionState === "connecting"
+      ? "Connecting"
+      : "Offline"
   const shouldShowOpenLoopMidi = Boolean(status?.loopMidiExecutablePath)
   const isControllerReady = Boolean(status?.loopMidiInstalled && status?.midiReady)
   const isMobileView = useIsMobileView()
@@ -78,10 +107,19 @@ export function App() {
         <div>
           <p {...stylex.props(styles.eyebrow)}>Sunlite Suite 2</p>
           <h1 {...stylex.props(styles.title)}>Mobile MIDI Controller</h1>
-          <p {...stylex.props(styles.subtitle)}>{serverMidiLabel ?? "Waiting for MIDI server"}</p>
+          <p {...stylex.props(styles.subtitle)}>
+            {serverMidiLabel ?? "Waiting for MIDI server"}
+          </p>
         </div>
 
-        <div {...stylex.props(styles.status, isOnline ? styles.statusOnline : styles.statusOffline)}>{statusLabel}</div>
+        <div
+          {...stylex.props(
+            styles.status,
+            isOnline ? styles.statusOnline : styles.statusOffline,
+          )}
+        >
+          {statusLabel}
+        </div>
       </header>
 
       {!isMobileView ? (
@@ -89,18 +127,26 @@ export function App() {
           <section {...stylex.props(styles.panel, styles.qrPanel)}>
             <div {...stylex.props(styles.sectionHeader)}>
               <h2 {...stylex.props(styles.sectionTitle)}>Open on phone</h2>
-              <p {...stylex.props(styles.sectionDescription)}>Scan this QR from a device connected to the same Wi‑Fi network.</p>
+              <p {...stylex.props(styles.sectionDescription)}>
+                Scan this QR from a device connected to the same Wi‑Fi network.
+              </p>
             </div>
 
             {status?.qrDataUrl ? (
               <div {...stylex.props(styles.qrWrap)}>
-                <img {...stylex.props(styles.qrImage)} src={status.qrDataUrl} alt="Mobile controller QR code" />
+                <img
+                  {...stylex.props(styles.qrImage)}
+                  src={status.qrDataUrl}
+                  alt="Mobile controller QR code"
+                />
               </div>
             ) : (
               <div {...stylex.props(styles.qrPlaceholder)}>Loading QR</div>
             )}
 
-            <div {...stylex.props(styles.urlBox)}>{status?.preferredLanUrl ?? "Detecting LAN URL"}</div>
+            <div {...stylex.props(styles.urlBox)}>
+              {status?.preferredLanUrl ?? "Detecting LAN URL"}
+            </div>
 
             {status?.networkUrlCandidates && status.networkUrlCandidates.length > 1 ? (
               <div {...stylex.props(styles.networkList)}>
@@ -113,14 +159,19 @@ export function App() {
               </div>
             ) : null}
 
-            {statusError ? <p {...stylex.props(styles.errorText)}>{statusError}</p> : null}
+            {statusError ? (
+              <p {...stylex.props(styles.errorText)}>{statusError}</p>
+            ) : null}
           </section>
 
           <section {...stylex.props(styles.panel)}>
             <div {...stylex.props(styles.sectionHeader)}>
               <h2 {...stylex.props(styles.sectionTitle)}>Setup</h2>
               <p {...stylex.props(styles.sectionDescription)}>
-                Configure two loopMIDI ports once. The controller appears after <strong>Sunlite Mobile In</strong> is ready. <strong>Sunlite Mobile Out</strong> is optional and only used for feedback.
+                Configure two loopMIDI ports once. The controller appears after{" "}
+                <strong>Sunlite Mobile In</strong> is ready.{" "}
+                <strong>Sunlite Mobile Out</strong> is optional and only used for
+                feedback.
               </p>
             </div>
 
@@ -129,7 +180,9 @@ export function App() {
                 <div {...stylex.props(styles.currentStep)}>
                   <div {...stylex.props(styles.setupStepCopy)}>
                     <strong>Loading setup status</strong>
-                    <span>Checking loopMIDI, available MIDI ports, and LAN controller URL.</span>
+                    <span>
+                      Checking loopMIDI, available MIDI ports, and LAN controller URL.
+                    </span>
                   </div>
                 </div>
               ) : !status.loopMidiInstalled ? (
@@ -139,11 +192,17 @@ export function App() {
                     <span>Install the virtual MIDI driver first.</span>
                   </div>
                   {status.loopMidiInstallerAvailable ? (
-                    <Button {...stylex.props(styles.setupButton)} isDisabled={setupBusy !== null} onPress={() => void runSetupAction("install")}>
+                    <Button
+                      {...stylex.props(styles.setupButton)}
+                      isDisabled={setupBusy !== null}
+                      onPress={() => void runSetupAction("install")}
+                    >
                       {setupBusy === "install" ? "Installing..." : "Install loopMIDI"}
                     </Button>
                   ) : (
-                    <span {...stylex.props(styles.setupUnavailable)}>loopMIDI installer is not bundled with this app.</span>
+                    <span {...stylex.props(styles.setupUnavailable)}>
+                      loopMIDI installer is not bundled with this app.
+                    </span>
                   )}
                 </div>
               ) : !status.midiReady ? (
@@ -151,19 +210,33 @@ export function App() {
                   <div {...stylex.props(styles.setupStepCopy)}>
                     <strong>2. Create the Sunlite Mobile MIDI ports</strong>
                     <span>
-                      Open loopMIDI. Create <strong>Sunlite Mobile In</strong> first. Create <strong>Sunlite Mobile Out</strong> only if you want feedback from Sunlite. Then refresh.
+                      Open loopMIDI. Create <strong>Sunlite Mobile In</strong> first.
+                      Create <strong>Sunlite Mobile Out</strong> only if you want feedback
+                      from Sunlite. Then refresh.
                     </span>
                   </div>
                   <div {...stylex.props(styles.setupActions)}>
                     {shouldShowOpenLoopMidi ? (
-                      <Button {...stylex.props(styles.setupButton)} isDisabled={setupBusy !== null} onPress={() => void runSetupAction("open")}>
+                      <Button
+                        {...stylex.props(styles.setupButton)}
+                        isDisabled={setupBusy !== null}
+                        onPress={() => void runSetupAction("open")}
+                      >
                         {setupBusy === "open" ? "Opening..." : "Open loopMIDI"}
                       </Button>
                     ) : (
-                      <span {...stylex.props(styles.setupUnavailable)}>loopMIDI executable not found.</span>
+                      <span {...stylex.props(styles.setupUnavailable)}>
+                        loopMIDI executable not found.
+                      </span>
                     )}
-                    <Button {...stylex.props(styles.setupButton, styles.setupButtonSecondary)} isDisabled={setupBusy !== null || isLoading} onPress={() => void runSetupAction("refresh")}>
-                      {setupBusy === "refresh" || isLoading ? "Refreshing..." : "Refresh MIDI ports"}
+                    <Button
+                      {...stylex.props(styles.setupButton, styles.setupButtonSecondary)}
+                      isDisabled={setupBusy !== null || isLoading}
+                      onPress={() => void runSetupAction("refresh")}
+                    >
+                      {setupBusy === "refresh" || isLoading
+                        ? "Refreshing..."
+                        : "Refresh MIDI ports"}
                     </Button>
                   </div>
                 </div>
@@ -172,12 +245,29 @@ export function App() {
                   <div {...stylex.props(styles.setupStepCopy)}>
                     <strong>Setup complete</strong>
                     <span>
-                      MIDI to Sunlite <strong>{status.midiOutputName}</strong> is ready. {status.feedbackReady ? <>Feedback from Sunlite <strong>{status.midiInputName}</strong> is enabled. </> : <>MIDI feedback is disabled or missing; buttons stay unlit until Sunlite MIDI OUT is configured. </>}
+                      MIDI to Sunlite <strong>{status.midiOutputName}</strong> is ready.{" "}
+                      {status.feedbackReady ? (
+                        <>
+                          Feedback from Sunlite <strong>{status.midiInputName}</strong> is
+                          enabled.{" "}
+                        </>
+                      ) : (
+                        <>
+                          MIDI feedback is disabled or missing; buttons stay unlit until
+                          Sunlite MIDI OUT is configured.{" "}
+                        </>
+                      )}
                       In Sunlite, use MIDI channel <strong>{status.midiChannel}</strong>.
                     </span>
                   </div>
-                  <Button {...stylex.props(styles.setupButton, styles.setupButtonSecondary)} isDisabled={setupBusy !== null || isLoading} onPress={() => void runSetupAction("refresh")}>
-                    {setupBusy === "refresh" || isLoading ? "Refreshing..." : "Refresh MIDI ports"}
+                  <Button
+                    {...stylex.props(styles.setupButton, styles.setupButtonSecondary)}
+                    isDisabled={setupBusy !== null || isLoading}
+                    onPress={() => void runSetupAction("refresh")}
+                  >
+                    {setupBusy === "refresh" || isLoading
+                      ? "Refreshing..."
+                      : "Refresh MIDI ports"}
                   </Button>
                 </div>
               )}
@@ -186,14 +276,26 @@ export function App() {
             {status && (!status.midiReady || !status.feedbackReady) ? (
               <div {...stylex.props(styles.portList)}>
                 <strong>Available MIDI outputs</strong>
-                <span>{status.availableMidiOutputs.length ? status.availableMidiOutputs.join(", ") : "No MIDI outputs detected yet."}</span>
+                <span>
+                  {status.availableMidiOutputs.length
+                    ? status.availableMidiOutputs.join(", ")
+                    : "No MIDI outputs detected yet."}
+                </span>
                 <strong>Available MIDI inputs</strong>
-                <span>{status.availableMidiInputs.length ? status.availableMidiInputs.join(", ") : "No MIDI inputs detected yet."}</span>
+                <span>
+                  {status.availableMidiInputs.length
+                    ? status.availableMidiInputs.join(", ")
+                    : "No MIDI inputs detected yet."}
+                </span>
               </div>
             ) : null}
 
-            {status?.feedbackDisabledReason ? <p {...stylex.props(styles.warningText)}>{status.feedbackDisabledReason}</p> : null}
-            {setupMessage ? <p {...stylex.props(styles.setupMessage)}>{setupMessage}</p> : null}
+            {status?.feedbackDisabledReason ? (
+              <p {...stylex.props(styles.warningText)}>{status.feedbackDisabledReason}</p>
+            ) : null}
+            {setupMessage ? (
+              <p {...stylex.props(styles.setupMessage)}>{setupMessage}</p>
+            ) : null}
           </section>
         </section>
       ) : null}
@@ -216,7 +318,18 @@ export function App() {
           <div {...stylex.props(styles.sectionHeader)}>
             <h2 {...stylex.props(styles.sectionTitle)}>MIDI controls locked</h2>
             <p {...stylex.props(styles.sectionDescription)}>
-              {isMobileView ? <>Finish loopMIDI and Sunlite setup on the computer first. This mobile view only shows the controller once the MIDI output port is ready.</> : <>The controller appears after loopMIDI is installed and <strong>Sunlite Mobile In</strong> is detected. <strong>Sunlite Mobile Out</strong> is optional for feedback.</>}
+              {isMobileView ? (
+                <>
+                  Finish loopMIDI and Sunlite setup on the computer first. This mobile
+                  view only shows the controller once the MIDI output port is ready.
+                </>
+              ) : (
+                <>
+                  The controller appears after loopMIDI is installed and{" "}
+                  <strong>Sunlite Mobile In</strong> is detected.{" "}
+                  <strong>Sunlite Mobile Out</strong> is optional for feedback.
+                </>
+              )}
             </p>
           </div>
         </section>
@@ -226,7 +339,7 @@ export function App() {
 }
 
 const styles = stylex.create({
-app: {
+  app: {
     width: "100%",
     maxWidth: "none",
     minWidth: "360px",
@@ -239,7 +352,7 @@ app: {
     boxSizing: "border-box",
     overflowX: "hidden",
   },
-header: {
+  header: {
     position: "sticky",
     top: 0,
     zIndex: 20,
@@ -254,7 +367,7 @@ header: {
     backdropFilter: "blur(12px)",
     padding: "18px 0 16px",
   },
-eyebrow: {
+  eyebrow: {
     margin: "0 0 4px",
     color: "#a78bfa",
     fontSize: "0.78rem",
@@ -262,17 +375,17 @@ eyebrow: {
     letterSpacing: "0.08em",
     textTransform: "uppercase",
   },
-title: {
+  title: {
     margin: 0,
     fontSize: "clamp(1.9rem, 4vw, 3rem)",
     lineHeight: 1.02,
   },
-subtitle: {
+  subtitle: {
     margin: "8px 0 0",
     color: "#93c5fd",
     fontSize: "0.9rem",
   },
-status: {
+  status: {
     flexShrink: 0,
     borderRadius: "999px",
     borderWidth: "1px",
@@ -281,17 +394,17 @@ status: {
     fontSize: "0.84rem",
     fontWeight: 900,
   },
-statusOnline: {
+  statusOnline: {
     borderColor: "rgba(16, 185, 129, 0.32)",
     backgroundColor: "rgba(16, 185, 129, 0.14)",
     color: "#a7f3d0",
   },
-statusOffline: {
+  statusOffline: {
     borderColor: "rgba(239, 68, 68, 0.34)",
     backgroundColor: "rgba(239, 68, 68, 0.12)",
     color: "#fecaca",
   },
-heroGrid: {
+  heroGrid: {
     display: "grid",
     gridTemplateColumns: {
       default: "1fr",
@@ -299,7 +412,7 @@ heroGrid: {
     },
     gap: "16px",
   },
-panel: {
+  panel: {
     marginTop: "16px",
     borderWidth: "1px",
     borderStyle: "solid",
@@ -309,38 +422,38 @@ panel: {
     boxShadow: "0 16px 48px rgba(0, 0, 0, 0.28)",
     padding: "16px",
   },
-qrPanel: {
+  qrPanel: {
     display: "grid",
     justifyItems: "center",
   },
-sectionHeader: {
+  sectionHeader: {
     display: "grid",
     gap: "4px",
     marginBottom: "14px",
     width: "100%",
   },
-sectionTitle: {
+  sectionTitle: {
     margin: 0,
     fontSize: "1rem",
   },
-sectionDescription: {
+  sectionDescription: {
     margin: 0,
     color: "#94a3b8",
     fontSize: "0.9rem",
     lineHeight: 1.5,
   },
-qrWrap: {
+  qrWrap: {
     width: "min(100%, 320px)",
     borderRadius: "22px",
     backgroundColor: "#ffffff",
     padding: "12px",
   },
-qrImage: {
+  qrImage: {
     display: "block",
     width: "100%",
     height: "auto",
   },
-qrPlaceholder: {
+  qrPlaceholder: {
     display: "grid",
     placeItems: "center",
     width: "min(100%, 320px)",
@@ -350,7 +463,7 @@ qrPlaceholder: {
     color: "#94a3b8",
     fontWeight: 800,
   },
-urlBox: {
+  urlBox: {
     width: "100%",
     marginTop: "14px",
     borderRadius: "14px",
@@ -362,13 +475,13 @@ urlBox: {
     overflowWrap: "anywhere",
     textAlign: "center",
   },
-errorText: {
+  errorText: {
     width: "100%",
     color: "#fecaca",
     fontSize: "0.85rem",
     overflowWrap: "anywhere",
   },
-networkList: {
+  networkList: {
     display: "grid",
     gap: "6px",
     width: "100%",
@@ -381,12 +494,12 @@ networkList: {
     lineHeight: 1.4,
     overflowWrap: "anywhere",
   },
-setupFlow: {
+  setupFlow: {
     display: "grid",
     gap: "10px",
     marginTop: "14px",
   },
-currentStep: {
+  currentStep: {
     display: "grid",
     gridTemplateColumns: {
       default: "1fr",
@@ -401,27 +514,27 @@ currentStep: {
     backgroundColor: "rgba(255, 255, 255, 0.05)",
     padding: "14px",
   },
-currentStepWarning: {
+  currentStepWarning: {
     borderColor: "rgba(245, 158, 11, 0.34)",
     backgroundColor: "rgba(245, 158, 11, 0.09)",
   },
-currentStepReady: {
+  currentStepReady: {
     borderColor: "rgba(16, 185, 129, 0.34)",
     backgroundColor: "rgba(16, 185, 129, 0.1)",
   },
-setupStepCopy: {
+  setupStepCopy: {
     display: "grid",
     gap: "6px",
     color: "#cbd5e1",
     lineHeight: 1.45,
   },
-setupActions: {
+  setupActions: {
     display: "flex",
     gap: "10px",
     flexWrap: "wrap",
     justifyContent: "flex-end",
   },
-setupButton: {
+  setupButton: {
     borderWidth: 0,
     borderRadius: "14px",
     backgroundColor: "#8b5cf6",
@@ -430,17 +543,17 @@ setupButton: {
     fontWeight: 800,
     padding: "12px 14px",
   },
-setupButtonSecondary: {
+  setupButtonSecondary: {
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "rgba(167, 139, 250, 0.5)",
     backgroundColor: "rgba(255, 255, 255, 0.04)",
   },
-setupUnavailable: {
+  setupUnavailable: {
     color: "#fecaca",
     fontSize: "0.86rem",
   },
-portList: {
+  portList: {
     display: "grid",
     gap: "6px",
     marginTop: "14px",
@@ -450,15 +563,15 @@ portList: {
     color: "#cbd5e1",
     fontSize: "0.86rem",
   },
-setupMessage: {
+  setupMessage: {
     margin: "14px 0 0",
     color: "#ddd6fe",
     fontSize: "0.88rem",
   },
-controlsLockedPanel: {
+  controlsLockedPanel: {
     minHeight: "180px",
   },
-warningText: {
+  warningText: {
     margin: "12px 0 0",
     borderRadius: "14px",
     borderWidth: "1px",

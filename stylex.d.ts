@@ -1,1 +1,1 @@
-declare module "*.stylex";
+declare module "*.stylex"

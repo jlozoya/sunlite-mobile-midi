@@ -1,4 +1,13 @@
-export type PadColor = "off" | "red" | "amber" | "yellow" | "green" | "cyan" | "blue" | "purple" | "white"
+export type PadColor =
+  | "off"
+  | "red"
+  | "amber"
+  | "yellow"
+  | "green"
+  | "cyan"
+  | "blue"
+  | "purple"
+  | "white"
 export type MidiButtonMessageType = "note" | "cc" | "program"
 export type MidiButtonMode = "trigger" | "momentary" | "toggle"
 
@@ -98,11 +107,14 @@ export const PAD_GRID: MidiPadConfig[] = Array.from({ length: 64 }, (_, index) =
   }
 })
 
-export const SCENE_BUTTONS: MidiSceneButtonConfig[] = Array.from({ length: 8 }, (_, index) => ({
-  id: `scene-launch-${index + 1}`,
-  label: `Scene ${index + 1}`,
-  note: 112 + index,
-}))
+export const SCENE_BUTTONS: MidiSceneButtonConfig[] = Array.from(
+  { length: 8 },
+  (_, index) => ({
+    id: `scene-launch-${index + 1}`,
+    label: `Scene ${index + 1}`,
+    note: 112 + index,
+  }),
+)
 
 export const FADERS: MidiFaderConfig[] = [
   { id: "fader-1", label: "Fader 1", controller: 48, defaultValue: 0 },
@@ -116,11 +128,30 @@ export const FADERS: MidiFaderConfig[] = [
   { id: "fader-9", label: "Master", controller: 56, defaultValue: 127 },
 ]
 
-export const PAD_COLOR_OPTIONS: PadColor[] = ["off", "red", "amber", "yellow", "green", "cyan", "blue", "purple", "white"]
-export const MIDI_BUTTON_MESSAGE_TYPES: MidiButtonMessageType[] = ["note", "cc", "program"]
+export const PAD_COLOR_OPTIONS: PadColor[] = [
+  "off",
+  "red",
+  "amber",
+  "yellow",
+  "green",
+  "cyan",
+  "blue",
+  "purple",
+  "white",
+]
+export const MIDI_BUTTON_MESSAGE_TYPES: MidiButtonMessageType[] = [
+  "note",
+  "cc",
+  "program",
+]
 export const MIDI_BUTTON_MODES: MidiButtonMode[] = ["trigger", "momentary", "toggle"]
 
-function defaultButtonCustomization(label: string, midiNumber: number, offColor: PadColor, onColor: PadColor): ButtonCustomization {
+function defaultButtonCustomization(
+  label: string,
+  midiNumber: number,
+  offColor: PadColor,
+  onColor: PadColor,
+): ButtonCustomization {
   return {
     label,
     offColor,
@@ -148,7 +179,10 @@ export const DEFAULT_CONTROLLER_CUSTOMIZATION: ControllerCustomization = {
     ]),
   ),
   sceneButtons: Object.fromEntries(
-    SCENE_BUTTONS.map((button) => [String(button.note), defaultButtonCustomization(button.label, button.note, "blue", "white")]),
+    SCENE_BUTTONS.map((button) => [
+      String(button.note),
+      defaultButtonCustomization(button.label, button.note, "blue", "white"),
+    ]),
   ),
   faders: Object.fromEntries(
     FADERS.map((fader) => [
@@ -165,28 +199,40 @@ export const DEFAULT_CONTROLLER_CUSTOMIZATION: ControllerCustomization = {
 }
 
 export function mergeControllerCustomization(value: unknown): ControllerCustomization {
-  const partial = value && typeof value === "object" ? (value as Partial<ControllerCustomization>) : {}
+  const partial =
+    value && typeof value === "object" ? (value as Partial<ControllerCustomization>) : {}
 
   const pads = { ...DEFAULT_CONTROLLER_CUSTOMIZATION.pads }
   for (const [key, customization] of Object.entries(partial.pads ?? {})) {
     if (!customization || typeof customization !== "object") continue
-    const current = pads[key] ?? defaultButtonCustomization(`Pad ${key}`, clampMidiNumber(key), "off", "green")
+    const current =
+      pads[key] ??
+      defaultButtonCustomization(`Pad ${key}`, clampMidiNumber(key), "off", "green")
     pads[key] = mergeButtonCustomization(customization, current)
   }
 
   const sceneButtons = { ...DEFAULT_CONTROLLER_CUSTOMIZATION.sceneButtons }
   for (const [key, customization] of Object.entries(partial.sceneButtons ?? {})) {
     if (!customization || typeof customization !== "object") continue
-    const current = sceneButtons[key] ?? defaultButtonCustomization(`Scene ${key}`, clampMidiNumber(key), "blue", "white")
+    const current =
+      sceneButtons[key] ??
+      defaultButtonCustomization(`Scene ${key}`, clampMidiNumber(key), "blue", "white")
     sceneButtons[key] = mergeButtonCustomization(customization, current)
   }
 
   const faders = { ...DEFAULT_CONTROLLER_CUSTOMIZATION.faders }
   for (const [key, customization] of Object.entries(partial.faders ?? {})) {
     if (!customization || typeof customization !== "object") continue
-    const current = faders[key] ?? { label: `CC ${key}`, controller: clampMidiNumber(key), minValue: 0, maxValue: 127, defaultValue: 0 }
+    const current = faders[key] ?? {
+      label: `CC ${key}`,
+      controller: clampMidiNumber(key),
+      minValue: 0,
+      maxValue: 127,
+      defaultValue: 0,
+    }
     faders[key] = {
-      label: typeof customization.label === "string" ? customization.label : current.label,
+      label:
+        typeof customization.label === "string" ? customization.label : current.label,
       controller: clampMidiNumber(customization.controller ?? current.controller),
       minValue: clampMidiNumber(customization.minValue ?? current.minValue),
       maxValue: clampMidiNumber(customization.maxValue ?? current.maxValue),
@@ -197,20 +243,31 @@ export function mergeControllerCustomization(value: unknown): ControllerCustomiz
   return { pads, sceneButtons, faders }
 }
 
-function mergeButtonCustomization(customization: Partial<ButtonCustomization>, current: ButtonCustomization): ButtonCustomization {
-  const legacyMidiNumber = "midiNumber" in customization ? customization.midiNumber : undefined
+function mergeButtonCustomization(
+  customization: Partial<ButtonCustomization>,
+  current: ButtonCustomization,
+): ButtonCustomization {
+  const legacyMidiNumber =
+    "midiNumber" in customization ? customization.midiNumber : undefined
 
   return {
     label: typeof customization.label === "string" ? customization.label : current.label,
-    offColor: isPadColor(customization.offColor) ? customization.offColor : current.offColor,
+    offColor: isPadColor(customization.offColor)
+      ? customization.offColor
+      : current.offColor,
     onColor: isPadColor(customization.onColor) ? customization.onColor : current.onColor,
-    messageType: isMidiButtonMessageType(customization.messageType) ? customization.messageType : current.messageType,
+    messageType: isMidiButtonMessageType(customization.messageType)
+      ? customization.messageType
+      : current.messageType,
     midiNumber: clampMidiNumber(legacyMidiNumber ?? current.midiNumber),
     onValue: clampMidiNumber(customization.onValue ?? current.onValue),
     offValue: clampMidiNumber(customization.offValue ?? current.offValue),
     mode: isMidiButtonMode(customization.mode) ? customization.mode : current.mode,
     offDelayMs: clampDelay(customization.offDelayMs ?? current.offDelayMs),
-    initialActive: typeof customization.initialActive === "boolean" ? customization.initialActive : current.initialActive,
+    initialActive:
+      typeof customization.initialActive === "boolean"
+        ? customization.initialActive
+        : current.initialActive,
   }
 }
 
@@ -219,7 +276,9 @@ function isPadColor(value: unknown): value is PadColor {
 }
 
 function isMidiButtonMessageType(value: unknown): value is MidiButtonMessageType {
-  return typeof value === "string" && (MIDI_BUTTON_MESSAGE_TYPES as string[]).includes(value)
+  return (
+    typeof value === "string" && (MIDI_BUTTON_MESSAGE_TYPES as string[]).includes(value)
+  )
 }
 
 function isMidiButtonMode(value: unknown): value is MidiButtonMode {

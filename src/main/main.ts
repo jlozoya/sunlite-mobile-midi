@@ -9,9 +9,12 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import QRCode from "qrcode"
-import { DEFAULT_CONTROLLER_CUSTOMIZATION, mergeControllerCustomization, type ControllerCustomization } from "../shared/controller-config.js"
+import {
+  DEFAULT_CONTROLLER_CUSTOMIZATION,
+  mergeControllerCustomization,
+  type ControllerCustomization,
+} from "../shared/controller-config.js"
 import { WebSocketServer, type WebSocket } from "ws"
-
 
 type AutoUpdaterLike = {
   autoDownload: boolean
@@ -92,7 +95,9 @@ function configureAutoUpdates() {
   })
 
   autoUpdater.on("update-downloaded", (info: unknown) => {
-    console.info(`Sunlite Mobile MIDI update downloaded: ${getUpdateInfoVersion(info)}. It will install on app quit.`)
+    console.info(
+      `Sunlite Mobile MIDI update downloaded: ${getUpdateInfoVersion(info)}. It will install on app quit.`,
+    )
   })
 
   setTimeout(() => {
@@ -101,7 +106,6 @@ function configureAutoUpdates() {
     })
   }, 3000)
 }
-
 
 type MidiConnection = {
   outputName: string
@@ -148,7 +152,6 @@ type IncomingCommand =
   | { type: "cc"; controller: number; value: number }
   | { type: "program"; number: number }
 
-
 type MidiPayload = Record<string, number>
 type MidiSend = (messageType: string, payload: MidiPayload) => void
 type ProcessEventEmitter = {
@@ -191,7 +194,10 @@ let midiFeedbackBroadcastTimer: NodeJS.Timeout | null = null
 function cloneMidiFeedbackState(): MidiFeedbackState {
   return {
     padStates: Object.fromEntries(
-      Object.entries(midiFeedbackState.padStates).map(([note, state]) => [note, { ...state }]),
+      Object.entries(midiFeedbackState.padStates).map(([note, state]) => [
+        note,
+        { ...state },
+      ]),
     ),
     ccValues: { ...midiFeedbackState.ccValues },
   }
@@ -206,7 +212,9 @@ function normalizeStoredMidiFeedbackState(value: unknown): MidiFeedbackState {
     return { padStates: {}, ccValues: {} }
   }
 
-  const source = value as Partial<MidiFeedbackState> & { padVelocities?: Record<string, unknown> }
+  const source = value as Partial<MidiFeedbackState> & {
+    padVelocities?: Record<string, unknown>
+  }
 
   function normalizeMidiNumberRecord(record: unknown): Record<number, number> {
     if (!record || typeof record !== "object") {
@@ -304,7 +312,10 @@ function saveMidiFeedbackState() {
   }
 }
 
-function updateMidiFeedbackState(kind: "noteon" | "noteoff" | "cc", message: Record<string, unknown>): MidiFeedbackState {
+function updateMidiFeedbackState(
+  kind: "noteon" | "noteoff" | "cc",
+  message: Record<string, unknown>,
+): MidiFeedbackState {
   if (kind === "noteon") {
     const note = clampMidiValue(message.note)
     const velocity = clampMidiValue(message.velocity)
@@ -366,7 +377,6 @@ function queueMidiFeedbackStateBroadcast() {
   }, 35)
 }
 
-
 function getControllerConfigPath(): string {
   return path.join(electronApp.getPath("userData"), "controller-config.json")
 }
@@ -389,7 +399,9 @@ function loadControllerCustomization(): ControllerCustomization {
   }
 }
 
-function saveControllerCustomization(nextCustomization: ControllerCustomization): ControllerCustomization {
+function saveControllerCustomization(
+  nextCustomization: ControllerCustomization,
+): ControllerCustomization {
   controllerCustomization = mergeControllerCustomization(nextCustomization)
   const configPath = getControllerConfigPath()
   fs.mkdirSync(path.dirname(configPath), { recursive: true })
@@ -435,7 +447,13 @@ function isLikelyVirtualInterface(interfaceName: string): boolean {
 
 function isPreferredLanInterface(interfaceName: string): boolean {
   const name = interfaceName.toLowerCase()
-  return name.includes("wi-fi") || name.includes("wifi") || name.includes("wireless") || name.includes("wlan") || name.includes("ethernet")
+  return (
+    name.includes("wi-fi") ||
+    name.includes("wifi") ||
+    name.includes("wireless") ||
+    name.includes("wlan") ||
+    name.includes("ethernet")
+  )
 }
 
 function isPrivateIpv4(address: string): boolean {
@@ -447,7 +465,11 @@ function isPrivateIpv4(address: string): boolean {
 
   const [first, second] = parts
 
-  return first === 10 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168)
+  return (
+    first === 10 ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  )
 }
 
 function isLinkLocalIpv4(address: string): boolean {
@@ -491,7 +513,9 @@ function getNetworkUrlCandidates(port: number): NetworkUrlCandidate[] {
     }
   }
 
-  return candidates.sort((a, b) => b.priority - a.priority || a.interfaceName.localeCompare(b.interfaceName))
+  return candidates.sort(
+    (a, b) => b.priority - a.priority || a.interfaceName.localeCompare(b.interfaceName),
+  )
 }
 
 function getAvailableMidiOutputs(): string[] {
@@ -514,7 +538,9 @@ function findMidiName(names: string[], targetName: string): string | null {
   const exactMatch = names.find((name) => name === targetName)
   if (exactMatch) return exactMatch
 
-  const partialMatch = names.find((name) => name.toLowerCase().includes(targetName.toLowerCase()))
+  const partialMatch = names.find((name) =>
+    name.toLowerCase().includes(targetName.toLowerCase()),
+  )
 
   return partialMatch ?? null
 }
@@ -547,9 +573,12 @@ function createMidiSender(output: easymidi.Output) {
   function sendNote(note: number, velocity = 127, offDelayMs = 500) {
     sendNoteOn(note, velocity)
 
-    setTimeout(() => {
-      sendNoteOff(note, 0)
-    }, Math.max(0, Number(offDelayMs) || 500))
+    setTimeout(
+      () => {
+        sendNoteOff(note, 0)
+      },
+      Math.max(0, Number(offDelayMs) || 500),
+    )
   }
 
   function sendControlChange(controller: number, value: number) {
@@ -586,8 +615,10 @@ function closeMidiConnection() {
   midiConnection = null
 }
 
-
-function getMidiMessageFingerprint(kind: string, message: Record<string, unknown>): string {
+function getMidiMessageFingerprint(
+  kind: string,
+  message: Record<string, unknown>,
+): string {
   const channel = String(message.channel ?? "")
   const note = String(message.note ?? "")
   const velocity = String(message.velocity ?? "")
@@ -630,18 +661,28 @@ function disableMidiFeedback(reason: string) {
   broadcastToAll({ event: "feedback-disabled", message: reason })
 }
 
-function shouldAcceptMidiFeedback(kind: string, message: Record<string, unknown>): boolean {
+function shouldAcceptMidiFeedback(
+  kind: string,
+  message: Record<string, unknown>,
+): boolean {
   if (feedbackDisabledReason) return false
 
   const now = Date.now()
   const fingerprint = getMidiMessageFingerprint(kind, message)
-  midiGuardEvents = midiGuardEvents.filter((event) => now - event.at <= MIDI_LOOP_GUARD_WINDOW_MS)
+  midiGuardEvents = midiGuardEvents.filter(
+    (event) => now - event.at <= MIDI_LOOP_GUARD_WINDOW_MS,
+  )
   midiGuardEvents.push({ at: now, fingerprint })
 
-  const repeatedCount = midiGuardEvents.filter((event) => event.fingerprint === fingerprint).length
+  const repeatedCount = midiGuardEvents.filter(
+    (event) => event.fingerprint === fingerprint,
+  ).length
   const totalCount = midiGuardEvents.length
 
-  if (repeatedCount >= MIDI_LOOP_GUARD_MAX_REPEATED_MESSAGES || totalCount >= MIDI_LOOP_GUARD_MAX_TOTAL_MESSAGES) {
+  if (
+    repeatedCount >= MIDI_LOOP_GUARD_MAX_REPEATED_MESSAGES ||
+    totalCount >= MIDI_LOOP_GUARD_MAX_TOTAL_MESSAGES
+  ) {
     disableMidiFeedback(
       `MIDI feedback was disabled because the app detected a possible MIDI loop. Check Sunlite routing: MIDI input must use "${MIDI_OUTPUT_NAME}" and MIDI OUT must use "${MIDI_INPUT_NAME}". Do not select both ports in both tabs. Fix the routing, then refresh MIDI ports.`,
     )
@@ -663,7 +704,8 @@ function refreshMidiConnection() {
 
   if (outputName) {
     const output = new easymidi.Output(outputName)
-    let inputName = inputNameCandidate && inputNameCandidate !== outputName ? inputNameCandidate : null
+    let inputName =
+      inputNameCandidate && inputNameCandidate !== outputName ? inputNameCandidate : null
 
     if (inputNameCandidate && inputNameCandidate === outputName) {
       updateFeedbackStatus(
@@ -758,8 +800,18 @@ function getLoopMidiInstallerPath(): string {
 
 function findLoopMidiExecutable(): string | null {
   const candidates = [
-    path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Tobias Erichsen", "loopMIDI", "loopMIDI.exe"),
-    path.join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Tobias Erichsen", "loopMIDI", "loopMIDI.exe"),
+    path.join(
+      process.env.ProgramFiles ?? "C:\\Program Files",
+      "Tobias Erichsen",
+      "loopMIDI",
+      "loopMIDI.exe",
+    ),
+    path.join(
+      process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)",
+      "Tobias Erichsen",
+      "loopMIDI",
+      "loopMIDI.exe",
+    ),
     path.join(process.env.LOCALAPPDATA ?? "", "Programs", "loopMIDI", "loopMIDI.exe"),
   ]
 
@@ -767,30 +819,32 @@ function findLoopMidiExecutable(): string | null {
 }
 
 function runProcess(command: string, args: string[]) {
-  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(command, args, {
-      windowsHide: false,
-      shell: false,
-    })
+  return new Promise<{ code: number | null; stdout: string; stderr: string }>(
+    (resolve, reject) => {
+      const child = spawn(command, args, {
+        windowsHide: false,
+        shell: false,
+      })
 
-    let stdout = ""
-    let stderr = ""
+      let stdout = ""
+      let stderr = ""
 
-    child.stdout?.on("data", (chunk) => {
-      stdout += String(chunk)
-    })
+      child.stdout?.on("data", (chunk) => {
+        stdout += String(chunk)
+      })
 
-    child.stderr?.on("data", (chunk) => {
-      stderr += String(chunk)
-    })
+      child.stderr?.on("data", (chunk) => {
+        stderr += String(chunk)
+      })
 
-    const childEvents = child as unknown as ProcessEventEmitter
+      const childEvents = child as unknown as ProcessEventEmitter
 
-    childEvents.on("error", reject)
-    childEvents.on("close", (code: number | null) => {
-      resolve({ code, stdout, stderr })
-    })
-  })
+      childEvents.on("error", reject)
+      childEvents.on("close", (code: number | null) => {
+        resolve({ code, stdout, stderr })
+      })
+    },
+  )
 }
 
 async function installLoopMidi() {
@@ -846,7 +900,9 @@ async function openLoopMidi() {
 
 function handleCommand(payload: IncomingCommand) {
   if (!midiConnection) {
-    throw new Error(`MIDI output "${MIDI_OUTPUT_NAME}" is not available. Install/open loopMIDI and create the port first.`)
+    throw new Error(
+      `MIDI output "${MIDI_OUTPUT_NAME}" is not available. Install/open loopMIDI and create the port first.`,
+    )
   }
 
   if (payload.type === "note") {
@@ -916,7 +972,10 @@ async function startControllerServer(): Promise<ServerStatus> {
       const result = await installLoopMidi()
       response.json({ ok: result.code === 0, ...result, status: refreshMidiConnection() })
     } catch (error) {
-      response.status(500).json({ ok: false, message: error instanceof Error ? error.message : "Unknown install error" })
+      response.status(500).json({
+        ok: false,
+        message: error instanceof Error ? error.message : "Unknown install error",
+      })
     }
   })
 
@@ -925,7 +984,10 @@ async function startControllerServer(): Promise<ServerStatus> {
       const openedPath = await openLoopMidi()
       response.json({ ok: true, openedPath, status: refreshMidiConnection() })
     } catch (error) {
-      response.status(500).json({ ok: false, message: error instanceof Error ? error.message : "Unknown open error" })
+      response.status(500).json({
+        ok: false,
+        message: error instanceof Error ? error.message : "Unknown open error",
+      })
     }
   })
 
@@ -939,7 +1001,11 @@ async function startControllerServer(): Promise<ServerStatus> {
       broadcastToAll({ event: "controller-config", config: nextCustomization })
       response.json(nextCustomization)
     } catch (error) {
-      response.status(500).json({ ok: false, message: error instanceof Error ? error.message : "Unknown controller config error" })
+      response.status(500).json({
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "Unknown controller config error",
+      })
     }
   })
 
@@ -964,8 +1030,22 @@ async function startControllerServer(): Promise<ServerStatus> {
     refreshMidiConnection()
     safeSend(socket, { event: "controller-config", config: controllerCustomization })
     safeSend(socket, { event: "midi-feedback-state", state: cloneMidiFeedbackState() })
-    setTimeout(() => safeSend(socket, { event: "midi-feedback-state", state: cloneMidiFeedbackState() }), 350)
-    setTimeout(() => safeSend(socket, { event: "midi-feedback-state", state: cloneMidiFeedbackState() }), 1200)
+    setTimeout(
+      () =>
+        safeSend(socket, {
+          event: "midi-feedback-state",
+          state: cloneMidiFeedbackState(),
+        }),
+      350,
+    )
+    setTimeout(
+      () =>
+        safeSend(socket, {
+          event: "midi-feedback-state",
+          state: cloneMidiFeedbackState(),
+        }),
+      1200,
+    )
 
     if (midiConnection) {
       safeSend(socket, {

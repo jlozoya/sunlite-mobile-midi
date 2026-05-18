@@ -21,7 +21,8 @@ export function useServerStatus() {
       setError(null)
       return data
     } catch (unknownError) {
-      const message = unknownError instanceof Error ? unknownError.message : "Unknown status error"
+      const message =
+        unknownError instanceof Error ? unknownError.message : "Unknown status error"
       setError(message)
       return null
     } finally {

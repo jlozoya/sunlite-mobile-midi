@@ -1,8 +1,20 @@
 import * as stylex from "@stylexjs/stylex"
 import { Button } from "react-aria-components"
-import type { ButtonCustomization, MidiSceneButtonConfig } from "../../../shared/controller-config.ts"
-import { getButtonFrameStyle, getLedLayerStyle, isOffColor, type ApcLedFeedbackBehavior, type ApcMidiLedColor } from "../controller/ledFeedback"
-import { sendStandardButtonNoteOff, sendStandardButtonNoteOn } from "../controller/midiCommands"
+import type {
+  ButtonCustomization,
+  MidiSceneButtonConfig,
+} from "../../../shared/controller-config.ts"
+import {
+  getButtonFrameStyle,
+  getLedLayerStyle,
+  isOffColor,
+  type ApcLedFeedbackBehavior,
+  type ApcMidiLedColor,
+} from "../controller/ledFeedback"
+import {
+  sendStandardButtonNoteOff,
+  sendStandardButtonNoteOn,
+} from "../controller/midiCommands"
 import { useMidiButtonPress } from "../hooks/useMidiButtonPress"
 import type { MidiCommand } from "../types"
 
@@ -16,7 +28,15 @@ export type SceneButtonProps = {
   onEdit: () => void
 }
 
-export function SceneButton({ button, config, feedbackColor, feedbackBehavior, isMobileView, sendCommand, onEdit }: SceneButtonProps) {
+export function SceneButton({
+  button,
+  config,
+  feedbackColor,
+  feedbackBehavior,
+  isMobileView,
+  sendCommand,
+  onEdit,
+}: SceneButtonProps) {
   const isLit = !isOffColor(feedbackColor)
   const pressHandlers = useMidiButtonPress({
     isMobileView,
@@ -36,7 +56,11 @@ export function SceneButton({ button, config, feedbackColor, feedbackBehavior, i
         onEdit()
       }}
     >
-      <span {...stylex.props(styles.padLedLayer)} style={getLedLayerStyle(feedbackColor, feedbackBehavior)} aria-hidden="true" />
+      <span
+        {...stylex.props(styles.padLedLayer)}
+        style={getLedLayerStyle(feedbackColor, feedbackBehavior)}
+        aria-hidden="true"
+      />
       <span {...stylex.props(styles.sceneLabel)}>{config?.label ?? button.label}</span>
       <small {...stylex.props(styles.sceneMeta)}>N {button.note}</small>
     </Button>

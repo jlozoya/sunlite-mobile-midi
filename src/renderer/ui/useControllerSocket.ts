@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { DEFAULT_CONTROLLER_CUSTOMIZATION, type ControllerCustomization } from "../../shared/controller-config"
-import type { MidiFeedbackState, MidiInputMessage, MidiPadFeedback, SocketMessage } from "./types"
+import {
+  DEFAULT_CONTROLLER_CUSTOMIZATION,
+  type ControllerCustomization,
+} from "../../shared/controller-config"
+import type {
+  MidiFeedbackState,
+  MidiInputMessage,
+  MidiPadFeedback,
+  SocketMessage,
+} from "./types"
 
 type ConnectionState = "connecting" | "online" | "offline" | "error"
 
@@ -11,7 +19,11 @@ type MidiCommand =
   | { type: "cc"; controller: number; value: number }
   | { type: "program"; number: number }
 
-function normalizeMidiFeedbackState(state: MidiFeedbackState | { padVelocities?: Record<number, number>; ccValues?: Record<number, number> }): MidiFeedbackState {
+function normalizeMidiFeedbackState(
+  state:
+    | MidiFeedbackState
+    | { padVelocities?: Record<number, number>; ccValues?: Record<number, number> },
+): MidiFeedbackState {
   const source = state as MidiFeedbackState & { padVelocities?: Record<number, number> }
 
   const padStatesFromState = Object.fromEntries(
@@ -32,8 +44,15 @@ function normalizeMidiFeedbackState(state: MidiFeedbackState | { padVelocities?:
   ) as Record<number, MidiPadFeedback>
 
   return {
-    padStates: Object.keys(padStatesFromState).length ? padStatesFromState : legacyPadStates,
-    ccValues: Object.fromEntries(Object.entries(source.ccValues ?? {}).map(([key, value]) => [Number(key), Number(value)])),
+    padStates: Object.keys(padStatesFromState).length
+      ? padStatesFromState
+      : legacyPadStates,
+    ccValues: Object.fromEntries(
+      Object.entries(source.ccValues ?? {}).map(([key, value]) => [
+        Number(key),
+        Number(value),
+      ]),
+    ),
   }
 }
 
@@ -51,13 +70,21 @@ export function useControllerSocket() {
   const [serverMidiLabel, setServerMidiLabel] = useState<string | null>(null)
   const [padStates, setPadStates] = useState<Record<number, MidiPadFeedback>>({})
   const [ccValues, setCcValues] = useState<Record<number, number>>({})
-  const [controllerCustomization, setControllerCustomization] = useState<ControllerCustomization>(DEFAULT_CONTROLLER_CUSTOMIZATION)
+  const [controllerCustomization, setControllerCustomization] =
+    useState<ControllerCustomization>(DEFAULT_CONTROLLER_CUSTOMIZATION)
 
-  const applyFeedbackState = useCallback((state: MidiFeedbackState | { padVelocities?: Record<number, number>; ccValues?: Record<number, number> }) => {
-    const nextState = normalizeMidiFeedbackState(state)
-    setPadStates(nextState.padStates)
-    setCcValues(nextState.ccValues)
-  }, [])
+  const applyFeedbackState = useCallback(
+    (
+      state:
+        | MidiFeedbackState
+        | { padVelocities?: Record<number, number>; ccValues?: Record<number, number> },
+    ) => {
+      const nextState = normalizeMidiFeedbackState(state)
+      setPadStates(nextState.padStates)
+      setCcValues(nextState.ccValues)
+    },
+    [],
+  )
 
   const requestFeedbackState = useCallback(() => {
     fetch("/api/midi-feedback/state")
@@ -82,36 +109,45 @@ export function useControllerSocket() {
     })
   }, [])
 
-  const setPersistentNoteFeedback = useCallback((note: number, velocity: number, behaviorChannel: number) => {
-    if (velocity <= 0) {
-      clearNoteFeedback(note)
-      return
-    }
+  const setPersistentNoteFeedback = useCallback(
+    (note: number, velocity: number, behaviorChannel: number) => {
+      if (velocity <= 0) {
+        clearNoteFeedback(note)
+        return
+      }
 
-    setPadStates((current) => ({
-      ...current,
-      [note]: { velocity, behaviorChannel: normalizeApcBehaviorChannel(behaviorChannel) },
-    }))
-  }, [clearNoteFeedback])
+      setPadStates((current) => ({
+        ...current,
+        [note]: {
+          velocity,
+          behaviorChannel: normalizeApcBehaviorChannel(behaviorChannel),
+        },
+      }))
+    },
+    [clearNoteFeedback],
+  )
 
-  const handleMidiInput = useCallback((message: MidiInputMessage) => {
-    if (message.kind === "noteon") {
-      setPersistentNoteFeedback(message.note, message.velocity, message.channel)
-      setLastCommand(`MIDI IN note ${message.note} velocity ${message.velocity}`)
-      return
-    }
+  const handleMidiInput = useCallback(
+    (message: MidiInputMessage) => {
+      if (message.kind === "noteon") {
+        setPersistentNoteFeedback(message.note, message.velocity, message.channel)
+        setLastCommand(`MIDI IN note ${message.note} velocity ${message.velocity}`)
+        return
+      }
 
-    if (message.kind === "noteoff") {
-      clearNoteFeedback(message.note)
-      setLastCommand(`MIDI IN note ${message.note} off`)
-      return
-    }
+      if (message.kind === "noteoff") {
+        clearNoteFeedback(message.note)
+        setLastCommand(`MIDI IN note ${message.note} off`)
+        return
+      }
 
-    if (message.kind === "cc") {
-      setCcValues((current) => ({ ...current, [message.controller]: message.value }))
-      setLastCommand(`MIDI IN CC ${message.controller} value ${message.value}`)
-    }
-  }, [clearNoteFeedback, setPersistentNoteFeedback])
+      if (message.kind === "cc") {
+        setCcValues((current) => ({ ...current, [message.controller]: message.value }))
+        setLastCommand(`MIDI IN CC ${message.controller} value ${message.value}`)
+      }
+    },
+    [clearNoteFeedback, setPersistentNoteFeedback],
+  )
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws"
@@ -151,8 +187,14 @@ export function useControllerSocket() {
           const feedbackLabel = payload.feedbackDisabledReason
             ? `Feedback disabled: ${payload.feedbackDisabledReason}`
             : `${payload.midiInputName ?? "No feedback input"} ← Sunlite`
-          setServerMidiLabel(`${payload.midiOutputName} → Sunlite · ${feedbackLabel} · Ch ${payload.midiChannel}`)
-          setLastCommand(payload.feedbackDisabledReason ? `Warning: ${payload.feedbackDisabledReason}` : `Ready: ${payload.midiOutputName}`)
+          setServerMidiLabel(
+            `${payload.midiOutputName} → Sunlite · ${feedbackLabel} · Ch ${payload.midiChannel}`,
+          )
+          setLastCommand(
+            payload.feedbackDisabledReason
+              ? `Warning: ${payload.feedbackDisabledReason}`
+              : `Ready: ${payload.midiOutputName}`,
+          )
           requestFeedbackState()
           window.setTimeout(requestFeedbackState, 350)
           window.setTimeout(requestFeedbackState, 1200)

@@ -17,7 +17,13 @@ export function useMidiButtonPress(options: {
   onPressStart: () => void
   onPressEnd: () => void
 }): MidiButtonPressHandlers {
-  const pointerStartRef = useRef<{ pointerId: number; x: number; y: number; didStartMidi: boolean; canceled: boolean } | null>(null)
+  const pointerStartRef = useRef<{
+    pointerId: number
+    x: number
+    y: number
+    didStartMidi: boolean
+    canceled: boolean
+  } | null>(null)
   const keyboardActiveRef = useRef(false)
 
   function cancelPointerPress(target: HTMLElement, pointerId: number) {

@@ -152,7 +152,8 @@ const OFF_BORDER_COLOR = "rgba(255, 255, 255, 0.12)"
 const OFF_BACKGROUND_COLOR = "rgba(15, 23, 42, 0)"
 
 export function getFeedbackBehavior(channel: number | undefined): ApcLedFeedbackBehavior {
-  const normalizedChannel = typeof channel === "number" ? Math.max(0, Math.min(15, Math.round(channel))) : 6
+  const normalizedChannel =
+    typeof channel === "number" ? Math.max(0, Math.min(15, Math.round(channel))) : 6
   const opacity = APC_LED_BRIGHTNESS[normalizedChannel] ?? 1
 
   if (normalizedChannel >= 7 && normalizedChannel <= 10) {
@@ -196,8 +197,12 @@ export function getFeedbackBehavior(channel: number | undefined): ApcLedFeedback
   }
 }
 
-export function getLedLayerStyle(color: ApcMidiLedColor | null, behavior: ApcLedFeedbackBehavior): CSSProperties {
-  const backgroundColor: CSSProperties["backgroundColor"] = color === null || color.toUpperCase() === "#000000" ? OFF_BACKGROUND_COLOR : color
+export function getLedLayerStyle(
+  color: ApcMidiLedColor | null,
+  behavior: ApcLedFeedbackBehavior,
+): CSSProperties {
+  const backgroundColor: CSSProperties["backgroundColor"] =
+    color === null || color.toUpperCase() === "#000000" ? OFF_BACKGROUND_COLOR : color
 
   return {
     ...behavior.style,
@@ -206,7 +211,8 @@ export function getLedLayerStyle(color: ApcMidiLedColor | null, behavior: ApcLed
 }
 
 export function getButtonFrameStyle(color: ApcMidiLedColor | null): CSSProperties {
-  const borderColor: CSSProperties["borderColor"] = color === null || color.toUpperCase() === "#000000" ? OFF_BORDER_COLOR : color
+  const borderColor: CSSProperties["borderColor"] =
+    color === null || color.toUpperCase() === "#000000" ? OFF_BORDER_COLOR : color
 
   return {
     borderColor,

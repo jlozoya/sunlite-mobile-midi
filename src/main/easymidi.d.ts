@@ -3,7 +3,11 @@ declare module "easymidi" {
   export function getInputs(): string[]
 
   export type NoteMessage = { note: number; velocity: number; channel: number }
-  export type ControlChangeMessage = { controller: number; value: number; channel: number }
+  export type ControlChangeMessage = {
+    controller: number
+    value: number
+    channel: number
+  }
 
   export class Output {
     constructor(name: string, virtual?: boolean)

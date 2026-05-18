@@ -1,8 +1,20 @@
 import * as stylex from "@stylexjs/stylex"
 import { Button } from "react-aria-components"
-import type { ButtonCustomization, MidiPadConfig } from "../../../shared/controller-config.ts"
-import { getButtonFrameStyle, getLedLayerStyle, isOffColor, type ApcLedFeedbackBehavior, type ApcMidiLedColor } from "../controller/ledFeedback"
-import { sendStandardButtonNoteOff, sendStandardButtonNoteOn } from "../controller/midiCommands"
+import type {
+  ButtonCustomization,
+  MidiPadConfig,
+} from "../../../shared/controller-config.ts"
+import {
+  getButtonFrameStyle,
+  getLedLayerStyle,
+  isOffColor,
+  type ApcLedFeedbackBehavior,
+  type ApcMidiLedColor,
+} from "../controller/ledFeedback"
+import {
+  sendStandardButtonNoteOff,
+  sendStandardButtonNoteOn,
+} from "../controller/midiCommands"
 import { useMidiButtonPress } from "../hooks/useMidiButtonPress"
 import type { MidiCommand } from "../types"
 
@@ -16,7 +28,15 @@ export type PadButtonProps = {
   onEdit: () => void
 }
 
-export function PadButton({ pad, config, feedbackColor, feedbackBehavior, isMobileView, sendCommand, onEdit }: PadButtonProps) {
+export function PadButton({
+  pad,
+  config,
+  feedbackColor,
+  feedbackBehavior,
+  isMobileView,
+  sendCommand,
+  onEdit,
+}: PadButtonProps) {
   const label = config?.label ?? pad.label
   const isLit = !isOffColor(feedbackColor)
   const pressHandlers = useMidiButtonPress({
@@ -37,7 +57,11 @@ export function PadButton({ pad, config, feedbackColor, feedbackBehavior, isMobi
         onEdit()
       }}
     >
-      <span {...stylex.props(styles.padLedLayer)} style={getLedLayerStyle(feedbackColor, feedbackBehavior)} aria-hidden="true" />
+      <span
+        {...stylex.props(styles.padLedLayer)}
+        style={getLedLayerStyle(feedbackColor, feedbackBehavior)}
+        aria-hidden="true"
+      />
       <span {...stylex.props(styles.padLabel)}>{label}</span>
       <small {...stylex.props(styles.padMeta)}>N {pad.note}</small>
     </Button>
