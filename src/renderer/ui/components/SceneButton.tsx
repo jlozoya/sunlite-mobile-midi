@@ -1,7 +1,7 @@
 import * as stylex from "@stylexjs/stylex"
 import { Button } from "react-aria-components"
-import type { ButtonCustomization, MidiSceneButtonConfig, PadColor } from "../../../shared/controller-config.ts"
-import { getButtonFrameStyle, getLedLayerStyle, type ApcLedFeedbackBehavior } from "../controller/ledFeedback"
+import type { ButtonCustomization, MidiSceneButtonConfig } from "../../../shared/controller-config.ts"
+import { getButtonFrameStyle, getLedLayerStyle, isOffColor, type ApcLedFeedbackBehavior, type ApcMidiLedColor } from "../controller/ledFeedback"
 import { sendStandardButtonNoteOff, sendStandardButtonNoteOn } from "../controller/midiCommands"
 import { useMidiButtonPress } from "../hooks/useMidiButtonPress"
 import type { MidiCommand } from "../types"
@@ -9,7 +9,7 @@ import type { MidiCommand } from "../types"
 export type SceneButtonProps = {
   button: MidiSceneButtonConfig
   config: ButtonCustomization | undefined
-  feedbackColor: PadColor | null
+  feedbackColor: ApcMidiLedColor | null
   feedbackBehavior: ApcLedFeedbackBehavior
   isMobileView: boolean
   sendCommand: (command: MidiCommand) => void
@@ -17,8 +17,7 @@ export type SceneButtonProps = {
 }
 
 export function SceneButton({ button, config, feedbackColor, feedbackBehavior, isMobileView, sendCommand, onEdit }: SceneButtonProps) {
-  const color = feedbackColor ?? "off"
-  const isLit = color !== "off"
+  const isLit = !isOffColor(feedbackColor)
   const pressHandlers = useMidiButtonPress({
     isMobileView,
     onPressStart: () => sendStandardButtonNoteOn(button.note, sendCommand),
@@ -28,7 +27,7 @@ export function SceneButton({ button, config, feedbackColor, feedbackBehavior, i
   return (
     <Button
       {...stylex.props(styles.sceneLaunchButton, isLit && styles.padButtonLit)}
-      style={getButtonFrameStyle(color)}
+      style={getButtonFrameStyle(feedbackColor)}
       data-led-behavior={feedbackBehavior.behavior}
       {...pressHandlers}
       onContextMenu={(event) => {
@@ -37,7 +36,7 @@ export function SceneButton({ button, config, feedbackColor, feedbackBehavior, i
         onEdit()
       }}
     >
-      <span {...stylex.props(styles.padLedLayer)} style={getLedLayerStyle(color, feedbackBehavior)} aria-hidden="true" />
+      <span {...stylex.props(styles.padLedLayer)} style={getLedLayerStyle(feedbackColor, feedbackBehavior)} aria-hidden="true" />
       <span {...stylex.props(styles.sceneLabel)}>{config?.label ?? button.label}</span>
       <small {...stylex.props(styles.sceneMeta)}>N {button.note}</small>
     </Button>
@@ -45,7 +44,7 @@ export function SceneButton({ button, config, feedbackColor, feedbackBehavior, i
 }
 
 const styles = stylex.create({
-sceneLaunchButton: {
+  sceneLaunchButton: {
     position: "relative",
     overflow: "hidden",
     minWidth: "54px",
@@ -66,23 +65,23 @@ sceneLaunchButton: {
     fontWeight: 900,
     padding: "8px",
   },
-padButtonLit: {
+  padButtonLit: {
     boxShadow: "0 0 22px rgba(255, 255, 255, 0.18)",
   },
-padLedLayer: {
+  padLedLayer: {
     position: "absolute",
     inset: 0,
     borderRadius: "inherit",
     pointerEvents: "none",
     zIndex: 0,
   },
-sceneLabel: {
+  sceneLabel: {
     position: "relative",
     zIndex: 1,
     color: "#f8fafc",
     textShadow: "0 1px 3px rgba(0, 0, 0, 0.85)",
   },
-sceneMeta: {
+  sceneMeta: {
     position: "relative",
     zIndex: 1,
     color: "rgba(255, 255, 255, 0.92)",

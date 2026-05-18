@@ -1,7 +1,7 @@
 import * as stylex from "@stylexjs/stylex"
 import { Button } from "react-aria-components"
-import type { ButtonCustomization, MidiPadConfig, PadColor } from "../../../shared/controller-config.ts"
-import { getButtonFrameStyle, getLedLayerStyle, type ApcLedFeedbackBehavior } from "../controller/ledFeedback"
+import type { ButtonCustomization, MidiPadConfig } from "../../../shared/controller-config.ts"
+import { getButtonFrameStyle, getLedLayerStyle, isOffColor, type ApcLedFeedbackBehavior, type ApcMidiLedColor } from "../controller/ledFeedback"
 import { sendStandardButtonNoteOff, sendStandardButtonNoteOn } from "../controller/midiCommands"
 import { useMidiButtonPress } from "../hooks/useMidiButtonPress"
 import type { MidiCommand } from "../types"
@@ -9,7 +9,7 @@ import type { MidiCommand } from "../types"
 export type PadButtonProps = {
   pad: MidiPadConfig
   config: ButtonCustomization | undefined
-  feedbackColor: PadColor | null
+  feedbackColor: ApcMidiLedColor | null
   feedbackBehavior: ApcLedFeedbackBehavior
   isMobileView: boolean
   sendCommand: (command: MidiCommand) => void
@@ -18,8 +18,7 @@ export type PadButtonProps = {
 
 export function PadButton({ pad, config, feedbackColor, feedbackBehavior, isMobileView, sendCommand, onEdit }: PadButtonProps) {
   const label = config?.label ?? pad.label
-  const color = feedbackColor ?? "off"
-  const isLit = color !== "off"
+  const isLit = !isOffColor(feedbackColor)
   const pressHandlers = useMidiButtonPress({
     isMobileView,
     onPressStart: () => sendStandardButtonNoteOn(pad.note, sendCommand),
@@ -29,7 +28,7 @@ export function PadButton({ pad, config, feedbackColor, feedbackBehavior, isMobi
   return (
     <Button
       {...stylex.props(styles.padButton, isLit && styles.padButtonLit)}
-      style={getButtonFrameStyle(color)}
+      style={getButtonFrameStyle(feedbackColor)}
       data-led-behavior={feedbackBehavior.behavior}
       {...pressHandlers}
       onContextMenu={(event) => {
@@ -38,7 +37,7 @@ export function PadButton({ pad, config, feedbackColor, feedbackBehavior, isMobi
         onEdit()
       }}
     >
-      <span {...stylex.props(styles.padLedLayer)} style={getLedLayerStyle(color, feedbackBehavior)} aria-hidden="true" />
+      <span {...stylex.props(styles.padLedLayer)} style={getLedLayerStyle(feedbackColor, feedbackBehavior)} aria-hidden="true" />
       <span {...stylex.props(styles.padLabel)}>{label}</span>
       <small {...stylex.props(styles.padMeta)}>N {pad.note}</small>
     </Button>
@@ -46,7 +45,7 @@ export function PadButton({ pad, config, feedbackColor, feedbackBehavior, isMobi
 }
 
 const styles = stylex.create({
-padButton: {
+  padButton: {
     position: "relative",
     overflow: "hidden",
     aspectRatio: "1 / 1",
@@ -70,17 +69,17 @@ padButton: {
     touchAction: "manipulation",
     userSelect: "none",
   },
-padButtonLit: {
+  padButtonLit: {
     boxShadow: "0 0 22px rgba(255, 255, 255, 0.18)",
   },
-padLedLayer: {
+  padLedLayer: {
     position: "absolute",
     inset: 0,
     borderRadius: "inherit",
     pointerEvents: "none",
     zIndex: 0,
   },
-padLabel: {
+  padLabel: {
     position: "relative",
     zIndex: 1,
     color: "#f8fafc",
@@ -96,7 +95,7 @@ padLabel: {
     WebkitLineClamp: 2,
     WebkitBoxOrient: "vertical",
   },
-padMeta: {
+  padMeta: {
     position: "relative",
     zIndex: 1,
     color: "rgba(255, 255, 255, 0.92)",
