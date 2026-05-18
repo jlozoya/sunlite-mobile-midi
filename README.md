@@ -1,49 +1,69 @@
-# Sunlite Mobile In / Sunlite Mobile Out MIDI
+# Sunlite Mobile MIDI
 
-Installable Electron + React + TypeScript + StyleX + React Aria app for controlling Sunlite Suite 2 from a phone through a local Wi-Fi web controller.
+Electron + React mobile MIDI controller for Sunlite Suite 2 and FreeStyler. It lets a phone or tablet control lighting software through a local Wi-Fi web interface and loopMIDI.
 
-## Architecture
+<img src="docs/images/app-preview.png" alt="Sunlite Mobile MIDI app preview" width="800" />
+
+## How it works
 
 ```txt
 Phone / tablet
-  -> local Wi-Fi web controller
-  -> Electron/Node server on the PC
-  -> loopMIDI virtual MIDI output
-  -> Sunlite Suite 2 MIDI input
+  -> Wi-Fi web controller
+  -> Electron app on PC
+  -> loopMIDI
+  -> Sunlite / FreeStyler
+```
 
-Sunlite Suite 2 MIDI output
-  -> loopMIDI virtual MIDI input
-  -> Electron/Node server
-  -> WebSocket feedback
-  -> mobile pad colors and fader values
+For feedback colors and fader values:
+
+```txt
+Sunlite / FreeStyler MIDI OUT
+  -> loopMIDI
+  -> Electron app
+  -> WebSocket
+  -> Phone / tablet UI
 ```
 
 ## Windows setup
 
-1. Install loopMIDI from the desktop setup screen if needed.
-2. Create a loopMIDI port named exactly:
+1. Install loopMIDI.
+2. Create two loopMIDI ports:
 
 ```txt
-Sunlite Mobile In / Sunlite Mobile Out
+Sunlite Mobile In
+Sunlite Mobile Out
 ```
 
-3. Open Sunlite Suite 2.
-4. Select `Sunlite Mobile In / Sunlite Mobile Out` as a MIDI input in Sunlite.
-5. To enable feedback colors/values, also select `Sunlite Mobile In / Sunlite Mobile Out` as MIDI output in Sunlite if your Sunlite mapping supports MIDI out feedback.
-6. Start this app.
-7. Scan the QR shown in the desktop app from your phone.
-8. Map the notes and CC controls in Sunlite.
+3. In Sunlite or FreeStyler, select:
 
-## APC-style controller layout
+```txt
+MIDI input  -> Sunlite Mobile In
+MIDI output -> Sunlite Mobile Out
+```
 
-The mobile controller uses an APC Mini MK2-inspired layout:
+4. Start the app.
+5. Scan the QR code from your phone.
+6. Map the MIDI notes and CC controls in the lighting software.
 
-- 8×8 pad matrix starting at MIDI note 36.
-- 8 scene-launch buttons starting at MIDI note 100.
-- 9 vertical faders using CC 1 through CC 9.
-- Incoming MIDI note/CC messages update pad colors and fader positions.
+## MIDI routing
 
-## Default MIDI mapping
+Use separate ports:
+
+```txt
+App -> Sunlite Mobile In -> Lighting software
+Lighting software -> Sunlite Mobile Out -> App feedback
+```
+
+Do not use the same port for both input and output.
+
+## Controller layout
+
+- 8×8 pad matrix.
+- Pads start at MIDI note `36`.
+- Scene buttons start at MIDI note `100`.
+- Faders use CC `1` through `9`.
+
+## Default mapping
 
 ```txt
 Pad 1 / Blackout  -> Note 36
@@ -54,8 +74,6 @@ Pad 5 / Scene 3   -> Note 40
 Pad 6 / Scene 4   -> Note 41
 Pad 7 / Strobe    -> Note 42
 Pad 8 / Move 1    -> Note 43
-Pad 9 / Move 2    -> Note 44
-Pad 10 / Chase    -> Note 45
 
 Scene Launch 1    -> Note 100
 Scene Launch 2    -> Note 101
@@ -73,21 +91,22 @@ Size              -> CC 8
 Master            -> CC 9
 ```
 
-## MIDI feedback color mapping
+## MIDI feedback colors
 
-If Sunlite sends MIDI notes back to the app, velocity controls the displayed pad color:
+Incoming MIDI note velocity controls the pad color using the APC RGB velocity table.
+
+Examples:
 
 ```txt
-0        -> off
-1-18     -> red
-19-36    -> amber
-37-54    -> yellow
-55-72    -> green
-73-90    -> cyan
-91-108   -> blue
-109-126  -> purple
-127      -> white
+Velocity 0   -> off
+Velocity 9   -> orange
+Velocity 21  -> green
+Velocity 45  -> blue
+Velocity 96  -> orange
+Velocity 127 -> dark brown
 ```
+
+The MIDI channel controls LED behavior or brightness. The velocity controls the color.
 
 ## Development
 
@@ -96,49 +115,62 @@ bun install
 bun run start
 ```
 
-`bun run start` builds the renderer and main process, then opens Electron.
-
-## Build installer
+## Format and check
 
 ```bash
-bun run dist
+bun run format
+bun run check
 ```
 
-The installer and portable build will be generated in:
+## Build
+
+```bash
+bun run dist:win
+```
+
+Build files are generated in:
 
 ```txt
 release/
 ```
 
-## Change MIDI output name
+## Change MIDI port names
 
 PowerShell:
 
 ```powershell
-$env:MIDI_OUTPUT_NAME="My MIDI Port"
+$env:MIDI_OUTPUT_NAME="My MIDI Input Port"
+$env:MIDI_INPUT_NAME="My MIDI Feedback Port"
 bun run start
 ```
 
 CMD:
 
 ```cmd
-set MIDI_OUTPUT_NAME=My MIDI Port
+set MIDI_OUTPUT_NAME=My MIDI Input Port
+set MIDI_INPUT_NAME=My MIDI Feedback Port
+bun run start
+```
+
+## Change HTTP port
+
+The default port is `3000`. If it is busy, the app tries the next available port.
+
+To set a preferred port:
+
+```powershell
+$env:PORT="3005"
 bun run start
 ```
 
 ## Firewall
 
-The phone must be on the same Wi-Fi network as the PC. Windows Firewall must allow this app / Node / Electron to accept private network connections.
+The phone must be on the same Wi-Fi network as the PC. Windows Firewall must allow the app, Node, or Electron to accept private network connections.
 
-## Installable Windows build
+## Updates
 
-Create an installer:
+For update hosting details, see:
 
-```powershell
-bun install
-bun run dist:win
+```txt
+UPDATE_SETUP.md
 ```
-
-The installer, portable build, and update metadata are generated in `release/`.
-
-For update hosting details, see `UPDATE_SETUP.md`.
