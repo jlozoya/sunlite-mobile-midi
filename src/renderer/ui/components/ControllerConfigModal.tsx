@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react"
 import { Button, Input, Label, TextField } from "react-aria-components"
 import {
   FADERS,
@@ -93,6 +93,14 @@ export function ControllerConfigModal({
     }
   }
 
+  function handleSaveOnEnter(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return
+
+    event.preventDefault()
+    event.stopPropagation()
+    save()
+  }
+
   return (
     <div {...stylex.props(styles.modalBackdrop)} onMouseDown={onClose}>
       <section
@@ -122,7 +130,7 @@ export function ControllerConfigModal({
               onChange={(label) => setButtonDraft({ ...buttonDraft, label })}
             >
               <Label>Button text</Label>
-              <Input {...stylex.props(styles.textInput)} />
+              <Input {...stylex.props(styles.textInput)} onKeyDown={handleSaveOnEnter} />
             </TextField>
 
             <div {...stylex.props(styles.helpBox)}>
@@ -144,7 +152,7 @@ export function ControllerConfigModal({
               onChange={(label) => setFaderDraft({ ...faderDraft, label })}
             >
               <Label>Fader text</Label>
-              <Input {...stylex.props(styles.textInput)} />
+              <Input {...stylex.props(styles.textInput)} onKeyDown={handleSaveOnEnter} />
             </TextField>
             <div {...stylex.props(styles.helpBox)}>
               <strong>Standard APC Mini mapping</strong>
