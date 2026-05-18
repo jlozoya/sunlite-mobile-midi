@@ -40,7 +40,8 @@ function getUpdateInfoVersion(info: unknown): string {
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const DEFAULT_PORT = 3000
+const DEFAULT_PORT = Number(process.env.PORT || 3000)
+const MAX_PORT_ATTEMPTS = 25
 const DEFAULT_MIDI_OUTPUT_NAME = "Sunlite Mobile In"
 const DEFAULT_MIDI_INPUT_NAME = "Sunlite Mobile Out"
 const MIDI_CHANNEL_ZERO_BASED = Number(process.env.MIDI_CHANNEL || 0)
@@ -96,7 +97,9 @@ function configureAutoUpdates() {
 
   autoUpdater.on("update-downloaded", (info: unknown) => {
     console.info(
-      `Sunlite Mobile MIDI update downloaded: ${getUpdateInfoVersion(info)}. It will install on app quit.`,
+      `Sunlite Mobile MIDI update downloaded: ${getUpdateInfoVersion(
+        info,
+      )}. It will install on app quit.`,
     )
   })
 
@@ -185,11 +188,14 @@ type MidiFeedbackState = {
 }
 
 const MIDI_LOOP_GUARD_WINDOW_MS = 1000
-const MIDI_LOOP_GUARD_MAX_TOTAL_MESSAGES = 24
-const MIDI_LOOP_GUARD_MAX_REPEATED_MESSAGES = 8
+const MIDI_LOOP_GUARD_MAX_TOTAL_MESSAGES = 240
+const MIDI_LOOP_GUARD_MAX_REPEATED_MESSAGES = 80
+const MIDI_LOOP_GUARD_WARNING_INTERVAL_MS = 3000
+
 let midiGuardEvents: MidiGuardEvent[] = []
 let midiFeedbackState: MidiFeedbackState = { padStates: {}, ccValues: {} }
 let midiFeedbackBroadcastTimer: NodeJS.Timeout | null = null
+let lastMidiLoopGuardWarningAt = 0
 
 function cloneMidiFeedbackState(): MidiFeedbackState {
   return {
@@ -368,9 +374,6 @@ function queueMidiFeedbackStateBroadcast() {
     clearTimeout(midiFeedbackBroadcastTimer)
   }
 
-  // Sunlite often emits several LED feedback messages in a very short burst.
-  // Broadcasting once after the burst prevents intermediate states from
-  // visually overriding each other in the renderer.
   midiFeedbackBroadcastTimer = setTimeout(() => {
     midiFeedbackBroadcastTimer = null
     broadcastMidiFeedbackState()
@@ -630,6 +633,7 @@ function getMidiMessageFingerprint(
 
 function resetMidiLoopGuard() {
   midiGuardEvents = []
+  lastMidiLoopGuardWarningAt = 0
 }
 
 function updateFeedbackStatus(reason: string | null) {
@@ -646,17 +650,6 @@ function updateFeedbackStatus(reason: string | null) {
 }
 
 function disableMidiFeedback(reason: string) {
-  try {
-    midiConnection?.input?.close()
-  } catch {
-    // Ignore close failures from native MIDI backends.
-  }
-
-  if (midiConnection) {
-    midiConnection.input = null
-    midiConnection.inputName = null
-  }
-
   updateFeedbackStatus(reason)
   broadcastToAll({ event: "feedback-disabled", message: reason })
 }
@@ -669,6 +662,7 @@ function shouldAcceptMidiFeedback(
 
   const now = Date.now()
   const fingerprint = getMidiMessageFingerprint(kind, message)
+
   midiGuardEvents = midiGuardEvents.filter(
     (event) => now - event.at <= MIDI_LOOP_GUARD_WINDOW_MS,
   )
@@ -683,10 +677,11 @@ function shouldAcceptMidiFeedback(
     repeatedCount >= MIDI_LOOP_GUARD_MAX_REPEATED_MESSAGES ||
     totalCount >= MIDI_LOOP_GUARD_MAX_TOTAL_MESSAGES
   ) {
-    disableMidiFeedback(
-      `MIDI feedback was disabled because the app detected a possible MIDI loop. Check Sunlite routing: MIDI input must use "${MIDI_OUTPUT_NAME}" and MIDI OUT must use "${MIDI_INPUT_NAME}". Do not select both ports in both tabs. Fix the routing, then refresh MIDI ports.`,
-    )
-    return false
+    if (now - lastMidiLoopGuardWarningAt >= MIDI_LOOP_GUARD_WARNING_INTERVAL_MS) {
+      lastMidiLoopGuardWarningAt = now
+    }
+
+    return true
   }
 
   return true
@@ -708,7 +703,7 @@ function refreshMidiConnection() {
       inputNameCandidate && inputNameCandidate !== outputName ? inputNameCandidate : null
 
     if (inputNameCandidate && inputNameCandidate === outputName) {
-      updateFeedbackStatus(
+      disableMidiFeedback(
         `MIDI feedback is disabled because input and output resolve to the same port: "${outputName}". Use separate ports: "${MIDI_OUTPUT_NAME}" for App → Sunlite and "${MIDI_INPUT_NAME}" for Sunlite → App.`,
       )
       inputName = null
@@ -759,7 +754,7 @@ function refreshMidiConnection() {
       availableMidiOutputs,
       availableMidiInputs,
       midiOutputName: midiConnection?.outputName ?? null,
-      midiInputName: midiConnection?.inputName ?? null,
+      midiInputName: feedbackDisabledReason ? null : (midiConnection?.inputName ?? null),
       midiReady: Boolean(midiConnection),
       feedbackReady: Boolean(midiConnection?.input) && !feedbackDisabledReason,
       feedbackDisabledReason,
@@ -866,8 +861,6 @@ async function installLoopMidi() {
     throw new Error(`loopMIDI installer was not found at: ${installerPath}`)
   }
 
-  // loopMIDISetup.exe is a WiX bootstrapper. /quiet /norestart is the standard silent install path.
-  // Windows may still show an elevation prompt because loopMIDI installs a system MIDI driver.
   const result = await runProcess(installerPath, ["/quiet", "/norestart"])
 
   refreshMidiConnection()
@@ -948,9 +941,66 @@ function handleCommand(payload: IncomingCommand) {
   throw new Error("Unsupported MIDI command.")
 }
 
+function isPortInUseError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "EADDRINUSE"
+  )
+}
+
+function listenWithPortFallback(
+  httpServer: http.Server,
+  preferredPort: number,
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let currentPort = preferredPort
+    let attempts = 0
+
+    function tryListen() {
+      httpServer.removeAllListeners("error")
+
+      httpServer.once("error", (error) => {
+        if (!isPortInUseError(error) || attempts >= MAX_PORT_ATTEMPTS) {
+          reject(error)
+          return
+        }
+
+        console.warn(
+          `[HTTP] Port ${currentPort} is busy. Trying port ${currentPort + 1}.`,
+        )
+
+        attempts += 1
+        currentPort += 1
+        setTimeout(tryListen, 50)
+      })
+
+      httpServer.listen(currentPort, "0.0.0.0", () => {
+        const address = httpServer.address()
+        const resolvedPort =
+          typeof address === "object" && address?.port ? address.port : currentPort
+
+        if (resolvedPort !== preferredPort) {
+          console.warn(
+            `[HTTP] Preferred port ${preferredPort} was busy. Server started on ${resolvedPort}.`,
+          )
+        } else {
+          console.info(`[HTTP] Server started on port ${resolvedPort}.`)
+        }
+
+        resolve(resolvedPort)
+      })
+    }
+
+    tryListen()
+  })
+}
+
 async function startControllerServer(): Promise<ServerStatus> {
   loadControllerCustomization()
   loadMidiFeedbackState()
+
   const appServer = express()
   const httpServer = http.createServer(appServer)
   const wss = new WebSocketServer({ server: httpServer })
@@ -1030,6 +1080,7 @@ async function startControllerServer(): Promise<ServerStatus> {
     refreshMidiConnection()
     safeSend(socket, { event: "controller-config", config: controllerCustomization })
     safeSend(socket, { event: "midi-feedback-state", state: cloneMidiFeedbackState() })
+
     setTimeout(
       () =>
         safeSend(socket, {
@@ -1038,6 +1089,7 @@ async function startControllerServer(): Promise<ServerStatus> {
         }),
       350,
     )
+
     setTimeout(
       () =>
         safeSend(socket, {
@@ -1051,7 +1103,7 @@ async function startControllerServer(): Promise<ServerStatus> {
       safeSend(socket, {
         type: "server-ready",
         midiOutputName: midiConnection.outputName,
-        midiInputName: midiConnection.inputName,
+        midiInputName: feedbackDisabledReason ? null : midiConnection.inputName,
         feedbackReady: Boolean(midiConnection.input) && !feedbackDisabledReason,
         feedbackDisabledReason,
         midiChannel: MIDI_CHANNEL_ZERO_BASED + 1,
@@ -1082,18 +1134,7 @@ async function startControllerServer(): Promise<ServerStatus> {
     })
   })
 
-  const port = await new Promise<number>((resolve, reject) => {
-    httpServer.once("error", reject)
-    httpServer.listen(DEFAULT_PORT, "0.0.0.0", () => {
-      const address = httpServer.address()
-      if (typeof address === "object" && address?.port) {
-        resolve(address.port)
-      } else {
-        resolve(DEFAULT_PORT)
-      }
-    })
-  })
-
+  const port = await listenWithPortFallback(httpServer, DEFAULT_PORT)
   const networkUrlCandidates = getNetworkUrlCandidates(port)
   const lanUrls = networkUrlCandidates.map((candidate) => candidate.url)
   const localUrl = `http://127.0.0.1:${port}`

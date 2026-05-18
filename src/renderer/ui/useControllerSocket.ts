@@ -129,6 +129,8 @@ export function useControllerSocket() {
 
   const handleMidiInput = useCallback(
     (message: MidiInputMessage) => {
+      console.info("[MIDI OUT -> UI]", message)
+
       if (message.kind === "noteon") {
         setPersistentNoteFeedback(message.note, message.velocity, message.channel)
         setLastCommand(`MIDI IN note ${message.note} velocity ${message.velocity}`)

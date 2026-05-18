@@ -128,11 +128,6 @@ export function ApcController({
           }}
         />
       ) : null}
-
-      <div {...stylex.props(styles.lastCommandBar)}>
-        <strong>Last command</strong>
-        <span>{lastCommand}</span>
-      </div>
     </section>
   )
 }
