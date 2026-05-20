@@ -2,9 +2,9 @@ import * as stylex from "@stylexjs/stylex"
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react"
 import { Button, Input, Label, TextField } from "react-aria-components"
 import {
+  APC_EXTRA_BUTTONS,
   FADERS,
   PAD_GRID,
-  SCENE_BUTTONS,
   type ButtonCustomization,
   type ControllerCustomization,
   type FaderCustomization,
@@ -204,7 +204,7 @@ function getEditableControlTarget(
   }
 
   if (control.kind === "scene") {
-    const scene = SCENE_BUTTONS.find((item) => item.note === control.note)
+    const scene = APC_EXTRA_BUTTONS.find((item) => item.note === control.note)
     return {
       kind: "button" as const,
       config: customization.sceneButtons[String(control.note)] ?? {

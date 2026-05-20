@@ -260,15 +260,26 @@ export function App() {
                       In Sunlite, use MIDI channel <strong>{status.midiChannel}</strong>.
                     </span>
                   </div>
-                  <Button
-                    {...stylex.props(styles.setupButton, styles.setupButtonSecondary)}
-                    isDisabled={setupBusy !== null || isLoading}
-                    onPress={() => void runSetupAction("refresh")}
-                  >
-                    {setupBusy === "refresh" || isLoading
-                      ? "Refreshing..."
-                      : "Refresh MIDI ports"}
-                  </Button>
+                  <div {...stylex.props(styles.setupActions)}>
+                    {shouldShowOpenLoopMidi ? (
+                      <Button
+                        {...stylex.props(styles.setupButton)}
+                        isDisabled={setupBusy !== null}
+                        onPress={() => void runSetupAction("open")}
+                      >
+                        {setupBusy === "open" ? "Opening..." : "Open loopMIDI"}
+                      </Button>
+                    ) : null}
+                    <Button
+                      {...stylex.props(styles.setupButton, styles.setupButtonSecondary)}
+                      isDisabled={setupBusy !== null || isLoading}
+                      onPress={() => void runSetupAction("refresh")}
+                    >
+                      {setupBusy === "refresh" || isLoading
+                        ? "Refreshing..."
+                        : "Refresh MIDI ports"}
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>

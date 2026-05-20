@@ -116,6 +116,27 @@ export const SCENE_BUTTONS: MidiSceneButtonConfig[] = Array.from(
   }),
 )
 
+export const BOTTOM_BUTTONS: MidiSceneButtonConfig[] = Array.from(
+  { length: 8 },
+  (_, index) => ({
+    id: `bottom-control-${index + 1}`,
+    label: `Bottom ${index + 1}`,
+    note: 100 + index,
+  }),
+)
+
+export const CORNER_BUTTON: MidiSceneButtonConfig = {
+  id: "corner-control",
+  label: "Corner",
+  note: 122,
+}
+
+export const APC_EXTRA_BUTTONS: MidiSceneButtonConfig[] = [
+  ...SCENE_BUTTONS,
+  ...BOTTOM_BUTTONS,
+  CORNER_BUTTON,
+]
+
 export const FADERS: MidiFaderConfig[] = [
   { id: "fader-1", label: "Fader 1", controller: 48, defaultValue: 0 },
   { id: "fader-2", label: "Fader 2", controller: 49, defaultValue: 0 },
@@ -179,7 +200,7 @@ export const DEFAULT_CONTROLLER_CUSTOMIZATION: ControllerCustomization = {
     ]),
   ),
   sceneButtons: Object.fromEntries(
-    SCENE_BUTTONS.map((button) => [
+    APC_EXTRA_BUTTONS.map((button) => [
       String(button.note),
       defaultButtonCustomization(button.label, button.note, "blue", "white"),
     ]),

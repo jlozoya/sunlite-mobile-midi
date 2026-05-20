@@ -60,7 +60,9 @@ Do not use the same port for both input and output.
 
 - 8×8 pad matrix.
 - Pads start at MIDI note `36`.
-- Scene buttons start at MIDI note `100`.
+- Right-hand scene buttons use MIDI notes `112` through `119`.
+- Bottom pads use MIDI notes `100` through `107`.
+- Bottom-right corner pad uses MIDI note `122`.
 - Faders use CC `1` through `9`.
 
 ## Default mapping
@@ -75,10 +77,17 @@ Pad 6 / Scene 4   -> Note 41
 Pad 7 / Strobe    -> Note 42
 Pad 8 / Move 1    -> Note 43
 
-Scene Launch 1    -> Note 100
-Scene Launch 2    -> Note 101
+Scene Launch 1    -> Note 112
+Scene Launch 2    -> Note 113
 ...
-Scene Launch 8    -> Note 107
+Scene Launch 8    -> Note 119
+
+Bottom 1          -> Note 100
+Bottom 2          -> Note 101
+...
+Bottom 8          -> Note 107
+
+Corner            -> Note 122
 
 Dimmer            -> CC 1
 Speed             -> CC 2

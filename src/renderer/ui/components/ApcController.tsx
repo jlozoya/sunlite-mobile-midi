@@ -1,6 +1,8 @@
 import * as stylex from "@stylexjs/stylex"
 import { useState } from "react"
 import {
+  BOTTOM_BUTTONS,
+  CORNER_BUTTON,
   FADERS,
   PAD_GRID,
   SCENE_BUTTONS,
@@ -47,52 +49,79 @@ export function ApcController({
       ) : null}
 
       <div {...stylex.props(styles.apcSurface)}>
-        <div {...stylex.props(styles.padMatrix)}>
-          {PAD_GRID.map((pad) => {
-            const config = customization.pads[String(pad.note)]
-            const feedbackState = padStates[pad.note]
-            const feedbackColor = getFeedbackColor(feedbackState?.velocity)
-            const feedbackBehavior = getFeedbackBehavior(feedbackState?.behaviorChannel)
+        <div {...stylex.props(styles.controllerGrid)}>
+          <div {...stylex.props(styles.padMatrix)}>
+            {PAD_GRID.map((pad) => {
+              const config = customization.pads[String(pad.note)]
+              const feedbackState = padStates[pad.note]
+              const feedbackColor = getFeedbackColor(feedbackState?.velocity)
+              const feedbackBehavior = getFeedbackBehavior(feedbackState?.behaviorChannel)
 
-            return (
-              <PadButton
-                key={pad.id}
-                pad={pad}
-                config={config}
-                feedbackColor={feedbackColor}
-                feedbackBehavior={feedbackBehavior}
-                isMobileView={isMobileView}
-                sendCommand={sendCommand}
-                onEdit={() =>
-                  setEditingControl({ kind: "pad", id: pad.id, note: pad.note })
-                }
-              />
-            )
-          })}
-        </div>
+              return (
+                <PadButton
+                  key={pad.id}
+                  pad={pad}
+                  config={config}
+                  feedbackColor={feedbackColor}
+                  feedbackBehavior={feedbackBehavior}
+                  isMobileView={isMobileView}
+                  sendCommand={sendCommand}
+                  onEdit={() =>
+                    setEditingControl({ kind: "pad", id: pad.id, note: pad.note })
+                  }
+                />
+              )
+            })}
+          </div>
 
-        <div {...stylex.props(styles.sceneColumn)}>
-          {SCENE_BUTTONS.map((button) => {
-            const config = customization.sceneButtons[String(button.note)]
-            const feedbackState = padStates[button.note]
-            const feedbackColor = getFeedbackColor(feedbackState?.velocity)
-            const feedbackBehavior = getFeedbackBehavior(feedbackState?.behaviorChannel)
-
-            return (
-              <SceneButton
+          <div {...stylex.props(styles.sceneColumn)}>
+            {SCENE_BUTTONS.map((button) => (
+              <MappedSceneButton
                 key={button.id}
                 button={button}
-                config={config}
-                feedbackColor={feedbackColor}
-                feedbackBehavior={feedbackBehavior}
+                padStates={padStates}
+                customization={customization}
                 isMobileView={isMobileView}
                 sendCommand={sendCommand}
                 onEdit={() =>
                   setEditingControl({ kind: "scene", id: button.id, note: button.note })
                 }
               />
-            )
-          })}
+            ))}
+          </div>
+
+          <div {...stylex.props(styles.bottomButtonRow)}>
+            {BOTTOM_BUTTONS.map((button) => (
+              <MappedSceneButton
+                key={button.id}
+                button={button}
+                padStates={padStates}
+                customization={customization}
+                isMobileView={isMobileView}
+                sendCommand={sendCommand}
+                onEdit={() =>
+                  setEditingControl({ kind: "scene", id: button.id, note: button.note })
+                }
+              />
+            ))}
+          </div>
+
+          <div {...stylex.props(styles.cornerButton)}>
+            <MappedSceneButton
+              button={CORNER_BUTTON}
+              padStates={padStates}
+              customization={customization}
+              isMobileView={isMobileView}
+              sendCommand={sendCommand}
+              onEdit={() =>
+                setEditingControl({
+                  kind: "scene",
+                  id: CORNER_BUTTON.id,
+                  note: CORNER_BUTTON.note,
+                })
+              }
+            />
+          </div>
         </div>
 
         <div {...stylex.props(styles.faderBank)}>
@@ -132,6 +161,41 @@ export function ApcController({
   )
 }
 
+type MappedSceneButtonProps = {
+  button: (typeof SCENE_BUTTONS)[number]
+  padStates: ApcControllerProps["padStates"]
+  customization: ControllerCustomization
+  isMobileView: boolean
+  sendCommand: (command: MidiCommand) => void
+  onEdit: () => void
+}
+
+function MappedSceneButton({
+  button,
+  padStates,
+  customization,
+  isMobileView,
+  sendCommand,
+  onEdit,
+}: MappedSceneButtonProps) {
+  const config = customization.sceneButtons[String(button.note)]
+  const feedbackState = padStates[button.note]
+  const feedbackColor = getFeedbackColor(feedbackState?.velocity)
+  const feedbackBehavior = getFeedbackBehavior(feedbackState?.behaviorChannel)
+
+  return (
+    <SceneButton
+      button={button}
+      config={config}
+      feedbackColor={feedbackColor}
+      feedbackBehavior={feedbackBehavior}
+      isMobileView={isMobileView}
+      sendCommand={sendCommand}
+      onEdit={onEdit}
+    />
+  )
+}
+
 const styles = stylex.create({
   apcPanel: {
     width: "100%",
@@ -166,10 +230,7 @@ const styles = stylex.create({
     width: "100%",
     minWidth: 0,
     display: "grid",
-    gridTemplateColumns: {
-      default: "minmax(0, 1fr)",
-      "@media (min-width: 900px)": "minmax(352px, 1fr) clamp(72px, 6.4vw, 112px)",
-    },
+    gridTemplateColumns: "minmax(0, 1fr)",
     gap: {
       default: "clamp(6px, 0.9vw, 14px)",
       "@media (max-width: 760px)": "6px",
@@ -186,6 +247,18 @@ const styles = stylex.create({
       "@media (max-width: 760px)": "6px",
     },
     boxSizing: "border-box",
+  },
+  controllerGrid: {
+    minWidth: 0,
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      "@media (min-width: 900px)": "minmax(352px, 1fr) clamp(72px, 6.4vw, 112px)",
+    },
+    gap: {
+      default: "clamp(4px, 0.6vw, 8px)",
+      "@media (max-width: 760px)": "4px",
+    },
   },
   padMatrix: {
     minWidth: 0,
@@ -210,6 +283,22 @@ const styles = stylex.create({
       default: "clamp(4px, 0.6vw, 8px)",
       "@media (max-width: 760px)": "4px",
     },
+  },
+  bottomButtonRow: {
+    minWidth: 0,
+    display: "grid",
+    gridTemplateColumns: {
+      default: "repeat(8, minmax(44px, 1fr))",
+      "@media (max-width: 760px)": "repeat(8, minmax(36px, 1fr))",
+    },
+    gap: {
+      default: "clamp(4px, 0.6vw, 8px)",
+      "@media (max-width: 760px)": "4px",
+    },
+  },
+  cornerButton: {
+    minWidth: 0,
+    display: "grid",
   },
   faderBank: {
     gridColumn: "1 / -1",
