@@ -58,6 +58,16 @@ Do not use the same port for both input and output.
 
 ## Controller layout
 
+The app renders the active MIDI console from a controller model definition in:
+
+```txt
+src/shared/midi-controllers/
+```
+
+The current default model is `akai-apc-mini-mk2`. Additional console models should be
+created as their own files, then added to `CONTROLLER_MODELS` in
+`src/shared/controller-models.ts`.
+
 - 8×8 pad matrix.
 - Pads start at MIDI note `36`.
 - Right-hand scene buttons use MIDI notes `112` through `119`.

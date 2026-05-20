@@ -31,7 +31,7 @@ function normalizeMidiFeedbackState(
       Number(key),
       {
         velocity: Number(value.velocity),
-        behaviorChannel: normalizeApcBehaviorChannel(value.behaviorChannel),
+        behaviorChannel: normalizeMidiBehaviorChannel(value.behaviorChannel),
       },
     ]),
   ) as Record<number, MidiPadFeedback>
@@ -56,7 +56,7 @@ function normalizeMidiFeedbackState(
   }
 }
 
-function normalizeApcBehaviorChannel(value: unknown): number {
+function normalizeMidiBehaviorChannel(value: unknown): number {
   const numeric = Number(value)
   if (Number.isNaN(numeric)) return 6
   return Math.max(0, Math.min(15, Math.round(numeric)))
@@ -120,7 +120,7 @@ export function useControllerSocket() {
         ...current,
         [note]: {
           velocity,
-          behaviorChannel: normalizeApcBehaviorChannel(behaviorChannel),
+          behaviorChannel: normalizeMidiBehaviorChannel(behaviorChannel),
         },
       }))
     },

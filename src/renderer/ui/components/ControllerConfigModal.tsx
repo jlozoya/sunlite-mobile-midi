@@ -2,17 +2,17 @@ import * as stylex from "@stylexjs/stylex"
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react"
 import { Button, Input, Label, TextField } from "react-aria-components"
 import {
-  APC_EXTRA_BUTTONS,
-  FADERS,
-  PAD_GRID,
+  getModelButtons,
   type ButtonCustomization,
   type ControllerCustomization,
   type FaderCustomization,
+  type MidiControllerModel,
 } from "../../../shared/controller-config.ts"
 import type { EditableControl } from "../types"
 
 export type ControllerConfigModalProps = {
   control: EditableControl
+  model: MidiControllerModel
   customization: ControllerCustomization
   midiChannel: number
   onClose: () => void
@@ -21,14 +21,15 @@ export type ControllerConfigModalProps = {
 
 export function ControllerConfigModal({
   control,
+  model,
   customization,
   midiChannel,
   onClose,
   onSave,
 }: ControllerConfigModalProps) {
   const target = useMemo(
-    () => getEditableControlTarget(control, customization),
-    [control, customization],
+    () => getEditableControlTarget(control, model, customization),
+    [control, model, customization],
   )
   const [buttonDraft, setButtonDraft] = useState<ButtonCustomization | null>(
     target.kind === "button" ? target.config : null,
@@ -134,11 +135,11 @@ export function ControllerConfigModal({
             </TextField>
 
             <div {...stylex.props(styles.helpBox)}>
-              <strong>Standard APC Mini mapping</strong>
+              <strong>Standard {model.name} mapping</strong>
               <span>
-                This app uses the fixed APC-style note for this button. Color and lit/off
-                state are controlled only by MIDI OUT feedback from Sunlite. Configure
-                Sunlite to send feedback to <strong>Sunlite Mobile Out</strong>.
+                This app uses the fixed {model.name} note for this button. Color and
+                lit/off state are controlled only by MIDI OUT feedback from Sunlite.
+                Configure Sunlite to send feedback to <strong>Sunlite Mobile Out</strong>.
               </span>
             </div>
           </div>
@@ -155,10 +156,10 @@ export function ControllerConfigModal({
               <Input {...stylex.props(styles.textInput)} onKeyDown={handleSaveOnEnter} />
             </TextField>
             <div {...stylex.props(styles.helpBox)}>
-              <strong>Standard APC Mini mapping</strong>
+              <strong>Standard {model.name} mapping</strong>
               <span>
-                This fader keeps its fixed APC-style CC number. Only the displayed text is
-                editable here.
+                This fader keeps its fixed {model.name} CC number. Only the displayed text
+                is editable here.
               </span>
             </div>
           </div>
@@ -182,10 +183,11 @@ export function ControllerConfigModal({
 
 function getEditableControlTarget(
   control: EditableControl,
+  model: MidiControllerModel,
   customization: ControllerCustomization,
 ) {
   if (control.kind === "pad") {
-    const pad = PAD_GRID.find((item) => item.note === control.note)
+    const pad = model.padGrid.find((item) => item.note === control.note)
     return {
       kind: "button" as const,
       config: customization.pads[String(control.note)] ?? {
@@ -204,7 +206,7 @@ function getEditableControlTarget(
   }
 
   if (control.kind === "scene") {
-    const scene = APC_EXTRA_BUTTONS.find((item) => item.note === control.note)
+    const scene = getModelButtons(model).find((item) => item.note === control.note)
     return {
       kind: "button" as const,
       config: customization.sceneButtons[String(control.note)] ?? {
@@ -222,7 +224,7 @@ function getEditableControlTarget(
     }
   }
 
-  const fader = FADERS.find((item) => item.controller === control.controller)
+  const fader = model.faders.find((item) => item.controller === control.controller)
   return {
     kind: "fader" as const,
     config: customization.faders[String(control.controller)] ?? {

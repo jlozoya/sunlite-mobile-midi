@@ -8,8 +8,8 @@ import {
   getButtonFrameStyle,
   getLedLayerStyle,
   isOffColor,
-  type ApcLedFeedbackBehavior,
-  type ApcMidiLedColor,
+  type MidiLedColor,
+  type MidiLedFeedbackBehavior,
 } from "../controller/ledFeedback"
 import {
   sendStandardButtonNoteOff,
@@ -21,8 +21,8 @@ import type { MidiCommand } from "../types"
 export type PadButtonProps = {
   pad: MidiPadConfig
   config: ButtonCustomization | undefined
-  feedbackColor: ApcMidiLedColor | null
-  feedbackBehavior: ApcLedFeedbackBehavior
+  feedbackColor: MidiLedColor | null
+  feedbackBehavior: MidiLedFeedbackBehavior
   isMobileView: boolean
   sendCommand: (command: MidiCommand) => void
   onEdit: () => void

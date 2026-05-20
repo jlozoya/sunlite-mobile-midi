@@ -255,7 +255,7 @@ function normalizeStoredMidiFeedbackState(value: unknown): MidiFeedbackState {
         if (velocity > 0) {
           normalized[note] = {
             velocity,
-            behaviorChannel: clampApcLedBehaviorChannel(item.behaviorChannel),
+            behaviorChannel: clampMidiLedBehaviorChannel(item.behaviorChannel),
           }
         }
 
@@ -279,7 +279,7 @@ function normalizeStoredMidiFeedbackState(value: unknown): MidiFeedbackState {
   }
 }
 
-function clampApcLedBehaviorChannel(value: unknown): number {
+function clampMidiLedBehaviorChannel(value: unknown): number {
   const numericValue = Number(value)
 
   if (Number.isNaN(numericValue)) {
@@ -325,7 +325,7 @@ function updateMidiFeedbackState(
   if (kind === "noteon") {
     const note = clampMidiValue(message.note)
     const velocity = clampMidiValue(message.velocity)
-    const behaviorChannel = clampApcLedBehaviorChannel(message.channel)
+    const behaviorChannel = clampMidiLedBehaviorChannel(message.channel)
 
     if (velocity <= 0) {
       const nextPadStates = { ...midiFeedbackState.padStates }

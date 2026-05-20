@@ -1,3 +1,5 @@
+import { CONTROLLER_MODELS, DEFAULT_CONTROLLER_MODEL } from "./controller-models.js"
+
 export type PadColor =
   | "off"
   | "red"
@@ -26,11 +28,27 @@ export type MidiSceneButtonConfig = {
   note: number
 }
 
+export type MidiButtonConfig = MidiSceneButtonConfig
+
 export type MidiFaderConfig = {
   id: string
   label: string
   controller: number
   defaultValue: number
+}
+
+export type MidiControllerModel = {
+  id: string
+  name: string
+  description: string
+  padColumns: number
+  bottomButtonColumns: number
+  faderColumns: number
+  padGrid: MidiPadConfig[]
+  sideButtons: MidiButtonConfig[]
+  bottomButtons: MidiButtonConfig[]
+  cornerButton: MidiButtonConfig | null
+  faders: MidiFaderConfig[]
 }
 
 export type ButtonCustomization = {
@@ -57,97 +75,28 @@ export type FaderCustomization = {
 }
 
 export type ControllerCustomization = {
+  modelId: string
   pads: Record<string, ButtonCustomization>
   sceneButtons: Record<string, SceneButtonCustomization>
   faders: Record<string, FaderCustomization>
 }
 
-const NAMED_PAD_LABELS: Record<number, string> = {
-  56: "Blackout",
-  57: "Full On",
-  58: "Scene 1",
-  59: "Scene 2",
-  60: "Scene 3",
-  61: "Scene 4",
-  62: "Strobe",
-  63: "Move 1",
-  48: "Move 2",
-  49: "Chase",
+export { CONTROLLER_MODELS, DEFAULT_CONTROLLER_MODEL }
+export const DEFAULT_CONTROLLER_MODEL_ID = DEFAULT_CONTROLLER_MODEL.id
+
+export function getControllerModel(modelId: string | undefined): MidiControllerModel {
+  return (
+    CONTROLLER_MODELS.find((model) => model.id === modelId) ?? DEFAULT_CONTROLLER_MODEL
+  )
 }
 
-const NAMED_PAD_COLORS: Record<number, PadColor> = {
-  56: "red",
-  57: "amber",
-  58: "purple",
-  59: "purple",
-  60: "purple",
-  61: "purple",
-  62: "yellow",
-  63: "cyan",
-  48: "cyan",
-  49: "green",
+export function getModelButtons(model: MidiControllerModel): MidiButtonConfig[] {
+  return [
+    ...model.sideButtons,
+    ...model.bottomButtons,
+    ...(model.cornerButton ? [model.cornerButton] : []),
+  ]
 }
-
-function getApcPadNote(row: number, column: number): number {
-  return (7 - row) * 8 + column
-}
-
-export const PAD_GRID: MidiPadConfig[] = Array.from({ length: 64 }, (_, index) => {
-  const row = Math.floor(index / 8)
-  const column = index % 8
-  const note = getApcPadNote(row, column)
-
-  return {
-    id: `pad-r${row + 1}-c${column + 1}`,
-    label: NAMED_PAD_LABELS[note] ?? `Pad ${note}`,
-    note,
-    row,
-    column,
-    defaultColor: NAMED_PAD_COLORS[note] ?? "off",
-  }
-})
-
-export const SCENE_BUTTONS: MidiSceneButtonConfig[] = Array.from(
-  { length: 8 },
-  (_, index) => ({
-    id: `scene-launch-${index + 1}`,
-    label: `Scene ${index + 1}`,
-    note: 112 + index,
-  }),
-)
-
-export const BOTTOM_BUTTONS: MidiSceneButtonConfig[] = Array.from(
-  { length: 8 },
-  (_, index) => ({
-    id: `bottom-control-${index + 1}`,
-    label: `Bottom ${index + 1}`,
-    note: 100 + index,
-  }),
-)
-
-export const CORNER_BUTTON: MidiSceneButtonConfig = {
-  id: "corner-control",
-  label: "Corner",
-  note: 122,
-}
-
-export const APC_EXTRA_BUTTONS: MidiSceneButtonConfig[] = [
-  ...SCENE_BUTTONS,
-  ...BOTTOM_BUTTONS,
-  CORNER_BUTTON,
-]
-
-export const FADERS: MidiFaderConfig[] = [
-  { id: "fader-1", label: "Fader 1", controller: 48, defaultValue: 0 },
-  { id: "fader-2", label: "Fader 2", controller: 49, defaultValue: 0 },
-  { id: "fader-3", label: "Fader 3", controller: 50, defaultValue: 0 },
-  { id: "fader-4", label: "Fader 4", controller: 51, defaultValue: 0 },
-  { id: "fader-5", label: "Fader 5", controller: 52, defaultValue: 0 },
-  { id: "fader-6", label: "Fader 6", controller: 53, defaultValue: 0 },
-  { id: "fader-7", label: "Fader 7", controller: 54, defaultValue: 0 },
-  { id: "fader-8", label: "Fader 8", controller: 55, defaultValue: 0 },
-  { id: "fader-9", label: "Master", controller: 56, defaultValue: 127 },
-]
 
 export const PAD_COLOR_OPTIONS: PadColor[] = [
   "off",
@@ -188,8 +137,9 @@ function defaultButtonCustomization(
 }
 
 export const DEFAULT_CONTROLLER_CUSTOMIZATION: ControllerCustomization = {
+  modelId: DEFAULT_CONTROLLER_MODEL.id,
   pads: Object.fromEntries(
-    PAD_GRID.map((pad) => [
+    DEFAULT_CONTROLLER_MODEL.padGrid.map((pad) => [
       String(pad.note),
       defaultButtonCustomization(
         pad.label,
@@ -200,13 +150,13 @@ export const DEFAULT_CONTROLLER_CUSTOMIZATION: ControllerCustomization = {
     ]),
   ),
   sceneButtons: Object.fromEntries(
-    APC_EXTRA_BUTTONS.map((button) => [
+    getModelButtons(DEFAULT_CONTROLLER_MODEL).map((button) => [
       String(button.note),
       defaultButtonCustomization(button.label, button.note, "blue", "white"),
     ]),
   ),
   faders: Object.fromEntries(
-    FADERS.map((fader) => [
+    DEFAULT_CONTROLLER_MODEL.faders.map((fader) => [
       String(fader.controller),
       {
         label: fader.label,
@@ -222,17 +172,25 @@ export const DEFAULT_CONTROLLER_CUSTOMIZATION: ControllerCustomization = {
 export function mergeControllerCustomization(value: unknown): ControllerCustomization {
   const partial =
     value && typeof value === "object" ? (value as Partial<ControllerCustomization>) : {}
+  const model = getControllerModel(partial.modelId)
+  const defaultCustomization =
+    model.id === DEFAULT_CONTROLLER_CUSTOMIZATION.modelId
+      ? DEFAULT_CONTROLLER_CUSTOMIZATION
+      : createDefaultControllerCustomization(model)
 
-  const pads = { ...DEFAULT_CONTROLLER_CUSTOMIZATION.pads }
+  const pads = { ...defaultCustomization.pads }
   for (const [key, customization] of Object.entries(partial.pads ?? {})) {
     if (!customization || typeof customization !== "object") continue
     const current =
       pads[key] ??
       defaultButtonCustomization(`Pad ${key}`, clampMidiNumber(key), "off", "green")
-    pads[key] = mergeButtonCustomization(customization, current)
+    pads[key] = mergeButtonCustomization(
+      refreshLegacyApcMiniPadLabel(customization, current),
+      current,
+    )
   }
 
-  const sceneButtons = { ...DEFAULT_CONTROLLER_CUSTOMIZATION.sceneButtons }
+  const sceneButtons = { ...defaultCustomization.sceneButtons }
   for (const [key, customization] of Object.entries(partial.sceneButtons ?? {})) {
     if (!customization || typeof customization !== "object") continue
     const current =
@@ -241,7 +199,7 @@ export function mergeControllerCustomization(value: unknown): ControllerCustomiz
     sceneButtons[key] = mergeButtonCustomization(customization, current)
   }
 
-  const faders = { ...DEFAULT_CONTROLLER_CUSTOMIZATION.faders }
+  const faders = { ...defaultCustomization.faders }
   for (const [key, customization] of Object.entries(partial.faders ?? {})) {
     if (!customization || typeof customization !== "object") continue
     const current = faders[key] ?? {
@@ -261,7 +219,73 @@ export function mergeControllerCustomization(value: unknown): ControllerCustomiz
     }
   }
 
-  return { pads, sceneButtons, faders }
+  return { modelId: model.id, pads, sceneButtons, faders }
+}
+
+function refreshLegacyApcMiniPadLabel(
+  customization: Partial<ButtonCustomization>,
+  current: ButtonCustomization,
+): Partial<ButtonCustomization> {
+  if (
+    typeof customization.label !== "string" ||
+    current.label === customization.label ||
+    customization.label === `Pad ${current.midiNumber}` ||
+    LEGACY_APC_MINI_PAD_LABELS.has(customization.label)
+  ) {
+    return { ...customization, label: current.label }
+  }
+
+  return customization
+}
+
+const LEGACY_APC_MINI_PAD_LABELS = new Set([
+  "Blackout",
+  "Full On",
+  "Scene 1",
+  "Scene 2",
+  "Scene 3",
+  "Scene 4",
+  "Strobe",
+  "Move 1",
+  "Move 2",
+  "Chase",
+])
+
+function createDefaultControllerCustomization(
+  model: MidiControllerModel,
+): ControllerCustomization {
+  return {
+    modelId: model.id,
+    pads: Object.fromEntries(
+      model.padGrid.map((pad) => [
+        String(pad.note),
+        defaultButtonCustomization(
+          pad.label,
+          pad.note,
+          pad.defaultColor ?? "off",
+          pad.defaultColor && pad.defaultColor !== "off" ? pad.defaultColor : "green",
+        ),
+      ]),
+    ),
+    sceneButtons: Object.fromEntries(
+      getModelButtons(model).map((button) => [
+        String(button.note),
+        defaultButtonCustomization(button.label, button.note, "blue", "white"),
+      ]),
+    ),
+    faders: Object.fromEntries(
+      model.faders.map((fader) => [
+        String(fader.controller),
+        {
+          label: fader.label,
+          controller: fader.controller,
+          minValue: 0,
+          maxValue: 127,
+          defaultValue: fader.defaultValue,
+        },
+      ]),
+    ),
+  }
 }
 
 function mergeButtonCustomization(

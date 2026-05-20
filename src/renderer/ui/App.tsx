@@ -1,8 +1,12 @@
 import * as stylex from "@stylexjs/stylex"
 import { useState } from "react"
 import { Button } from "react-aria-components"
-import type { ControllerCustomization } from "../../shared/controller-config.ts"
-import { ApcController } from "./components/ApcController"
+import {
+  DEFAULT_CONTROLLER_MODEL,
+  getControllerModel,
+  type ControllerCustomization,
+} from "../../shared/controller-config.ts"
+import { MidiController } from "./components/MidiController"
 import { useIsMobileView } from "./hooks/useIsMobileView"
 import { useControllerSocket } from "./useControllerSocket"
 import { useServerStatus } from "./useServerStatus"
@@ -100,6 +104,9 @@ export function App() {
   const shouldShowOpenLoopMidi = Boolean(status?.loopMidiExecutablePath)
   const isControllerReady = Boolean(status?.loopMidiInstalled && status?.midiReady)
   const isMobileView = useIsMobileView()
+  const controllerModel = getControllerModel(
+    controllerCustomization.modelId ?? DEFAULT_CONTROLLER_MODEL.id,
+  )
 
   return (
     <main {...stylex.props(styles.app)}>
@@ -312,7 +319,8 @@ export function App() {
       ) : null}
 
       {isControllerReady ? (
-        <ApcController
+        <MidiController
+          model={controllerModel}
           padStates={padStates}
           ccValues={ccValues}
           sendCommand={sendCommand}

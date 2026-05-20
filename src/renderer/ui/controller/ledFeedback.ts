@@ -1,11 +1,11 @@
 import type { CSSProperties } from "react"
 
-export type ApcLedFeedbackBehavior = {
+export type MidiLedFeedbackBehavior = {
   behavior: string
   style: CSSProperties
 }
 
-export type ApcMidiLedColor = `#${string}`
+export type MidiLedColor = `#${string}`
 
 const APC_LED_BRIGHTNESS: Record<number, number> = {
   0: 0.1,
@@ -17,7 +17,7 @@ const APC_LED_BRIGHTNESS: Record<number, number> = {
   6: 1,
 }
 
-const APC_MINI_RGB_BY_VELOCITY: Record<number, ApcMidiLedColor> = {
+const APC_MINI_RGB_BY_VELOCITY: Record<number, MidiLedColor> = {
   0: "#000000",
   1: "#1E1E1E",
   2: "#7F7F7F",
@@ -151,7 +151,9 @@ const APC_MINI_RGB_BY_VELOCITY: Record<number, ApcMidiLedColor> = {
 const OFF_BORDER_COLOR = "rgba(255, 255, 255, 0.12)"
 const OFF_BACKGROUND_COLOR = "rgba(15, 23, 42, 0)"
 
-export function getFeedbackBehavior(channel: number | undefined): ApcLedFeedbackBehavior {
+export function getFeedbackBehavior(
+  channel: number | undefined,
+): MidiLedFeedbackBehavior {
   const normalizedChannel =
     typeof channel === "number" ? Math.max(0, Math.min(15, Math.round(channel))) : 6
   const opacity = APC_LED_BRIGHTNESS[normalizedChannel] ?? 1
@@ -168,7 +170,7 @@ export function getFeedbackBehavior(channel: number | undefined): ApcLedFeedback
       behavior: `pulse-${normalizedChannel}`,
       style: {
         opacity,
-        animation: `apc-led-pulse ${durations[normalizedChannel]} ease-in-out infinite`,
+        animation: `midi-led-pulse ${durations[normalizedChannel]} ease-in-out infinite`,
       },
     }
   }
@@ -186,7 +188,7 @@ export function getFeedbackBehavior(channel: number | undefined): ApcLedFeedback
       behavior: `blink-${normalizedChannel}`,
       style: {
         opacity,
-        animation: `apc-led-blink ${durations[normalizedChannel]} steps(1, end) infinite`,
+        animation: `midi-led-blink ${durations[normalizedChannel]} steps(1, end) infinite`,
       },
     }
   }
@@ -198,8 +200,8 @@ export function getFeedbackBehavior(channel: number | undefined): ApcLedFeedback
 }
 
 export function getLedLayerStyle(
-  color: ApcMidiLedColor | null,
-  behavior: ApcLedFeedbackBehavior,
+  color: MidiLedColor | null,
+  behavior: MidiLedFeedbackBehavior,
 ): CSSProperties {
   const backgroundColor: CSSProperties["backgroundColor"] =
     color === null || color.toUpperCase() === "#000000" ? OFF_BACKGROUND_COLOR : color
@@ -210,7 +212,7 @@ export function getLedLayerStyle(
   }
 }
 
-export function getButtonFrameStyle(color: ApcMidiLedColor | null): CSSProperties {
+export function getButtonFrameStyle(color: MidiLedColor | null): CSSProperties {
   const borderColor: CSSProperties["borderColor"] =
     color === null || color.toUpperCase() === "#000000" ? OFF_BORDER_COLOR : color
 
@@ -219,13 +221,13 @@ export function getButtonFrameStyle(color: ApcMidiLedColor | null): CSSPropertie
   }
 }
 
-export function getFeedbackColor(value: number | undefined): ApcMidiLedColor | null {
+export function getFeedbackColor(value: number | undefined): MidiLedColor | null {
   if (typeof value !== "number" || Number.isNaN(value)) return null
 
   const velocity = Math.max(0, Math.min(127, Math.round(value)))
   return APC_MINI_RGB_BY_VELOCITY[velocity] ?? null
 }
 
-export function isOffColor(color: ApcMidiLedColor | null): boolean {
+export function isOffColor(color: MidiLedColor | null): boolean {
   return color === null || color.toUpperCase() === "#000000"
 }
