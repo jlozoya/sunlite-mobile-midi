@@ -4,6 +4,12 @@ This project uses `electron-builder` for Windows installers and `electron-update
 
 ## Build an installer
 
+Install the build-only Python dependency once. End users do not need Python:
+
+```powershell
+python -m pip install -r python/requirements-build.txt
+```
+
 ```powershell
 bun install
 bun run dist:win
@@ -11,10 +17,15 @@ bun run dist:win
 
 Artifacts are written to `release/`:
 
-- `Sunlite Mobile MIDI-<version>-win-x64.exe` NSIS installer
-- `Sunlite Mobile MIDI-<version>-win-x64.exe.blockmap`
+- `Sunlite Mobile MIDI-Setup-<version>-x64.exe` NSIS installer
+- `Sunlite Mobile MIDI-Setup-<version>-x64.exe.blockmap`
+- `Sunlite Mobile MIDI-Portable-<version>-x64.exe`
 - `latest.yml`
 - portable build, when enabled
+
+The build also compiles `python/prodj_link_bridge.py` into a standalone Windows executable and packages it under `resources/prodj-link` in the installed application.
+
+On first launch the app provisions the configured MIDI bridge, creates `Sunlite Mobile In` and `Sunlite Mobile Out`, starts it minimized and waits until the ports are usable. Public redistribution of loopMIDI is not permitted without the author's written consent; replace the private-build installer with a licensed virtualMIDI MSI before publishing.
 
 ## App icon
 

@@ -1,4 +1,8 @@
 import type { ControllerCustomization } from "../../shared/controller-config"
+import type {
+  AutomationSocketEvent,
+  AutomationStatus,
+} from "../../shared/automation-types"
 
 export type NetworkUrlCandidate = {
   interfaceName: string
@@ -28,6 +32,8 @@ export type ServerStatus = {
   loopMidiInstallerAvailable: boolean
   loopMidiExecutablePath: string | null
   loopMidiInstalled: boolean
+  midiAutoConfigured: boolean
+  midiProvisioningMessage: string | null
 }
 
 export type MidiInputMessage =
@@ -89,6 +95,9 @@ export type SocketMessage =
       type: "error"
       message: string
     }
+  | AutomationSocketEvent
+
+export type { AutomationStatus }
 
 export type MidiCommand =
   | { type: "note"; note: number; velocity?: number; offDelayMs?: number }

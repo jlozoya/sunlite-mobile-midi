@@ -9,6 +9,7 @@ import type {
   MidiPadFeedback,
   SocketMessage,
 } from "./types"
+import type { AutomationSocketCommand } from "../../shared/automation-types"
 
 type ConnectionState = "connecting" | "online" | "offline" | "error"
 
@@ -272,6 +273,13 @@ export function useControllerSocket() {
     socket.send(JSON.stringify(command))
   }, [])
 
+  const sendAutomationCommand = useCallback((command: AutomationSocketCommand) => {
+    const socket = socketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false
+    socket.send(JSON.stringify(command))
+    return true
+  }, [])
+
   return {
     connectionState,
     lastCommand,
@@ -281,5 +289,6 @@ export function useControllerSocket() {
     controllerCustomization,
     setControllerCustomization,
     sendCommand,
+    sendAutomationCommand,
   }
 }

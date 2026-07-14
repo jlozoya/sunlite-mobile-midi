@@ -7,6 +7,7 @@ import {
   type ControllerCustomization,
 } from "../../shared/controller-config.ts"
 import { MidiController } from "./components/MidiController"
+import { AutomationStudio } from "./automation/AutomationStudio"
 import { useIsMobileView } from "./hooks/useIsMobileView"
 import { useControllerSocket } from "./useControllerSocket"
 import { useServerStatus } from "./useServerStatus"
@@ -22,21 +23,18 @@ export function App() {
     controllerCustomization,
     setControllerCustomization,
     sendCommand,
+    sendAutomationCommand,
   } = useControllerSocket()
   const [setupMessage, setSetupMessage] = useState<string | null>(null)
-  const [setupBusy, setSetupBusy] = useState<"install" | "open" | "refresh" | null>(null)
+  const [setupBusy, setSetupBusy] = useState<"install" | "refresh" | null>(null)
 
-  async function runSetupAction(action: "install" | "open" | "refresh") {
+  async function runSetupAction(action: "install" | "refresh") {
     setSetupBusy(action)
     setSetupMessage(null)
 
     try {
       const endpoint =
-        action === "install"
-          ? "/api/loopmidi/install"
-          : action === "open"
-            ? "/api/loopmidi/open"
-            : "/api/midi/refresh"
+        action === "install" ? "/api/loopmidi/install" : "/api/midi/refresh"
       const response = await fetch(endpoint, { method: "POST" })
       const payload = (await response.json()) as {
         ok?: boolean
@@ -53,18 +51,12 @@ export function App() {
 
       if (action === "install") {
         setSetupMessage(
-          payload.skipped
-            ? "loopMIDI is already installed. Open it and create Sunlite Mobile In and Sunlite Mobile Out if they are not visible yet."
-            : payload.code === 0
-              ? "loopMIDI installer finished. Open loopMIDI and create Sunlite Mobile In and Sunlite Mobile Out if they are not visible yet."
-              : "loopMIDI installer was launched. Finish the installer, then refresh MIDI ports.",
-        )
-      } else if (action === "open") {
-        setSetupMessage(
-          "loopMIDI was opened. Create two ports named Sunlite Mobile In and Sunlite Mobile Out, then refresh MIDI ports.",
+          payload.code === 0 || payload.skipped
+            ? "El puente MIDI quedó configurado automáticamente."
+            : "Windows no pudo terminar la preparación del puente MIDI.",
         )
       } else {
-        setSetupMessage("MIDI ports refreshed.")
+        setSetupMessage("Puertos MIDI actualizados.")
       }
     } catch (error) {
       setSetupMessage(error instanceof Error ? error.message : "Unknown setup error")
@@ -101,7 +93,6 @@ export function App() {
     : connectionState === "connecting"
       ? "Connecting"
       : "Offline"
-  const shouldShowOpenLoopMidi = Boolean(status?.loopMidiExecutablePath)
   const isControllerReady = Boolean(status?.loopMidiInstalled && status?.midiReady)
   const isMobileView = useIsMobileView()
   const controllerModel = getControllerModel(
@@ -173,12 +164,10 @@ export function App() {
 
           <section {...stylex.props(styles.panel)}>
             <div {...stylex.props(styles.sectionHeader)}>
-              <h2 {...stylex.props(styles.sectionTitle)}>Setup</h2>
+              <h2 {...stylex.props(styles.sectionTitle)}>Conexión automática</h2>
               <p {...stylex.props(styles.sectionDescription)}>
-                Configure two loopMIDI ports once. The controller appears after{" "}
-                <strong>Sunlite Mobile In</strong> is ready.{" "}
-                <strong>Sunlite Mobile Out</strong> is optional and only used for
-                feedback.
+                La aplicación prepara y abre por sí sola los puertos necesarios para
+                comunicarse con Sunlite.
               </p>
             </div>
 
@@ -186,17 +175,15 @@ export function App() {
               {!status ? (
                 <div {...stylex.props(styles.currentStep)}>
                   <div {...stylex.props(styles.setupStepCopy)}>
-                    <strong>Loading setup status</strong>
-                    <span>
-                      Checking loopMIDI, available MIDI ports, and LAN controller URL.
-                    </span>
+                    <strong>Preparando la conexión</strong>
+                    <span>Comprobando el puente MIDI y los puertos locales.</span>
                   </div>
                 </div>
               ) : !status.loopMidiInstalled ? (
                 <div {...stylex.props(styles.currentStep, styles.currentStepWarning)}>
                   <div {...stylex.props(styles.setupStepCopy)}>
-                    <strong>1. Install loopMIDI</strong>
-                    <span>Install the virtual MIDI driver first.</span>
+                    <strong>Se necesita preparar el puente MIDI</strong>
+                    <span>Solo tendrás que aceptar el permiso de Windows.</span>
                   </div>
                   {status.loopMidiInstallerAvailable ? (
                     <Button
@@ -204,87 +191,71 @@ export function App() {
                       isDisabled={setupBusy !== null}
                       onPress={() => void runSetupAction("install")}
                     >
-                      {setupBusy === "install" ? "Installing..." : "Install loopMIDI"}
+                      {setupBusy === "install"
+                        ? "Preparando..."
+                        : "Preparar automáticamente"}
                     </Button>
                   ) : (
                     <span {...stylex.props(styles.setupUnavailable)}>
-                      loopMIDI installer is not bundled with this app.
+                      El componente MIDI no está incluido en esta compilación.
                     </span>
                   )}
                 </div>
               ) : !status.midiReady ? (
                 <div {...stylex.props(styles.currentStep, styles.currentStepWarning)}>
                   <div {...stylex.props(styles.setupStepCopy)}>
-                    <strong>2. Create the Sunlite Mobile MIDI ports</strong>
+                    <strong>Terminando la conexión MIDI</strong>
                     <span>
-                      Open loopMIDI. Create <strong>Sunlite Mobile In</strong> first.
-                      Create <strong>Sunlite Mobile Out</strong> only if you want feedback
-                      from Sunlite. Then refresh.
+                      La configuración automática no terminó correctamente. Puedes volver
+                      a intentarlo sin crear puertos manualmente.
                     </span>
                   </div>
                   <div {...stylex.props(styles.setupActions)}>
-                    {shouldShowOpenLoopMidi ? (
-                      <Button
-                        {...stylex.props(styles.setupButton)}
-                        isDisabled={setupBusy !== null}
-                        onPress={() => void runSetupAction("open")}
-                      >
-                        {setupBusy === "open" ? "Opening..." : "Open loopMIDI"}
-                      </Button>
-                    ) : (
-                      <span {...stylex.props(styles.setupUnavailable)}>
-                        loopMIDI executable not found.
-                      </span>
-                    )}
+                    <Button
+                      {...stylex.props(styles.setupButton)}
+                      isDisabled={setupBusy !== null}
+                      onPress={() => void runSetupAction("install")}
+                    >
+                      {setupBusy === "install" ? "Preparando..." : "Reintentar"}
+                    </Button>
                     <Button
                       {...stylex.props(styles.setupButton, styles.setupButtonSecondary)}
                       isDisabled={setupBusy !== null || isLoading}
                       onPress={() => void runSetupAction("refresh")}
                     >
                       {setupBusy === "refresh" || isLoading
-                        ? "Refreshing..."
-                        : "Refresh MIDI ports"}
+                        ? "Actualizando..."
+                        : "Comprobar puertos"}
                     </Button>
                   </div>
                 </div>
               ) : (
                 <div {...stylex.props(styles.currentStep, styles.currentStepReady)}>
                   <div {...stylex.props(styles.setupStepCopy)}>
-                    <strong>Setup complete</strong>
+                    <strong>Puente MIDI listo</strong>
                     <span>
-                      MIDI to Sunlite <strong>{status.midiOutputName}</strong> is ready.{" "}
+                      Sunlite puede recibir comandos por{" "}
+                      <strong>{status.midiOutputName}</strong>.{" "}
                       {status.feedbackReady ? (
                         <>
-                          Feedback from Sunlite <strong>{status.midiInputName}</strong> is
-                          enabled.{" "}
+                          El retorno por <strong>{status.midiInputName}</strong> está
+                          disponible.{" "}
                         </>
                       ) : (
-                        <>
-                          MIDI feedback is disabled or missing; buttons stay unlit until
-                          Sunlite MIDI OUT is configured.{" "}
-                        </>
+                        <>El retorno visual es opcional. </>
                       )}
-                      In Sunlite, use MIDI channel <strong>{status.midiChannel}</strong>.
+                      Canal MIDI <strong>{status.midiChannel}</strong>.
                     </span>
                   </div>
                   <div {...stylex.props(styles.setupActions)}>
-                    {shouldShowOpenLoopMidi ? (
-                      <Button
-                        {...stylex.props(styles.setupButton)}
-                        isDisabled={setupBusy !== null}
-                        onPress={() => void runSetupAction("open")}
-                      >
-                        {setupBusy === "open" ? "Opening..." : "Open loopMIDI"}
-                      </Button>
-                    ) : null}
                     <Button
                       {...stylex.props(styles.setupButton, styles.setupButtonSecondary)}
                       isDisabled={setupBusy !== null || isLoading}
                       onPress={() => void runSetupAction("refresh")}
                     >
                       {setupBusy === "refresh" || isLoading
-                        ? "Refreshing..."
-                        : "Refresh MIDI ports"}
+                        ? "Actualizando..."
+                        : "Comprobar"}
                     </Button>
                   </div>
                 </div>
@@ -316,6 +287,10 @@ export function App() {
             ) : null}
           </section>
         </section>
+      ) : null}
+
+      {!isMobileView ? (
+        <AutomationStudio sendAutomationCommand={sendAutomationCommand} />
       ) : null}
 
       {isControllerReady ? (

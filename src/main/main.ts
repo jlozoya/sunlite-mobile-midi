@@ -1,4 +1,4 @@
-import { app as electronApp, BrowserWindow, shell } from "electron"
+import { app as electronApp, BrowserWindow, session, shell } from "electron"
 import electronUpdater from "electron-updater"
 import { spawn } from "node:child_process"
 import fs from "node:fs"
@@ -9,11 +9,17 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import QRCode from "qrcode"
+import type {
+  AutomationMidiCommand,
+  AutomationSocketCommand,
+} from "../shared/automation-types.js"
 import {
   DEFAULT_CONTROLLER_CUSTOMIZATION,
   mergeControllerCustomization,
   type ControllerCustomization,
 } from "../shared/controller-config.js"
+import { AutomationEngine } from "./automation/automation-engine.js"
+import { ProDjLinkSidecar } from "./automation/prodj-link-sidecar.js"
 import { WebSocketServer, type WebSocket } from "ws"
 
 type AutoUpdaterLike = {
@@ -47,6 +53,8 @@ const DEFAULT_MIDI_INPUT_NAME = "Sunlite Mobile Out"
 const MIDI_CHANNEL_ZERO_BASED = Number(process.env.MIDI_CHANNEL || 0)
 const MIDI_OUTPUT_NAME = process.env.MIDI_OUTPUT_NAME || DEFAULT_MIDI_OUTPUT_NAME
 const MIDI_INPUT_NAME = process.env.MIDI_INPUT_NAME || DEFAULT_MIDI_INPUT_NAME
+const LOOP_MIDI_REGISTRY_KEY = "HKCU\\Software\\Tobias Erichsen\\loopMIDI"
+const LOOP_MIDI_PORTS_REGISTRY_KEY = `${LOOP_MIDI_REGISTRY_KEY}\\Ports`
 
 const rendererDir = path.resolve(__dirname, "../renderer")
 
@@ -146,6 +154,8 @@ type ServerStatus = {
   loopMidiInstallerAvailable: boolean
   loopMidiExecutablePath: string | null
   loopMidiInstalled: boolean
+  midiAutoConfigured: boolean
+  midiProvisioningMessage: string | null
 }
 
 type IncomingCommand =
@@ -175,6 +185,10 @@ let midiConnection: MidiConnection | null = null
 let mainWindow: BrowserWindow | null = null
 let controllerCustomization: ControllerCustomization = DEFAULT_CONTROLLER_CUSTOMIZATION
 let feedbackDisabledReason: string | null = null
+let automationEngine: AutomationEngine | null = null
+let prodjLinkSidecar: ProDjLinkSidecar | null = null
+let midiAutoConfigured = false
+let midiProvisioningMessage: string | null = null
 
 type MidiGuardEvent = { at: number; fingerprint: string }
 type MidiPadFeedback = {
@@ -716,6 +730,11 @@ function refreshMidiConnection() {
         const record = midiMessageToRecord(message)
         if (!shouldAcceptMidiFeedback("noteon", record)) return
         updateMidiFeedbackState("noteon", record)
+        automationEngine?.recordFeedback({
+          type: "noteon",
+          note: clampMidiValue(message.note),
+          velocity: clampMidiValue(message.velocity),
+        })
         broadcastToAll({ event: "midi-input", message: { kind: "noteon", ...message } })
         queueMidiFeedbackStateBroadcast()
       })
@@ -724,6 +743,11 @@ function refreshMidiConnection() {
         const record = midiMessageToRecord(message)
         if (!shouldAcceptMidiFeedback("noteoff", record)) return
         updateMidiFeedbackState("noteoff", record)
+        automationEngine?.recordFeedback({
+          type: "noteoff",
+          note: clampMidiValue(message.note),
+          velocity: clampMidiValue(message.velocity),
+        })
         broadcastToAll({ event: "midi-input", message: { kind: "noteoff", ...message } })
         queueMidiFeedbackStateBroadcast()
       })
@@ -732,6 +756,11 @@ function refreshMidiConnection() {
         const record = midiMessageToRecord(message)
         if (!shouldAcceptMidiFeedback("cc", record)) return
         updateMidiFeedbackState("cc", record)
+        automationEngine?.recordFeedback({
+          type: "cc",
+          controller: clampMidiValue(message.controller),
+          value: clampMidiValue(message.value),
+        })
         broadcastToAll({ event: "midi-input", message: { kind: "cc", ...message } })
         queueMidiFeedbackStateBroadcast()
       })
@@ -760,6 +789,8 @@ function refreshMidiConnection() {
       feedbackDisabledReason,
       loopMidiExecutablePath,
       loopMidiInstalled: Boolean(loopMidiExecutablePath),
+      midiAutoConfigured,
+      midiProvisioningMessage,
     }
   }
 
@@ -813,11 +844,11 @@ function findLoopMidiExecutable(): string | null {
   return candidates.find((candidate) => candidate && fs.existsSync(candidate)) ?? null
 }
 
-function runProcess(command: string, args: string[]) {
+function runProcess(command: string, args: string[], windowsHide = true) {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>(
     (resolve, reject) => {
       const child = spawn(command, args, {
-        windowsHide: false,
+        windowsHide,
         shell: false,
       })
 
@@ -842,11 +873,106 @@ function runProcess(command: string, args: string[]) {
   )
 }
 
+async function configureLoopMidiPorts() {
+  if (process.platform !== "win32") return
+
+  const settings = [
+    [LOOP_MIDI_REGISTRY_KEY, "StartMinimized", "1"],
+    [LOOP_MIDI_PORTS_REGISTRY_KEY, MIDI_OUTPUT_NAME, "1"],
+    [LOOP_MIDI_PORTS_REGISTRY_KEY, MIDI_INPUT_NAME, "1"],
+  ] as const
+
+  for (const [key, name, value] of settings) {
+    const result = await runProcess("reg.exe", [
+      "ADD",
+      key,
+      "/v",
+      name,
+      "/t",
+      "REG_DWORD",
+      "/d",
+      value,
+      "/f",
+    ])
+
+    if (result.code !== 0) {
+      throw new Error(
+        `Could not configure the MIDI port "${name}": ${result.stderr || result.stdout}`,
+      )
+    }
+  }
+}
+
+function startLoopMidiInBackground(executablePath: string) {
+  spawn(executablePath, [], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  }).unref()
+}
+
+async function waitForMidiPorts(timeoutMs = 8000): Promise<boolean> {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const availableOutputs = getAvailableMidiOutputs()
+    if (availableOutputs.includes(MIDI_OUTPUT_NAME)) return true
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+
+  return false
+}
+
+async function provisionMidiBridge(options: { installIfMissing: boolean }) {
+  midiAutoConfigured = false
+  midiProvisioningMessage = "Preparing the local MIDI bridge..."
+
+  let executablePath = findLoopMidiExecutable()
+
+  if (!executablePath && options.installIfMissing) {
+    const installerPath = getLoopMidiInstallerPath()
+    if (!fs.existsSync(installerPath)) {
+      throw new Error("The bundled MIDI bridge installer is missing.")
+    }
+
+    const installResult = await runProcess(installerPath, ["/quiet", "/norestart"], false)
+    if (installResult.code !== 0) {
+      throw new Error(
+        installResult.stderr ||
+          installResult.stdout ||
+          `MIDI bridge installation exited with code ${installResult.code}.`,
+      )
+    }
+
+    executablePath = findLoopMidiExecutable()
+  }
+
+  if (!executablePath) {
+    midiProvisioningMessage = "The local MIDI bridge is not installed."
+    return false
+  }
+
+  await configureLoopMidiPorts()
+  startLoopMidiInBackground(executablePath)
+
+  if (!(await waitForMidiPorts())) {
+    midiProvisioningMessage =
+      "The MIDI bridge is installed but did not expose its ports. Restart Windows and reopen the application."
+    return false
+  }
+
+  midiAutoConfigured = true
+  midiProvisioningMessage =
+    "Local MIDI bridge ready. Sunlite can use the Sunlite Mobile In port."
+  refreshMidiConnection()
+  return true
+}
+
 async function installLoopMidi() {
   const existingExecutablePath = findLoopMidiExecutable()
 
   if (existingExecutablePath) {
-    refreshMidiConnection()
+    await provisionMidiBridge({ installIfMissing: false })
     return {
       code: 0,
       stdout: existingExecutablePath,
@@ -861,9 +987,10 @@ async function installLoopMidi() {
     throw new Error(`loopMIDI installer was not found at: ${installerPath}`)
   }
 
-  const result = await runProcess(installerPath, ["/quiet", "/norestart"])
-
-  refreshMidiConnection()
+  const result = await runProcess(installerPath, ["/quiet", "/norestart"], false)
+  if (result.code === 0) {
+    await provisionMidiBridge({ installIfMissing: false })
+  }
 
   return result
 }
@@ -941,6 +1068,12 @@ function handleCommand(payload: IncomingCommand) {
   throw new Error("Unsupported MIDI command.")
 }
 
+function isAutomationSocketCommand(value: unknown): value is AutomationSocketCommand {
+  if (!value || typeof value !== "object" || !("type" in value)) return false
+  const type = (value as { type?: unknown }).type
+  return type === "automation-audio-frame" || type === "automation-audio-disconnected"
+}
+
 function isPortInUseError(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -1001,9 +1134,34 @@ async function startControllerServer(): Promise<ServerStatus> {
   loadControllerCustomization()
   loadMidiFeedbackState()
 
+  try {
+    await provisionMidiBridge({ installIfMissing: electronApp.isPackaged })
+  } catch (error) {
+    midiAutoConfigured = false
+    midiProvisioningMessage =
+      error instanceof Error ? error.message : "Automatic MIDI setup failed."
+    console.warn("Automatic MIDI provisioning failed", error)
+  }
+
   const appServer = express()
   const httpServer = http.createServer(appServer)
   const wss = new WebSocketServer({ server: httpServer })
+
+  activeWebSocketServer = wss
+  automationEngine = new AutomationEngine(
+    electronApp.getPath("userData"),
+    broadcastToAll,
+    (command: AutomationMidiCommand) => handleCommand(command as IncomingCommand),
+  )
+
+  const projectRoot = path.resolve(__dirname, "../..")
+  prodjLinkSidecar = new ProDjLinkSidecar({
+    isPackaged: electronApp.isPackaged,
+    resourcesPath: process.resourcesPath,
+    projectRoot,
+    onEvent: (event) => automationEngine?.handleDjLinkEvent(event),
+    onStatus: (status) => automationEngine?.setBridgeStatus(status),
+  })
 
   appServer.use(express.json())
   appServer.use(express.static(rendererDir))
@@ -1070,16 +1228,79 @@ async function startControllerServer(): Promise<ServerStatus> {
     response.json({ ok: true, state: cloneMidiFeedbackState() })
   })
 
+  appServer.get("/api/automation/status", (_request, response) => {
+    response.json(automationEngine?.getStatus())
+  })
+
+  appServer.put("/api/automation/mode", (request, response) => {
+    try {
+      response.json(automationEngine?.setMode(request.body?.mode))
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : "Invalid automation mode",
+      })
+    }
+  })
+
+  appServer.put("/api/automation/settings", (request, response) => {
+    try {
+      response.json(automationEngine?.updateSettings(request.body))
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : "Invalid automation settings",
+      })
+    }
+  })
+
+  appServer.post("/api/automation/session/start", (request, response) => {
+    response.json(automationEngine?.startSession(request.body?.name))
+  })
+
+  appServer.post("/api/automation/session/stop", (_request, response) => {
+    response.json(automationEngine?.stopSession())
+  })
+
+  appServer.post("/api/automation/train", (_request, response) => {
+    response.json(automationEngine?.train())
+  })
+
+  appServer.get("/api/automation/sessions/:id", (request, response) => {
+    response.json({
+      id: request.params.id,
+      events: automationEngine?.readTimeline(request.params.id) ?? [],
+    })
+  })
+
+  appServer.post("/api/automation/examples/:id/exclude", (request, response) => {
+    try {
+      response.json(automationEngine?.excludeTrainingExample(request.params.id))
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : "Invalid example",
+      })
+    }
+  })
+
+  appServer.post("/api/automation/prodj-link/restart", (_request, response) => {
+    prodjLinkSidecar?.stop()
+    prodjLinkSidecar?.start()
+    response.json(automationEngine?.getStatus())
+  })
+
   appServer.get("*", (_request, response) => {
     response.sendFile(path.join(rendererDir, "index.html"))
   })
-
-  activeWebSocketServer = wss
 
   wss.on("connection", (socket) => {
     refreshMidiConnection()
     safeSend(socket, { event: "controller-config", config: controllerCustomization })
     safeSend(socket, { event: "midi-feedback-state", state: cloneMidiFeedbackState() })
+    if (automationEngine) {
+      safeSend(socket, {
+        event: "automation-status",
+        status: automationEngine.getStatus(),
+      })
+    }
 
     setTimeout(
       () =>
@@ -1120,8 +1341,20 @@ async function startControllerServer(): Promise<ServerStatus> {
 
     socket.on("message", (rawMessage) => {
       try {
-        const payload = JSON.parse(rawMessage.toString()) as IncomingCommand
-        const result = handleCommand(payload)
+        const payload = JSON.parse(rawMessage.toString()) as unknown
+
+        if (isAutomationSocketCommand(payload)) {
+          if (payload.type === "automation-audio-frame") {
+            automationEngine?.handleAudioFrame(payload.frame)
+          } else {
+            automationEngine?.handleAudioDisconnected()
+          }
+          return
+        }
+
+        const midiPayload = payload as IncomingCommand
+        const result = handleCommand(midiPayload)
+        automationEngine?.recordManualCommand(midiPayload)
 
         safeSend(socket, { event: "command-result", command: result })
         broadcast(wss, { event: "last-command", command: result })
@@ -1168,9 +1401,12 @@ async function startControllerServer(): Promise<ServerStatus> {
     loopMidiInstallerAvailable: fs.existsSync(loopMidiInstallerPath),
     loopMidiExecutablePath,
     loopMidiInstalled: Boolean(loopMidiExecutablePath),
+    midiAutoConfigured,
+    midiProvisioningMessage,
   }
 
   refreshMidiConnection()
+  prodjLinkSidecar.start()
 
   return serverStatus
 }
@@ -1201,6 +1437,20 @@ async function createWindow(status: ServerStatus) {
 
 electronApp.whenReady().then(async () => {
   try {
+    session.defaultSession.setPermissionRequestHandler(
+      (webContents, permission, callback) => {
+        const currentUrl = webContents.getURL()
+        let isLocalController = false
+        try {
+          const parsed = new URL(currentUrl)
+          isLocalController =
+            parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost"
+        } catch {
+          isLocalController = false
+        }
+        callback(permission === "media" && isLocalController)
+      },
+    )
     const status = await startControllerServer()
     await createWindow(status)
     configureAutoUpdates()
@@ -1230,6 +1480,8 @@ electronApp.whenReady().then(async () => {
 })
 
 electronApp.on("window-all-closed", () => {
+  prodjLinkSidecar?.stop()
+  if (automationEngine?.getStatus().recording) automationEngine.stopSession()
   closeMidiConnection()
 
   if (process.platform !== "darwin") {

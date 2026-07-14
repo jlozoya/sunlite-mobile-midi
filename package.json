@@ -1,6 +1,6 @@
 {
   "name": "sunlite-mobile-midi",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Installable and update-ready mobile MIDI controller for Sunlite Suite 2.",
   "author": "jlozoya",
@@ -11,15 +11,17 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "test:automation": "bun run build:main && node tests/automation-smoke.mjs",
     "check": "bun run format:check && bun run typecheck",
     "build:main": "tsc -p tsconfig.node.json",
     "build:renderer": "vite build",
+    "build:sidecar": "powershell -ExecutionPolicy Bypass -File scripts/build-python-sidecar.ps1",
     "build": "bun run format:check && bun run build:main && bun run build:renderer",
     "start": "bun run build && electron dist/main/main.js",
     "pack": "bun run build && electron-builder --dir",
     "dist": "bun run build && electron-builder",
-    "dist:win": "bun run build && electron-builder --win",
-    "release:win": "bun run build && electron-builder --win --publish never"
+    "dist:win": "bun run build:sidecar && bun run build && electron-builder --win",
+    "release:win": "bun run build:sidecar && bun run build && electron-builder --win --publish never"
   },
   "dependencies": {
     "@stylexjs/stylex": "^0.9.3",
@@ -77,6 +79,7 @@
       ]
     },
     "nsis": {
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowElevation": true,
@@ -85,6 +88,9 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Sunlite Mobile MIDI",
       "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
     },
     "extraResources": [
       {
@@ -101,9 +107,15 @@
       {
         "from": "resources/icon.ico",
         "to": "icon.ico"
+      },
+      {
+        "from": "resources/prodj-link",
+        "to": "prodj-link",
+        "filter": [
+          "prodj-link-bridge.exe"
+        ]
       }
     ],
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "publish": [
       {
         "provider": "generic",
