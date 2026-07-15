@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Button } from "react-aria-components"
 import {
   DEFAULT_CONTROLLER_MODEL,
@@ -11,6 +11,22 @@ import { AutomationStudio } from "./automation/AutomationStudio"
 import { useIsMobileView } from "./hooks/useIsMobileView"
 import { useControllerSocket } from "./useControllerSocket"
 import { useServerStatus } from "./useServerStatus"
+
+type DesktopTab = "controller" | "automation" | "connection"
+
+const DESKTOP_TABS: Array<{
+  id: DesktopTab
+  label: string
+  description: string
+}> = [
+  { id: "controller", label: "Controlador", description: "Escenas y faders MIDI" },
+  {
+    id: "automation",
+    label: "Automatización",
+    description: "Audio, CDJ y entrenamiento",
+  },
+  { id: "connection", label: "Conexión", description: "Sunlite, red y teléfono" },
+]
 
 export function App() {
   const { status, error: statusError, isLoading, refreshStatus } = useServerStatus()
@@ -27,6 +43,8 @@ export function App() {
   } = useControllerSocket()
   const [setupMessage, setSetupMessage] = useState<string | null>(null)
   const [setupBusy, setSetupBusy] = useState<"install" | "refresh" | null>(null)
+  const [activeDesktopTab, setActiveDesktopTab] = useState<DesktopTab>("controller")
+  const initialTabSelected = useRef(false)
 
   async function runSetupAction(action: "install" | "refresh") {
     setSetupBusy(action)
@@ -47,7 +65,11 @@ export function App() {
         throw new Error(payload.message ?? `Setup action failed: ${response.status}`)
       }
 
-      await refreshStatus()
+      const refreshedStatus = await refreshStatus()
+
+      if (refreshedStatus?.loopMidiInstalled && refreshedStatus.midiReady) {
+        setActiveDesktopTab("controller")
+      }
 
       if (action === "install") {
         setSetupMessage(
@@ -99,6 +121,12 @@ export function App() {
     controllerCustomization.modelId ?? DEFAULT_CONTROLLER_MODEL.id,
   )
 
+  useEffect(() => {
+    if (!status || initialTabSelected.current) return
+    initialTabSelected.current = true
+    setActiveDesktopTab(isControllerReady ? "controller" : "connection")
+  }, [isControllerReady, status])
+
   return (
     <main {...stylex.props(styles.app)}>
       <header {...stylex.props(styles.header)}>
@@ -121,6 +149,46 @@ export function App() {
       </header>
 
       {!isMobileView ? (
+        <nav {...stylex.props(styles.tabs)} aria-label="Secciones de la aplicación">
+          <div {...stylex.props(styles.tabList)} role="tablist">
+            {DESKTOP_TABS.map((tab) => {
+              const isActive = activeDesktopTab === tab.id
+              const needsAttention = tab.id === "connection" && !isControllerReady
+
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  {...stylex.props(
+                    styles.tab,
+                    isActive && styles.tabActive,
+                    needsAttention && styles.tabAttention,
+                  )}
+                  onClick={() => setActiveDesktopTab(tab.id)}
+                >
+                  <span {...stylex.props(styles.tabLabel)}>{tab.label}</span>
+                  <span {...stylex.props(styles.tabDescription)}>{tab.description}</span>
+                </button>
+              )
+            })}
+          </div>
+          <div {...stylex.props(styles.tabConnectionSummary)}>
+            <span
+              {...stylex.props(
+                styles.tabConnectionDot,
+                isControllerReady
+                  ? styles.tabConnectionDotReady
+                  : styles.tabConnectionDotWarning,
+              )}
+            />
+            {isControllerReady ? "MIDI listo" : "Configuración pendiente"}
+          </div>
+        </nav>
+      ) : null}
+
+      {!isMobileView && activeDesktopTab === "connection" ? (
         <section {...stylex.props(styles.heroGrid)}>
           <section {...stylex.props(styles.panel, styles.qrPanel)}>
             <div {...stylex.props(styles.sectionHeader)}>
@@ -289,45 +357,54 @@ export function App() {
         </section>
       ) : null}
 
-      {!isMobileView ? (
+      {!isMobileView && activeDesktopTab === "automation" ? (
         <AutomationStudio sendAutomationCommand={sendAutomationCommand} />
       ) : null}
 
-      {isControllerReady ? (
-        <MidiController
-          model={controllerModel}
-          padStates={padStates}
-          ccValues={ccValues}
-          sendCommand={sendCommand}
-          lastCommand={lastCommand}
-          customization={controllerCustomization}
-          onSaveCustomization={saveControllerCustomization}
-          isMobileView={isMobileView}
-          feedbackReady={Boolean(status?.feedbackReady)}
-          feedbackWarning={status?.feedbackDisabledReason ?? null}
-          midiChannel={status?.midiChannel ?? 1}
-        />
-      ) : (
-        <section {...stylex.props(styles.panel, styles.controlsLockedPanel)}>
-          <div {...stylex.props(styles.sectionHeader)}>
-            <h2 {...stylex.props(styles.sectionTitle)}>MIDI controls locked</h2>
-            <p {...stylex.props(styles.sectionDescription)}>
-              {isMobileView ? (
-                <>
-                  Finish loopMIDI and Sunlite setup on the computer first. This mobile
-                  view only shows the controller once the MIDI output port is ready.
-                </>
-              ) : (
-                <>
-                  The controller appears after loopMIDI is installed and{" "}
-                  <strong>Sunlite Mobile In</strong> is detected.{" "}
-                  <strong>Sunlite Mobile Out</strong> is optional for feedback.
-                </>
-              )}
-            </p>
-          </div>
-        </section>
-      )}
+      {isMobileView || activeDesktopTab === "controller" ? (
+        isControllerReady ? (
+          <MidiController
+            model={controllerModel}
+            padStates={padStates}
+            ccValues={ccValues}
+            sendCommand={sendCommand}
+            lastCommand={lastCommand}
+            customization={controllerCustomization}
+            onSaveCustomization={saveControllerCustomization}
+            isMobileView={isMobileView}
+            feedbackReady={Boolean(status?.feedbackReady)}
+            feedbackWarning={status?.feedbackDisabledReason ?? null}
+            midiChannel={status?.midiChannel ?? 1}
+          />
+        ) : (
+          <section {...stylex.props(styles.panel, styles.controlsLockedPanel)}>
+            <div {...stylex.props(styles.sectionHeader)}>
+              <h2 {...stylex.props(styles.sectionTitle)}>Controlador no disponible</h2>
+              <p {...stylex.props(styles.sectionDescription)}>
+                {isMobileView ? (
+                  <>
+                    Termina la conexión con Sunlite desde la computadora. El controlador
+                    aparecerá aquí en cuanto el puerto MIDI esté listo.
+                  </>
+                ) : (
+                  <>
+                    La conexión MIDI todavía no está lista. La aplicación puede preparar
+                    los puertos automáticamente desde la pestaña Conexión.
+                  </>
+                )}
+              </p>
+            </div>
+            {!isMobileView ? (
+              <Button
+                {...stylex.props(styles.setupButton)}
+                onPress={() => setActiveDesktopTab("connection")}
+              >
+                Ir a Conexión
+              </Button>
+            ) : null}
+          </section>
+        )
+      ) : null}
     </main>
   )
 }
@@ -397,6 +474,84 @@ const styles = stylex.create({
     borderColor: "rgba(239, 68, 68, 0.34)",
     backgroundColor: "rgba(239, 68, 68, 0.12)",
     color: "#fecaca",
+  },
+  tabs: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "14px",
+    marginTop: "16px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    borderRadius: "20px",
+    backgroundColor: "rgba(18, 22, 38, 0.82)",
+    boxShadow: "0 12px 36px rgba(0, 0, 0, 0.22)",
+    padding: "7px",
+  },
+  tabList: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(150px, 1fr))",
+    gap: "6px",
+    flex: 1,
+  },
+  tab: {
+    position: "relative",
+    display: "grid",
+    gap: "3px",
+    minWidth: 0,
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "transparent",
+    borderRadius: "14px",
+    backgroundColor: "transparent",
+    color: "#94a3b8",
+    cursor: "pointer",
+    padding: "11px 14px",
+    textAlign: "left",
+    transition: "background-color 150ms ease, border-color 150ms ease, color 150ms ease",
+  },
+  tabActive: {
+    borderColor: "rgba(139, 92, 246, 0.5)",
+    backgroundColor: "rgba(139, 92, 246, 0.16)",
+    color: "#f5f3ff",
+  },
+  tabAttention: {
+    color: "#fcd34d",
+  },
+  tabLabel: {
+    fontSize: "0.92rem",
+    fontWeight: 900,
+  },
+  tabDescription: {
+    color: "#94a3b8",
+    fontSize: "0.72rem",
+    lineHeight: 1.3,
+  },
+  tabConnectionSummary: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flexShrink: 0,
+    padding: "0 12px 0 6px",
+    color: "#cbd5e1",
+    fontSize: "0.78rem",
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  },
+  tabConnectionDot: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "999px",
+    boxShadow: "0 0 12px currentColor",
+  },
+  tabConnectionDotReady: {
+    backgroundColor: "#34d399",
+    color: "#34d399",
+  },
+  tabConnectionDotWarning: {
+    backgroundColor: "#fbbf24",
+    color: "#fbbf24",
   },
   heroGrid: {
     display: "grid",
