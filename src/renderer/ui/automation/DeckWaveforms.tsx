@@ -112,8 +112,11 @@ export function DeckWaveforms({ waveforms }: Props) {
         </div>
       ) : (
         <div {...stylex.props(styles.empty)}>
-          Carga en un CDJ un track analizado por rekordbox para recibir su waveform por
-          Ethernet.
+          <strong>Para recibir waveforms</strong>
+          <span>
+            Conecta el PC y los CDJ al mismo switch Ethernet, carga un track analizado por
+            rekordbox y pulsa Play en el deck.
+          </span>
         </div>
       )}
     </section>
@@ -219,6 +222,8 @@ const styles = stylex.create({
     fontVariantNumeric: "tabular-nums",
   },
   empty: {
+    display: "grid",
+    gap: "5px",
     borderRadius: "12px",
     backgroundColor: "rgba(15, 23, 42, 0.54)",
     color: "#64748b",

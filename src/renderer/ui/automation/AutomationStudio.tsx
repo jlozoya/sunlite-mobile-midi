@@ -57,6 +57,25 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
   const latestBeat = status
     ? Object.values(status.latestBeats).sort((a, b) => b.receivedAt - a.receivedAt)[0]
     : null
+  const waveforms = Object.values(status?.waveforms ?? {})
+  const sourceReady = Boolean(status?.audioConnected || status?.waveformConnected)
+  const sourceLabel = status?.waveformConnected
+    ? status.audioConnected
+      ? "Waveform + audio listos"
+      : "Waveform listo"
+    : status?.audioConnected
+      ? "Audio listo"
+      : "Sin fuente"
+  const trainingDescription = status?.recording
+    ? `${formatDuration(status.activeSession?.durationMs ?? 0)} · usa los botones y sliders de Controlador`
+    : sourceReady
+      ? "Usa los botones y sliders de Controlador; cada acción se asociará con la música y el beat actual."
+      : "Carga un track analizado en un CDJ o activa la entrada de audio."
+  const showSpectrogram = Boolean(
+    status?.audioConnected ||
+    automation.liveFrames.length > 0 ||
+    automation.timeline.some((event) => event.kind === "audio"),
+  )
 
   function setSetting<K extends keyof AutomationSettings>(
     key: K,
@@ -193,7 +212,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
         </article>
       </div>
 
-      <DeckWaveforms waveforms={Object.values(status?.waveforms ?? {})} />
+      <DeckWaveforms waveforms={waveforms} />
 
       <div
         {...stylex.props(
@@ -202,18 +221,22 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
         )}
       >
         <div {...stylex.props(styles.recordingCopy)}>
-          <span {...stylex.props(styles.recordingDot)} />
-          <div>
+          <span
+            {...stylex.props(
+              styles.recordingDot,
+              sourceReady && styles.sourceReadyDot,
+              status?.recording && styles.recordingActiveDot,
+            )}
+          />
+          <div {...stylex.props(styles.recordingText)}>
             <strong>
               {status?.recording
                 ? (status.activeSession?.name ?? "Grabando sesión")
-                : "Grabar una sesión de entrenamiento"}
+                : sourceReady
+                  ? "Enséñale cómo controlas las luces"
+                  : "Primero conecta una fuente musical"}
             </strong>
-            <span>
-              {status?.recording
-                ? `${formatDuration(status.activeSession?.durationMs ?? 0)} · usa normalmente el controlador MIDI`
-                : "La aplicación asociará cada acción manual con el waveform, el espectro y el beat actual."}
-            </span>
+            <span>{trainingDescription}</span>
           </div>
         </div>
         {status?.recording ? (
@@ -223,47 +246,58 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
             disabled={automation.busy === "session"}
             onClick={() => void automation.stopSession()}
           >
-            Detener y entrenar
+            Finalizar y aprender
           </button>
         ) : (
-          <div {...stylex.props(styles.recordingActions)}>
+          <div {...stylex.props(styles.trainingControls)}>
+            <span
+              {...stylex.props(
+                styles.sourceBadge,
+                sourceReady && styles.sourceBadgeReady,
+              )}
+            >
+              {sourceLabel}
+            </span>
             <input
               {...stylex.props(styles.input)}
               value={sessionName}
               onChange={(event) => setSessionName(event.target.value)}
-              placeholder="Nombre de la sesión"
+              placeholder="Nombre (opcional)"
+              disabled={!sourceReady}
             />
             <button
               type="button"
-              {...stylex.props(styles.primaryButton)}
-              disabled={
-                automation.busy === "session" ||
-                (!status?.audioConnected && !status?.waveformConnected)
-              }
+              {...stylex.props(
+                styles.primaryButton,
+                !sourceReady && styles.disabledButton,
+              )}
+              disabled={automation.busy === "session" || !sourceReady}
               onClick={() =>
                 void automation.startSession(
                   sessionName || `Sesión ${new Date().toLocaleDateString()}`,
                 )
               }
             >
-              Comenzar grabación
+              Empezar entrenamiento
             </button>
           </div>
         )}
       </div>
 
-      <div {...stylex.props(styles.timelinePanel)}>
-        <div {...stylex.props(styles.legend)}>
-          <span>Espectrograma</span>
-          <span {...stylex.props(styles.manualLegend)}>MIDI manual</span>
-          <span {...stylex.props(styles.autoLegend)}>MIDI automático</span>
-          <span>líneas blancas: beats/compases</span>
+      {showSpectrogram ? (
+        <div {...stylex.props(styles.timelinePanel)}>
+          <div {...stylex.props(styles.legend)}>
+            <span>Espectrograma del mixer</span>
+            <span {...stylex.props(styles.manualLegend)}>MIDI manual</span>
+            <span {...stylex.props(styles.autoLegend)}>MIDI automático</span>
+            <span>líneas blancas: beats/compases</span>
+          </div>
+          <SpectrogramTimeline
+            liveFrames={automation.liveFrames}
+            timeline={automation.timeline}
+          />
         </div>
-        <SpectrogramTimeline
-          liveFrames={automation.liveFrames}
-          timeline={automation.timeline}
-        />
-      </div>
+      ) : null}
 
       {automation.timeline.some((event) => event.kind === "example") ? (
         <div {...stylex.props(styles.exampleEditor)}>
@@ -560,6 +594,10 @@ const styles = stylex.create({
     fontWeight: 850,
     padding: "10px 13px",
   },
+  disabledButton: {
+    opacity: 0.45,
+    cursor: "not-allowed",
+  },
   secondaryButton: {
     borderWidth: "1px",
     borderStyle: "solid",
@@ -590,14 +628,45 @@ const styles = stylex.create({
     backgroundColor: "rgba(127,29,29,0.16)",
   },
   recordingCopy: { display: "flex", alignItems: "center", gap: "11px" },
+  recordingText: {
+    display: "grid",
+    gap: "3px",
+  },
   recordingDot: {
     width: "10px",
     height: "10px",
     borderRadius: "50%",
+    backgroundColor: "#475569",
+    boxShadow: "none",
+  },
+  sourceReadyDot: {
+    backgroundColor: "#22d3ee",
+    boxShadow: "0 0 14px rgba(34,211,238,0.72)",
+  },
+  recordingActiveDot: {
     backgroundColor: "#ef4444",
     boxShadow: "0 0 16px rgba(239,68,68,0.8)",
   },
-  recordingActions: { display: "flex", gap: "8px", flexWrap: "wrap" },
+  trainingControls: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: "8px",
+    flexWrap: "wrap",
+  },
+  sourceBadge: {
+    borderRadius: "999px",
+    backgroundColor: "rgba(71, 85, 105, 0.16)",
+    color: "#94a3b8",
+    padding: "7px 10px",
+    fontSize: "0.72rem",
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  },
+  sourceBadgeReady: {
+    backgroundColor: "rgba(34, 211, 238, 0.12)",
+    color: "#a5f3fc",
+  },
   stopButton: {
     borderWidth: 0,
     borderRadius: "11px",

@@ -1,5 +1,6 @@
+import dgram, { type RemoteInfo, type SocketOptions, type SocketType } from "node:dgram"
 import {
-  bringOnline,
+  bringOnline as bringProlinkOnline,
   type CDJStatus,
   type ProlinkNetwork,
   type Track,
@@ -38,6 +39,35 @@ type Playhead = {
 
 function playerIsPlaying(state: CDJStatus.State): boolean {
   return state.playState === 3 || state.playState === 4
+}
+
+async function bringOnline(): Promise<ProlinkNetwork> {
+  const originalCreateSocket = dgram.createSocket
+  const reusableCreateSocket = (
+    options: SocketOptions | SocketType,
+    callback?: (message: Buffer, remoteInfo: RemoteInfo) => void,
+  ) => {
+    const reusableOptions =
+      typeof options === "string"
+        ? { type: options, reuseAddr: true }
+        : { ...options, reuseAddr: options.reuseAddr ?? true }
+    return originalCreateSocket(reusableOptions, callback)
+  }
+
+  dgram.createSocket = reusableCreateSocket as typeof dgram.createSocket
+  try {
+    return await bringProlinkOnline()
+  } finally {
+    dgram.createSocket = originalCreateSocket
+  }
+}
+
+function bridgeErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.includes("EADDRINUSE") || message.includes("50000")) {
+    return "Los puertos UDP 50000–50002 siguen ocupados por otro listener exclusivo de PRO DJ LINK."
+  }
+  return message || "Error de PRO DJ LINK"
 }
 
 export class ProDjLinkSidecar {
@@ -169,7 +199,7 @@ export class ProDjLinkSidecar {
       if (network) await network.disconnect().catch(() => undefined)
       if (this.stopped || generation !== this.generation) return
 
-      const message = error instanceof Error ? error.message : "Error de PRO DJ LINK"
+      const message = bridgeErrorMessage(error)
       this.options.onEvent({ type: "warning", message })
       this.updateStatus({ running: false, connected: false, message })
       this.restartTimer = setTimeout(() => {
