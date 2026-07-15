@@ -7,6 +7,7 @@ import {
   type ControllerCustomization,
 } from "../../shared/controller-config.ts"
 import { MidiController } from "./components/MidiController"
+import { Toast } from "./components/Toast"
 import { AutomationStudio } from "./automation/AutomationStudio"
 import { useIsMobileView } from "./hooks/useIsMobileView"
 import { useControllerSocket } from "./useControllerSocket"
@@ -350,9 +351,6 @@ export function App() {
             {status?.feedbackDisabledReason ? (
               <p {...stylex.props(styles.warningText)}>{status.feedbackDisabledReason}</p>
             ) : null}
-            {setupMessage ? (
-              <p {...stylex.props(styles.setupMessage)}>{setupMessage}</p>
-            ) : null}
           </section>
         </section>
       ) : null}
@@ -404,6 +402,10 @@ export function App() {
             ) : null}
           </section>
         )
+      ) : null}
+
+      {setupMessage ? (
+        <Toast message={setupMessage} onDismiss={() => setSetupMessage(null)} />
       ) : null}
     </main>
   )
@@ -711,11 +713,6 @@ const styles = stylex.create({
     padding: "12px",
     color: "#cbd5e1",
     fontSize: "0.86rem",
-  },
-  setupMessage: {
-    margin: "14px 0 0",
-    color: "#ddd6fe",
-    fontSize: "0.88rem",
   },
   controlsLockedPanel: {
     minHeight: "180px",

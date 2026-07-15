@@ -114,6 +114,7 @@ export function useAutomationStudio(sendAutomationCommand: SendAutomationCommand
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const clearMessage = useCallback(() => setMessage(null), [])
 
   const streamRef = useRef<MediaStream | null>(null)
   const contextRef = useRef<AudioContext | null>(null)
@@ -346,6 +347,7 @@ export function useAutomationStudio(sendAutomationCommand: SendAutomationCommand
     selectedSessionId,
     busy,
     message,
+    clearMessage,
     startAudio,
     stopAudio,
     updateMode,

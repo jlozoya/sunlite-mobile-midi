@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import type {
+  AudioFeatures,
   AutomationAudioFrame,
   AutomationMidiCommand,
   AutomationMode,
@@ -12,6 +13,7 @@ import type {
   DjLinkBridgeStatus,
   DjLinkDevice,
   DjLinkEvent,
+  DjLinkWaveform,
 } from "../../shared/automation-types.js"
 import { ExamplePolicyEngine } from "./policy-engine.js"
 import { AutomationSessionStore } from "./session-store.js"
@@ -132,6 +134,11 @@ export class AutomationEngine {
   private bridge: DjLinkBridgeStatus = { ...EMPTY_BRIDGE_STATUS }
   private devices = new Map<number, DjLinkDevice>()
   private latestBeats = new Map<number, Extract<DjLinkEvent, { type: "beat" }>["beat"]>()
+  private waveforms = new Map<number, DjLinkWaveform>()
+  private deckFeatures = new Map<
+    number,
+    { features: AudioFeatures; receivedAt: number }
+  >()
   private currentFrame: AutomationAudioFrame | null = null
   private lastAudioAt: number | null = null
   private lastRecordedAudioAt = 0
@@ -161,6 +168,9 @@ export class AutomationEngine {
     const devices = [...this.devices.values()]
       .filter((device) => now - device.lastSeenAt < 10000)
       .sort((a, b) => a.deviceNumber - b.deviceNumber)
+    const waveformConnected = [...this.deckFeatures.values()].some(
+      (entry) => now - entry.receivedAt < 2500,
+    )
 
     return {
       mode: this.mode,
@@ -169,9 +179,11 @@ export class AutomationEngine {
       sessions: this.store.list(),
       modelExampleCount: this.policy.exampleCount,
       audioConnected: this.lastAudioAt !== null && now - this.lastAudioAt < 2500,
+      waveformConnected,
       lastAudioAt: this.lastAudioAt,
       devices,
       latestBeats: Object.fromEntries(this.latestBeats),
+      waveforms: Object.fromEntries(this.waveforms),
       bridge: { ...this.bridge, connected: devices.length > 0 },
       settings: { ...this.settings },
       lastSuggestion: this.lastSuggestion,
@@ -314,6 +326,33 @@ export class AutomationEngine {
       this.appendTimeline({ kind: "position", position: event.position })
     }
 
+    if (event.type === "waveform") {
+      this.waveforms.set(event.waveform.deviceNumber, event.waveform)
+    }
+
+    if (event.type === "waveform-position") {
+      this.deckFeatures.set(event.position.deviceNumber, {
+        features: event.position.features,
+        receivedAt: event.position.receivedAt,
+      })
+      const waveform = this.waveforms.get(event.position.deviceNumber)
+      if (waveform) {
+        this.waveforms.set(event.position.deviceNumber, {
+          ...waveform,
+          positionMs: event.position.positionMs,
+          isPlaying: event.position.isPlaying,
+          isOnAir: event.position.isOnAir,
+          isMaster: event.position.isMaster,
+          updatedAt: event.position.receivedAt,
+        })
+      }
+    }
+
+    if (event.type === "waveform-unloaded") {
+      this.waveforms.delete(event.deviceNumber)
+      this.deckFeatures.delete(event.deviceNumber)
+    }
+
     this.broadcast({ event: "automation-dj-link", payload: event })
     this.queueStatusBroadcast()
   }
@@ -330,12 +369,18 @@ export class AutomationEngine {
     if (this.store.getActive()) {
       this.appendTimeline({ kind: "midi", command, source: "manual" })
 
-      if (this.currentFrame && command.type !== "noteoff") {
+      if (command.type !== "noteoff") {
         const latestBeat = this.getContextBeat()
+        const features =
+          this.getDeckFeatures(latestBeat?.deviceNumber) ?? this.currentFrame?.features
+        if (!features) {
+          this.queueStatusBroadcast()
+          return
+        }
         const example: AutomationTrainingExample = {
           id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
           createdAt: now,
-          features: { ...this.currentFrame.features },
+          features: { ...features },
           beatWithinBar: latestBeat?.beatWithinBar ?? 0,
           bpm: latestBeat?.bpm ?? 0,
           command: { ...command },
@@ -377,7 +422,7 @@ export class AutomationEngine {
     trigger: "audio" | "pro-dj-link",
     deviceNumber?: number,
   ): void {
-    if (this.mode === "manual" || !this.currentFrame) return
+    if (this.mode === "manual") return
     if (trigger === "pro-dj-link" && beatWithinBar !== 1) return
     if (trigger === "pro-dj-link" && deviceNumber && deviceNumber > 6) return
     if (
@@ -388,7 +433,13 @@ export class AutomationEngine {
       return
     }
 
-    const prediction = this.policy.predict(this.currentFrame.features, beatWithinBar, bpm)
+    const features =
+      trigger === "pro-dj-link"
+        ? this.getDeckFeatures(deviceNumber)
+        : this.currentFrame?.features
+    if (!features) return
+
+    const prediction = this.policy.predict(features, beatWithinBar, bpm)
     if (!prediction) return
 
     const now = Date.now()
@@ -438,6 +489,38 @@ export class AutomationEngine {
     this.lastSuggestion = suggestion
     this.broadcast({ event: "automation-suggestion", suggestion })
     this.queueStatusBroadcast()
+  }
+
+  private getDeckFeatures(deviceNumber?: number): AudioFeatures | null {
+    const now = Date.now()
+    const preferred = this.settings.preferredDeck
+    const candidates = [preferred, deviceNumber]
+      .filter((value): value is number => typeof value === "number")
+      .map((value) => ({
+        deviceNumber: value,
+        entry: this.deckFeatures.get(value),
+        waveform: this.waveforms.get(value),
+      }))
+
+    for (const candidate of candidates) {
+      if (candidate.entry && now - candidate.entry.receivedAt < 2500) {
+        return candidate.entry.features
+      }
+    }
+
+    const active = [...this.deckFeatures.entries()]
+      .filter(([, entry]) => now - entry.receivedAt < 2500)
+      .sort(([leftDevice], [rightDevice]) => {
+        const left = this.waveforms.get(leftDevice)
+        const right = this.waveforms.get(rightDevice)
+        const score = (waveform: DjLinkWaveform | undefined) =>
+          Number(waveform?.isOnAir) * 4 +
+          Number(waveform?.isPlaying) * 2 +
+          Number(waveform?.isMaster)
+        return score(right) - score(left)
+      })[0]
+
+    return active?.[1].features ?? null
   }
 
   private getSafetyBlock(command: AutomationMidiCommand, now: number): string | null {

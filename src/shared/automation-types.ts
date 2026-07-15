@@ -52,11 +52,38 @@ export type DjLinkPosition = {
   receivedAt: number
 }
 
+export type DjLinkWaveform = {
+  deviceNumber: number
+  trackId: number
+  title: string
+  durationSeconds: number
+  heights: number[]
+  colors: Array<[number, number, number]>
+  positionMs: number
+  isPlaying: boolean
+  isOnAir: boolean
+  isMaster: boolean
+  updatedAt: number
+}
+
+export type DjLinkWaveformPosition = {
+  deviceNumber: number
+  positionMs: number
+  isPlaying: boolean
+  isOnAir: boolean
+  isMaster: boolean
+  features: AudioFeatures
+  receivedAt: number
+}
+
 export type DjLinkEvent =
   | { type: "ready"; message: string }
   | { type: "device"; device: DjLinkDevice }
   | { type: "beat"; beat: DjLinkBeat }
   | { type: "position"; position: DjLinkPosition }
+  | { type: "waveform"; waveform: DjLinkWaveform }
+  | { type: "waveform-position"; position: DjLinkWaveformPosition }
+  | { type: "waveform-unloaded"; deviceNumber: number }
   | { type: "warning" | "error"; message: string }
 
 export type DjLinkBridgeStatus = {
@@ -107,9 +134,11 @@ export type AutomationStatus = {
   sessions: AutomationSessionSummary[]
   modelExampleCount: number
   audioConnected: boolean
+  waveformConnected: boolean
   lastAudioAt: number | null
   devices: DjLinkDevice[]
   latestBeats: Record<number, DjLinkBeat>
+  waveforms: Record<number, DjLinkWaveform>
   bridge: DjLinkBridgeStatus
   settings: AutomationSettings
   lastSuggestion: AutomationSuggestion | null

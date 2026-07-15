@@ -6,6 +6,8 @@ import type {
   AutomationSettings,
   AutomationSocketCommand,
 } from "../../../shared/automation-types"
+import { Toast } from "../components/Toast"
+import { DeckWaveforms } from "./DeckWaveforms"
 import { SpectrogramTimeline } from "./SpectrogramTimeline"
 import { useAutomationStudio } from "./useAutomationStudio"
 
@@ -78,8 +80,8 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
           <p {...stylex.props(styles.eyebrow)}>Automation Studio</p>
           <h2 {...stylex.props(styles.title)}>Entrenamiento y control automático</h2>
           <p {...stylex.props(styles.description)}>
-            Captura el audio del mixer, aprende tus acciones MIDI y sincroniza los cambios
-            con los beats recibidos desde los CDJ.
+            Usa el waveform recibido de los CDJ o el audio del mixer, aprende tus acciones
+            MIDI y sincroniza los cambios con cada compás.
           </p>
         </div>
         <div {...stylex.props(styles.modeGroup)}>
@@ -138,14 +140,16 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
           <span {...stylex.props(styles.cardDetail)}>
             {status?.audioConnected
               ? "Señal recibida y analizada localmente"
-              : "Selecciona el USB/REC OUT del mixer"}
+              : status?.waveformConnected
+                ? "Opcional: el waveform PRO DJ LINK ya puede entrenar el modelo"
+                : "Selecciona el USB/REC OUT del mixer"}
           </span>
         </article>
 
         <article {...stylex.props(styles.statusCard)}>
           <div {...stylex.props(styles.cardHeading)}>
             <span {...stylex.props(styles.cardIcon)}>LINK</span>
-            <strong>CDJ-3000</strong>
+            <strong>PRO DJ LINK</strong>
           </div>
           <div {...stylex.props(styles.metric)}>
             <span>{status?.devices.length ?? 0} decks</span>
@@ -162,7 +166,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
             Reiniciar listener
           </button>
           <span {...stylex.props(styles.cardDetail)}>
-            {status?.bridge.message ?? "Iniciando listener pasivo"}
+            {status?.bridge.message ?? "Buscando los CDJ en la red Ethernet"}
           </span>
         </article>
 
@@ -189,6 +193,8 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
         </article>
       </div>
 
+      <DeckWaveforms waveforms={Object.values(status?.waveforms ?? {})} />
+
       <div
         {...stylex.props(
           styles.recordingBar,
@@ -206,7 +212,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
             <span>
               {status?.recording
                 ? `${formatDuration(status.activeSession?.durationMs ?? 0)} · usa normalmente el controlador MIDI`
-                : "La aplicación asociará cada acción manual con el espectro y el beat actual."}
+                : "La aplicación asociará cada acción manual con el waveform, el espectro y el beat actual."}
             </span>
           </div>
         </div>
@@ -230,7 +236,10 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
             <button
               type="button"
               {...stylex.props(styles.primaryButton)}
-              disabled={automation.busy === "session" || !status?.audioConnected}
+              disabled={
+                automation.busy === "session" ||
+                (!status?.audioConnected && !status?.waveformConnected)
+              }
               onClick={() =>
                 void automation.startSession(
                   sessionName || `Sesión ${new Date().toLocaleDateString()}`,
@@ -432,7 +441,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
       </div>
 
       {automation.message ? (
-        <p {...stylex.props(styles.message)}>{automation.message}</p>
+        <Toast message={automation.message} onDismiss={automation.clearMessage} />
       ) : null}
     </section>
   )
@@ -702,12 +711,4 @@ const styles = stylex.create({
   },
   field: { display: "grid", gap: "5px", color: "#94a3b8", fontSize: "0.74rem" },
   saveButton: { alignSelf: "end" },
-  message: {
-    margin: "12px 0 0",
-    borderRadius: "11px",
-    backgroundColor: "rgba(34,211,238,0.08)",
-    color: "#a5f3fc",
-    padding: "9px 11px",
-    fontSize: "0.8rem",
-  },
 })

@@ -16,18 +16,20 @@
     "build:main": "tsc -p tsconfig.node.json",
     "build:renderer": "vite build",
     "build:sidecar": "powershell -ExecutionPolicy Bypass -File scripts/build-python-sidecar.ps1",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
     "build": "bun run format:check && bun run build:main && bun run build:renderer",
-    "start": "bun run build && electron dist/main/main.js",
+    "start": "bun run build && bun run rebuild:electron && electron dist/main/main.js",
     "pack": "bun run build && electron-builder --dir",
     "dist": "bun run build && electron-builder",
-    "dist:win": "bun run build:sidecar && bun run build && electron-builder --win",
-    "release:win": "bun run build:sidecar && bun run build && electron-builder --win --publish never"
+    "dist:win": "bun run build && electron-builder --win",
+    "release:win": "bun run build && electron-builder --win --publish never"
   },
   "dependencies": {
     "@stylexjs/stylex": "^0.9.3",
     "easymidi": "^3.1.0",
     "electron-updater": "^6.3.9",
     "express": "^4.19.2",
+    "prolink-connect": "^0.11.0",
     "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-aria-components": "^1.8.0",
@@ -49,6 +51,9 @@
     "typescript": "^5.8.2",
     "vite": "^6.2.0",
     "vite-plugin-stylex": "^0.13.0"
+  },
+  "overrides": {
+    "better-sqlite3": "12.11.1"
   },
   "build": {
     "appId": "com.lozoya.sunlite.mobilemidi",
@@ -107,13 +112,6 @@
       {
         "from": "resources/icon.ico",
         "to": "icon.ico"
-      },
-      {
-        "from": "resources/prodj-link",
-        "to": "prodj-link",
-        "filter": [
-          "prodj-link-bridge.exe"
-        ]
       }
     ],
     "publish": [

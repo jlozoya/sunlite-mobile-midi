@@ -2,7 +2,7 @@
 
 Electron + React mobile MIDI controller for Sunlite Suite 2 and FreeStyler. It lets a phone or tablet control lighting software through a local Wi-Fi web interface and a locally managed virtual MIDI bridge.
 
-Version 0.3 also includes Automation Studio: local audio analysis, CDJ-3000 beat/position monitoring through PRO DJ LINK, recording of MIDI training sessions, and assisted or automatic scene triggering.
+Version 0.3 also includes Automation Studio: local audio analysis, CDJ beat/position and HD waveform monitoring through PRO DJ LINK, recording of MIDI training sessions, and assisted or automatic scene triggering.
 
 <img src="docs/images/app-preview.png" alt="Sunlite Mobile MIDI app preview" width="800" />
 
@@ -138,23 +138,23 @@ The MIDI channel controls LED behavior or brightness. The velocity controls the 
 
 Automation Studio runs locally and does not upload audio or training data. It combines:
 
-- Audio captured from a DJ mixer USB input or REC OUT connected to an audio interface.
-- A passive Python-based PRO DJ LINK listener for CDJ device, beat, bar and CDJ-3000 precise-position packets.
+- HD track waveforms, playback position, beat and bar data retrieved from compatible CDJs through PRO DJ LINK.
+- Optional audio captured from a DJ mixer USB input or REC OUT connected to an audio interface.
 - MIDI actions already sent by this application to Sunlite.
 - A lightweight example-based model with confidence and safety limits.
 
-The installed application does **not** require Python or a JDK. The Python listener is compiled into `prodj-link-bridge.exe` and bundled as an Electron extra resource.
+The installed application does **not** require Python or a JDK. PRO DJ LINK support runs inside the Electron application.
 
 ### CDJ and mixer connection
 
-1. Connect the CDJ-3000 players, compatible DJ mixer, and the Windows computer to the same wired Ethernet switch.
-2. Use rekordbox-analyzed tracks so the players transmit accurate beat-grid information.
-3. Connect the mixer audio to the computer using its USB audio driver or REC OUT through an audio interface.
-4. Open Automation Studio and select that audio input.
+1. Connect the compatible CDJ players, DJ mixer, and Windows computer to the same wired Ethernet switch.
+2. Use rekordbox-analyzed tracks so the application can retrieve their HD waveform and beat grid.
+3. Open Automation Studio and wait for the loaded track waveform to appear.
+4. Optionally connect the mixer audio using its USB driver or REC OUT through an audio interface. This lets the model react to the final mixed signal as well.
 5. Keep the application in **Manual** mode and record a training session while operating Sunlite normally.
 6. Stop the recording to train the local model, then test **Assisted** mode before enabling **Auto**.
 
-The PRO DJ LINK component is passive: it listens on UDP ports `50000` and `50001` and never announces itself as a virtual player or sends commands to the CDJs. Only one application can normally own these listening ports, so rekordbox or another PRO DJ LINK integration may conflict on the same computer.
+To obtain detailed player state and waveform data, the application announces itself as a virtual PRO DJ LINK device. Only one application can normally own the required network ports, so rekordbox or another PRO DJ LINK integration may conflict on the same computer.
 
 ### Automation safety
 
@@ -162,7 +162,7 @@ The PRO DJ LINK component is passive: it listens on UDP ports `50000` and `50001
 - Note `42` is treated as strobe and receives an additional cooldown.
 - Manual MIDI input suspends automatic output temporarily.
 - PRO DJ LINK decisions are quantized to the first beat of a bar.
-- Automatic output requires a trained model, live audio, and the configured confidence threshold.
+- Automatic output requires a trained model, a live CDJ waveform or mixer audio, and the configured confidence threshold.
 - Sessions and the model are stored under the Electron user-data directory in `automation/`.
 
 ### Training data review
@@ -189,12 +189,7 @@ bun run check
 bun run dist:win
 ```
 
-`dist:win` first runs PyInstaller to produce the standalone PRO DJ LINK sidecar. Python and PyInstaller are build-time dependencies only:
-
-```powershell
-python -m pip install -r python/requirements-build.txt
-bun run build:sidecar
-```
+PRO DJ LINK is compiled with the Electron main process, so the Windows build does not require Python or a separate sidecar.
 
 Build files are generated in:
 
