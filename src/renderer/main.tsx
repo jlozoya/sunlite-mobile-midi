@@ -20,6 +20,7 @@ const globalStyles = stylex.create({
 })
 
 document.documentElement.style.colorScheme = "dark"
+document.documentElement.style.scrollbarGutter = "stable"
 document.body.className = stylex.props(globalStyles.base).className ?? ""
 
 const root = document.querySelector("#root")

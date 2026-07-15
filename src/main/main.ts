@@ -1417,6 +1417,7 @@ async function createWindow(status: ServerStatus) {
     height: 860,
     minWidth: 420,
     minHeight: 680,
+    show: false,
     title: "Sunlite Mobile MIDI",
     icon: getWindowIconPath(),
     autoHideMenuBar: true,
@@ -1433,6 +1434,8 @@ async function createWindow(status: ServerStatus) {
   })
 
   await mainWindow.loadURL(status.localUrl)
+  mainWindow.maximize()
+  mainWindow.show()
 }
 
 electronApp.whenReady().then(async () => {
