@@ -62,6 +62,27 @@ async function bringOnline(): Promise<ProlinkNetwork> {
   }
 }
 
+async function disconnectNetwork(network: ProlinkNetwork): Promise<void> {
+  try {
+    if (!network.isConfigured) {
+      network.configure({
+        vcdjId: 5,
+        iface: {
+          address: "127.0.0.1",
+          netmask: "255.0.0.0",
+          family: "IPv4",
+          mac: "00:00:00:00:00:00",
+          internal: true,
+          cidr: "127.0.0.1/8",
+        },
+      })
+    }
+    await network.disconnect()
+  } catch {
+    // Closing the application must never surface a library shutdown error.
+  }
+}
+
 function bridgeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   if (message.includes("EADDRINUSE") || message.includes("50000")) {
@@ -113,7 +134,7 @@ export class ProDjLinkSidecar {
     const network = this.network
     this.network = null
     if (network) {
-      this.shutdownPromise = network.disconnect().catch(() => undefined)
+      this.shutdownPromise = disconnectNetwork(network)
     }
 
     this.updateStatus({
@@ -138,7 +159,7 @@ export class ProDjLinkSidecar {
     try {
       network = await bringOnline()
       if (this.stopped || generation !== this.generation) {
-        await network.disconnect()
+        await disconnectNetwork(network)
         return
       }
       this.network = network
@@ -178,7 +199,7 @@ export class ProDjLinkSidecar {
 
       await network.autoconfigFromPeers()
       if (this.stopped || generation !== this.generation) {
-        await network.disconnect()
+        await disconnectNetwork(network)
         return
       }
 
@@ -196,7 +217,7 @@ export class ProDjLinkSidecar {
       })
     } catch (error) {
       if (network && network === this.network) this.network = null
-      if (network) await network.disconnect().catch(() => undefined)
+      if (network) await disconnectNetwork(network)
       if (this.stopped || generation !== this.generation) return
 
       const message = bridgeErrorMessage(error)
