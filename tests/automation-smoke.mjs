@@ -161,4 +161,61 @@ for (let index = 0; index < 6; index += 1) {
 }
 assert.equal(deckOnly.stopSession().modelExampleCount, 6)
 
+engine.startSession("Slider edit smoke")
+engine.handleAudioFrame({
+  capturedAt: Date.now(),
+  sampleRate: 48000,
+  spectrum: Array.from({ length: 64 }, (_, band) => band / 80),
+  features: {
+    rms: 0.35,
+    bass: 0.62,
+    mid: 0.44,
+    high: 0.2,
+    flux: 0.12,
+    centroid: 0.3,
+  },
+})
+for (const value of [12, 44, 78, 110]) {
+  engine.recordManualCommand({ type: "cc", controller: 51, value })
+}
+const sliderSession = engine.stopSession().sessions[0]
+const sliderExamples = engine
+  .readTimeline(sliderSession.id)
+  .filter((event) => event.kind === "example" && event.example)
+const editedSlider = engine.updateTrainingExamples(sliderSession.id, [
+  { id: sliderExamples[0].example.id, t: 0, value: 64 },
+])
+const editedPoint = editedSlider.events.find(
+  (event) => event.example?.id === sliderExamples[0].example.id,
+)
+assert.equal(editedPoint.t, 0)
+assert.equal(editedPoint.example.command.value, 64)
+const resizedCurve = engine.updateTrainingExamples(sliderSession.id, [
+  { id: sliderExamples[1].example.id, delete: true },
+  {
+    id: "created-slider-point",
+    t: 0,
+    value: 96,
+    controller: 51,
+    create: true,
+  },
+])
+assert.equal(
+  resizedCurve.events.some((event) => event.example?.id === sliderExamples[1].example.id),
+  false,
+)
+assert.equal(
+  resizedCurve.events.find((event) => event.example?.id === "created-slider-point")
+    .example.command.value,
+  96,
+)
+engine.deleteSession(sliderSession.id)
+
+const originalSessionId = trained.sessions[0].id
+const renamed = engine.renameSession(originalSessionId, "Renamed smoke session")
+assert.equal(renamed.sessions[0].name, "Renamed smoke session")
+const afterDelete = engine.deleteSession(originalSessionId)
+assert.equal(afterDelete.sessions.length, 0)
+assert.equal(afterDelete.modelExampleCount, 0)
+
 console.log("Automation smoke test passed")

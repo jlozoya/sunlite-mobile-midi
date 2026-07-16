@@ -1271,6 +1271,41 @@ async function startControllerServer(): Promise<ServerStatus> {
     })
   })
 
+  appServer.put("/api/automation/sessions/:id", (request, response) => {
+    try {
+      response.json(
+        automationEngine?.renameSession(request.params.id, request.body?.name),
+      )
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : "Invalid training session",
+      })
+    }
+  })
+
+  appServer.delete("/api/automation/sessions/:id", (request, response) => {
+    try {
+      response.json(automationEngine?.deleteSession(request.params.id))
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : "Invalid training session",
+      })
+    }
+  })
+
+  appServer.patch("/api/automation/sessions/:id/examples", (request, response) => {
+    try {
+      response.json(
+        automationEngine?.updateTrainingExamples(request.params.id, request.body?.edits),
+      )
+    } catch (error) {
+      response.status(400).json({
+        message:
+          error instanceof Error ? error.message : "Invalid training example edits",
+      })
+    }
+  })
+
   appServer.post("/api/automation/examples/:id/exclude", (request, response) => {
     try {
       response.json(automationEngine?.excludeTrainingExample(request.params.id))

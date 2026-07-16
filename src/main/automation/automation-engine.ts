@@ -17,6 +17,7 @@ import type {
 } from "../../shared/automation-types.js"
 import { ExamplePolicyEngine } from "./policy-engine.js"
 import { AutomationSessionStore } from "./session-store.js"
+import type { TrainingExampleEdit } from "./session-store.js"
 
 const DEFAULT_SETTINGS: AutomationSettings = {
   confidenceThreshold: 0.62,
@@ -232,6 +233,26 @@ export class AutomationEngine {
 
   readTimeline(id: string): AutomationTimelineEvent[] {
     return this.store.readTimeline(id)
+  }
+
+  renameSession(id: string, name: unknown): AutomationStatus {
+    this.store.rename(id, name)
+    this.queueStatusBroadcast()
+    return this.getStatus()
+  }
+
+  deleteSession(id: string): AutomationStatus {
+    this.store.delete(id)
+    return this.train()
+  }
+
+  updateTrainingExamples(
+    sessionId: string,
+    edits: TrainingExampleEdit[],
+  ): { status: AutomationStatus; events: AutomationTimelineEvent[] } {
+    const events = this.store.updateTrainingExamples(sessionId, edits)
+    const status = this.train()
+    return { status, events }
   }
 
   excludeTrainingExample(id: string): AutomationStatus {

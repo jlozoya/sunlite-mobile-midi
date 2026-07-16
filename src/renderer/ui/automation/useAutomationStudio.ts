@@ -303,6 +303,102 @@ export function useAutomationStudio(sendAutomationCommand: SendAutomationCommand
     }
   }, [])
 
+  const renameSession = useCallback(
+    async (id: string, name: string): Promise<boolean> => {
+      setBusy(`rename-${id}`)
+      try {
+        setStatus(
+          await requestJson<AutomationStatus>(
+            `/api/automation/sessions/${encodeURIComponent(id)}`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name }),
+            },
+          ),
+        )
+        setMessage("Sesión renombrada")
+        return true
+      } catch (error) {
+        setMessage(
+          error instanceof Error ? error.message : "No se pudo renombrar la sesión",
+        )
+        return false
+      } finally {
+        setBusy(null)
+      }
+    },
+    [],
+  )
+
+  const deleteSession = useCallback(
+    async (id: string): Promise<boolean> => {
+      setBusy(`delete-${id}`)
+      try {
+        const next = await requestJson<AutomationStatus>(
+          `/api/automation/sessions/${encodeURIComponent(id)}`,
+          { method: "DELETE" },
+        )
+        setStatus(next)
+        if (selectedSessionId === id) {
+          setSelectedSessionId(null)
+          setTimeline([])
+        }
+        setMessage(
+          `Sesión eliminada · el modelo conserva ${next.modelExampleCount} ejemplos`,
+        )
+        return true
+      } catch (error) {
+        setMessage(
+          error instanceof Error ? error.message : "No se pudo eliminar la sesión",
+        )
+        return false
+      } finally {
+        setBusy(null)
+      }
+    },
+    [selectedSessionId],
+  )
+
+  const updateTrainingExamples = useCallback(
+    async (
+      edits: Array<{
+        id: string
+        t?: number
+        value?: number
+        delete?: boolean
+        create?: boolean
+        controller?: number
+      }>,
+      successMessage: string,
+    ): Promise<boolean> => {
+      if (!selectedSessionId || !edits.length) return false
+      setBusy("edit-examples")
+      try {
+        const payload = await requestJson<{
+          status: AutomationStatus
+          events: AutomationTimelineEvent[]
+        }>(`/api/automation/sessions/${encodeURIComponent(selectedSessionId)}/examples`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ edits }),
+        })
+        setStatus(payload.status)
+        setTimeline(payload.events)
+        setMessage(successMessage)
+        return true
+      } catch (error) {
+        setMessage(
+          error instanceof Error ? error.message : "No se pudieron guardar los cambios",
+        )
+        return false
+      } finally {
+        setBusy(null)
+      }
+    },
+    [selectedSessionId],
+  )
+
   const excludeExample = useCallback(async (id: string) => {
     setBusy(`exclude-${id}`)
     try {
@@ -356,6 +452,9 @@ export function useAutomationStudio(sendAutomationCommand: SendAutomationCommand
     stopSession,
     train,
     loadSession,
+    renameSession,
+    deleteSession,
+    updateTrainingExamples,
     excludeExample,
     restartBridge,
   }

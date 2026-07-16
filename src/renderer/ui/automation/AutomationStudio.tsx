@@ -8,7 +8,9 @@ import type {
 } from "../../../shared/automation-types"
 import { Toast } from "../components/Toast"
 import { DeckWaveforms } from "./DeckWaveforms"
+import { SliderCurveEditor } from "./SliderCurveEditor"
 import { SpectrogramTimeline } from "./SpectrogramTimeline"
+import { detectSliderGestures } from "./slider-curves"
 import { useAutomationStudio } from "./useAutomationStudio"
 
 type Props = {
@@ -43,6 +45,11 @@ function formatCommand(command: AutomationMidiCommand | undefined): string {
 export function AutomationStudio({ sendAutomationCommand }: Props) {
   const automation = useAutomationStudio(sendAutomationCommand)
   const [sessionName, setSessionName] = useState("")
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
+  const [sessionNameDraft, setSessionNameDraft] = useState("")
+  const [editingSliderGestureId, setEditingSliderGestureId] = useState<string | null>(
+    null,
+  )
   const [settingsDraft, setSettingsDraft] = useState<AutomationSettings | null>(null)
   const [settingsDirty, setSettingsDirty] = useState(false)
 
@@ -74,7 +81,20 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
   const showSpectrogram = Boolean(
     status?.audioConnected ||
     automation.liveFrames.length > 0 ||
-    automation.timeline.some((event) => event.kind === "audio"),
+    automation.timeline.length > 0,
+  )
+  const sliderGestures = detectSliderGestures(automation.timeline)
+  const groupedSliderExamples = new Set(
+    sliderGestures.flatMap((gesture) => gesture.points.map((point) => point.id)),
+  )
+  const standaloneExamples = automation.timeline.filter(
+    (event) =>
+      event.kind === "example" &&
+      event.example &&
+      !groupedSliderExamples.has(event.example.id),
+  )
+  const editingSliderGesture = sliderGestures.find(
+    (gesture) => gesture.id === editingSliderGestureId,
   )
 
   function setSetting<K extends keyof AutomationSettings>(
@@ -90,6 +110,40 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
     if (!settingsDraft) return
     await automation.updateSettings(settingsDraft)
     setSettingsDirty(false)
+  }
+
+  async function saveSessionName(id: string) {
+    if (!sessionNameDraft.trim()) return
+    if (await automation.renameSession(id, sessionNameDraft)) {
+      setEditingSessionId(null)
+      setSessionNameDraft("")
+    }
+  }
+
+  async function removeSession(id: string, name: string) {
+    if (
+      !window.confirm(`¿Eliminar "${name}"? Sus ejemplos también se quitarán del modelo.`)
+    ) {
+      return
+    }
+    if (await automation.deleteSession(id)) {
+      setEditingSessionId(null)
+      setSessionNameDraft("")
+    }
+  }
+
+  async function removeSliderGesture(controller: number, pointIds: string[]) {
+    if (
+      !window.confirm(
+        `¿Eliminar el movimiento completo del slider CC ${controller}? Se quitarán ${pointIds.length} puntos del modelo.`,
+      )
+    ) {
+      return
+    }
+    await automation.updateTrainingExamples(
+      pointIds.map((id) => ({ id, delete: true })),
+      `Movimiento CC ${controller} eliminado`,
+    )
   }
 
   return (
@@ -288,13 +342,22 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
         <div {...stylex.props(styles.timelinePanel)}>
           <div {...stylex.props(styles.legend)}>
             <span>Espectrograma del mixer</span>
-            <span {...stylex.props(styles.manualLegend)}>MIDI manual</span>
+            <span {...stylex.props(styles.manualLegend)}>Notas editables</span>
+            <span {...stylex.props(styles.sliderLegend)}>Curvas de sliders</span>
             <span {...stylex.props(styles.autoLegend)}>MIDI automático</span>
             <span>líneas blancas: beats/compases</span>
           </div>
           <SpectrogramTimeline
             liveFrames={automation.liveFrames}
             timeline={automation.timeline}
+            editable={Boolean(automation.selectedSessionId)}
+            busy={automation.busy === "edit-examples"}
+            onMoveExample={(id, t) =>
+              automation.updateTrainingExamples(
+                [{ id, t }],
+                `Acción movida a ${formatDuration(t)}`,
+              )
+            }
           />
         </div>
       ) : null}
@@ -304,12 +367,48 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
           <div {...stylex.props(styles.cardHeading)}>
             <strong>Ajustar ejemplos de la sesión</strong>
             <span {...stylex.props(styles.cardDetail)}>
-              Excluye las acciones que no representan el comportamiento deseado
+              Arrastra acciones en la línea de tiempo o edita los sliders como curvas
             </span>
           </div>
+          {sliderGestures.length ? (
+            <div {...stylex.props(styles.sliderGestureList)}>
+              {sliderGestures.map((gesture) => (
+                <div key={gesture.id} {...stylex.props(styles.sliderGestureRow)}>
+                  <div {...stylex.props(styles.sliderGestureCopy)}>
+                    <strong>Slider CC {gesture.controller}</strong>
+                    <span {...stylex.props(styles.cardDetail)}>
+                      {gesture.points.length} mensajes · {formatDuration(gesture.start)}–
+                      {formatDuration(gesture.end)}
+                    </span>
+                  </div>
+                  <div {...stylex.props(styles.sliderGestureActions)}>
+                    <button
+                      type="button"
+                      {...stylex.props(styles.curveButton)}
+                      onClick={() => setEditingSliderGestureId(gesture.id)}
+                    >
+                      Editar curva
+                    </button>
+                    <button
+                      type="button"
+                      {...stylex.props(styles.curveButton, styles.deleteCurveButton)}
+                      disabled={automation.busy === "edit-examples"}
+                      onClick={() =>
+                        void removeSliderGesture(
+                          gesture.controller,
+                          gesture.points.map((point) => point.id),
+                        )
+                      }
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div {...stylex.props(styles.exampleList)}>
-            {automation.timeline
-              .filter((event) => event.kind === "example" && event.example)
+            {standaloneExamples
               .slice(-12)
               .reverse()
               .map((event) => (
@@ -333,6 +432,29 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
               ))}
           </div>
         </div>
+      ) : null}
+
+      {editingSliderGesture ? (
+        <SliderCurveEditor
+          gesture={editingSliderGesture}
+          busy={automation.busy === "edit-examples"}
+          onClose={() => setEditingSliderGestureId(null)}
+          onSave={({ points, deletedIds }) =>
+            automation.updateTrainingExamples(
+              [
+                ...points.map((point) => ({
+                  id: point.id,
+                  t: point.t,
+                  value: point.value,
+                  create: Boolean(point.isNew),
+                  controller: point.isNew ? editingSliderGesture.controller : undefined,
+                })),
+                ...deletedIds.map((id) => ({ id, delete: true })),
+              ],
+              `Curva CC ${editingSliderGesture.controller} actualizada`,
+            )
+          }
+        />
       ) : null}
 
       {status?.lastSuggestion ? (
@@ -361,24 +483,92 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
             </span>
           </div>
           <div {...stylex.props(styles.sessionList)}>
-            {status?.sessions.slice(0, 8).map((session) => (
-              <button
-                key={session.id}
-                type="button"
-                {...stylex.props(
-                  styles.sessionButton,
-                  automation.selectedSessionId === session.id &&
-                    styles.sessionButtonActive,
-                )}
-                onClick={() => void automation.loadSession(session.id)}
-              >
-                <span>{session.name}</span>
-                <small>
-                  {formatDuration(session.durationMs)} · {session.trainingExampleCount}{" "}
-                  ejemplos
-                </small>
-              </button>
-            ))}
+            {status?.sessions.map((session) => {
+              const isEditing = editingSessionId === session.id
+              const isSelected = automation.selectedSessionId === session.id
+
+              return (
+                <div
+                  key={session.id}
+                  {...stylex.props(
+                    styles.sessionRow,
+                    isSelected && styles.sessionRowActive,
+                  )}
+                >
+                  {isEditing ? (
+                    <div {...stylex.props(styles.sessionEdit)}>
+                      <input
+                        autoFocus
+                        {...stylex.props(styles.input, styles.sessionNameInput)}
+                        value={sessionNameDraft}
+                        maxLength={80}
+                        onChange={(event) => setSessionNameDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") void saveSessionName(session.id)
+                          if (event.key === "Escape") setEditingSessionId(null)
+                        }}
+                        aria-label="Nombre de la sesión"
+                      />
+                      <button
+                        type="button"
+                        {...stylex.props(styles.sessionActionButton)}
+                        disabled={
+                          !sessionNameDraft.trim() ||
+                          automation.busy === `rename-${session.id}`
+                        }
+                        onClick={() => void saveSessionName(session.id)}
+                      >
+                        Guardar
+                      </button>
+                      <button
+                        type="button"
+                        {...stylex.props(styles.sessionActionButton)}
+                        onClick={() => setEditingSessionId(null)}
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        {...stylex.props(styles.sessionButton)}
+                        onClick={() => void automation.loadSession(session.id)}
+                      >
+                        <span>{session.name}</span>
+                        <small>
+                          {formatDuration(session.durationMs)} ·{" "}
+                          {session.trainingExampleCount} ejemplos
+                        </small>
+                      </button>
+                      <div {...stylex.props(styles.sessionActions)}>
+                        <button
+                          type="button"
+                          {...stylex.props(styles.sessionActionButton)}
+                          onClick={() => {
+                            setEditingSessionId(session.id)
+                            setSessionNameDraft(session.name)
+                          }}
+                        >
+                          Renombrar
+                        </button>
+                        <button
+                          type="button"
+                          {...stylex.props(
+                            styles.sessionActionButton,
+                            styles.sessionDeleteButton,
+                          )}
+                          disabled={automation.busy === `delete-${session.id}`}
+                          onClick={() => void removeSession(session.id, session.name)}
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )
+            })}
             {!status?.sessions.length ? (
               <span {...stylex.props(styles.emptyText)}>
                 Aún no hay sesiones grabadas.
@@ -691,6 +881,7 @@ const styles = stylex.create({
     fontSize: "0.72rem",
   },
   manualLegend: { color: "#f59e0b" },
+  sliderLegend: { color: "#a78bfa" },
   autoLegend: { color: "#22d3ee" },
   suggestion: {
     display: "flex",
@@ -715,6 +906,51 @@ const styles = stylex.create({
     gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
     gap: "7px",
     marginTop: "10px",
+  },
+  sliderGestureList: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+    gap: "7px",
+    marginTop: "10px",
+  },
+  sliderGestureRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    flexWrap: "wrap",
+    borderRadius: "11px",
+    backgroundColor: "rgba(139,92,246,0.1)",
+    color: "#ddd6fe",
+    padding: "9px 10px",
+  },
+  sliderGestureCopy: {
+    display: "grid",
+    gap: "5px",
+    minWidth: 0,
+  },
+  sliderGestureActions: {
+    display: "flex",
+    gap: "7px",
+    flexShrink: 0,
+  },
+  curveButton: {
+    flexShrink: 0,
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(167,139,250,0.35)",
+    borderRadius: "9px",
+    backgroundColor: "rgba(139,92,246,0.1)",
+    color: "#ddd6fe",
+    cursor: "pointer",
+    fontWeight: 800,
+    padding: "7px 9px",
+    whiteSpace: "nowrap",
+  },
+  deleteCurveButton: {
+    borderColor: "rgba(248,113,113,0.35)",
+    backgroundColor: "rgba(127,29,29,0.12)",
+    color: "#fca5a5",
   },
   exampleRow: {
     display: "grid",
@@ -756,20 +992,67 @@ const styles = stylex.create({
     backgroundColor: "rgba(255,255,255,0.025)",
     padding: "13px",
   },
-  sessionList: { display: "grid", gap: "6px", marginTop: "10px" },
+  sessionList: {
+    display: "grid",
+    gap: "6px",
+    maxHeight: "360px",
+    marginTop: "10px",
+    overflowY: "auto",
+  },
+  sessionRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: "6px",
+    borderRadius: "10px",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    padding: "4px",
+  },
+  sessionRowActive: {
+    backgroundColor: "rgba(34,211,238,0.12)",
+  },
   sessionButton: {
     display: "flex",
     justifyContent: "space-between",
     gap: "10px",
+    minWidth: 0,
     borderWidth: 0,
-    borderRadius: "10px",
-    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: "8px",
+    backgroundColor: "transparent",
     color: "#cbd5e1",
     cursor: "pointer",
-    padding: "9px 10px",
+    padding: "7px 8px",
     textAlign: "left",
   },
-  sessionButtonActive: { backgroundColor: "rgba(34,211,238,0.12)", color: "#a5f3fc" },
+  sessionActions: {
+    display: "flex",
+    gap: "4px",
+  },
+  sessionActionButton: {
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(255,255,255,0.1)",
+    borderRadius: "8px",
+    backgroundColor: "rgba(255,255,255,0.035)",
+    color: "#cbd5e1",
+    cursor: "pointer",
+    padding: "6px 8px",
+    fontSize: "0.7rem",
+    fontWeight: 750,
+  },
+  sessionDeleteButton: {
+    borderColor: "rgba(248,113,113,0.24)",
+    color: "#fca5a5",
+  },
+  sessionEdit: {
+    gridColumn: "1 / -1",
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto auto",
+    gap: "5px",
+  },
+  sessionNameInput: {
+    width: "100%",
+  },
   emptyText: { color: "#64748b", fontSize: "0.8rem", padding: "10px 2px" },
   settingsGrid: {
     display: "grid",
