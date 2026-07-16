@@ -41,6 +41,7 @@ export function SpectrogramTimeline({
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [zoom, setZoom] = useState(1)
   const [drag, setDrag] = useState<DragState | null>(null)
+  const [pendingMoves, setPendingMoves] = useState<Record<string, number>>({})
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const duration = useMemo(
     () => Math.max(1, ...timeline.map((event) => event.t)),
@@ -51,6 +52,34 @@ export function SpectrogramTimeline({
     [timeline],
   )
   const canvasWidth = Math.round(1200 * zoom)
+
+  useEffect(() => {
+    setPendingMoves({})
+  }, [timeline])
+
+  useEffect(() => {
+    const container = scrollRef.current
+    if (!container) return
+
+    const handleWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return
+      event.preventDefault()
+      const rect = container.getBoundingClientRect()
+      const cursorX = event.clientX - rect.left
+      const cursorRatio =
+        (container.scrollLeft + cursorX) / Math.max(1, container.scrollWidth)
+      const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2
+      const nextZoom = Math.max(1, Math.min(8, zoom * factor))
+      if (nextZoom === zoom) return
+      setZoom(nextZoom)
+      requestAnimationFrame(() => {
+        container.scrollLeft = cursorRatio * container.scrollWidth - cursorX
+      })
+    }
+
+    container.addEventListener("wheel", handleWheel, { passive: false })
+    return () => container.removeEventListener("wheel", handleWheel)
+  }, [zoom])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -134,7 +163,10 @@ export function SpectrogramTimeline({
       values.forEach((event, index) => {
         const command = event.example?.command
         if (command?.type !== "cc") return
-        const displayT = drag && drag.id === event.example?.id ? drag.t : event.t
+        const displayT =
+          drag && drag.id === event.example?.id
+            ? drag.t
+            : (pendingMoves[event.example?.id ?? ""] ?? event.t)
         const x = (displayT / duration) * width
         const y = spectrumHeight - 12 - (command.value / 127) * 72
         if (index) context.lineTo(x, y)
@@ -145,7 +177,10 @@ export function SpectrogramTimeline({
 
     for (const event of examples) {
       if (!event.example) continue
-      const displayT = drag?.id === event.example.id ? drag.t : event.t
+      const displayT =
+        drag?.id === event.example.id
+          ? drag.t
+          : (pendingMoves[event.example.id] ?? event.t)
       const x = (displayT / duration) * width
       const isCc = event.example.command.type === "cc"
       const isHovered = hoveredId === event.example.id || drag?.id === event.example.id
@@ -173,7 +208,17 @@ export function SpectrogramTimeline({
       const x = (marker / markerCount) * width
       context.fillText(formatTime((marker / markerCount) * duration), x + 5, height - 11)
     }
-  }, [canvasWidth, drag, duration, examples, hoveredId, liveFrames, timeline, zoom])
+  }, [
+    canvasWidth,
+    drag,
+    duration,
+    examples,
+    hoveredId,
+    liveFrames,
+    pendingMoves,
+    timeline,
+    zoom,
+  ])
 
   function pointerTime(clientX: number): number {
     const canvas = canvasRef.current
@@ -188,8 +233,12 @@ export function SpectrogramTimeline({
   function closestExample(t: number): AutomationTimelineEvent | undefined {
     const threshold = (14 / canvasWidth) * duration
     return examples.reduce<AutomationTimelineEvent | undefined>((closest, event) => {
-      if (Math.abs(event.t - t) > threshold) return closest
-      if (!closest || Math.abs(event.t - t) < Math.abs(closest.t - t)) return event
+      const eventT = pendingMoves[event.example?.id ?? ""] ?? event.t
+      if (Math.abs(eventT - t) > threshold) return closest
+      const closestT = closest
+        ? (pendingMoves[closest.example?.id ?? ""] ?? closest.t)
+        : Infinity
+      if (!closest || Math.abs(eventT - t) < Math.abs(closestT - t)) return event
       return closest
     }, undefined)
   }
@@ -214,7 +263,9 @@ export function SpectrogramTimeline({
     <div>
       <div {...stylex.props(styles.toolbar)}>
         <span>
-          {editable ? "Arrastra una acción para cambiar su posición" : "Vista en vivo"}
+          {editable
+            ? "Arrastra acciones · Ctrl + rueda para zoom"
+            : "Ctrl + rueda para zoom"}
         </span>
         <div {...stylex.props(styles.zoomControls)}>
           <button
@@ -268,8 +319,21 @@ export function SpectrogramTimeline({
           onPointerUp={(event) => {
             if (!drag) return
             const completed = { ...drag, t: pointerTime(event.clientX) }
+            setPendingMoves((current) => ({
+              ...current,
+              [completed.id]: completed.t,
+            }))
             setDrag(null)
-            void onMoveExample?.(completed.id, completed.t)
+            void (async () => {
+              const saved = await onMoveExample?.(completed.id, completed.t)
+              if (saved === false) {
+                setPendingMoves((current) => {
+                  const next = { ...current }
+                  delete next[completed.id]
+                  return next
+                })
+              }
+            })()
           }}
           onPointerCancel={() => setDrag(null)}
         />
@@ -308,14 +372,15 @@ const styles = stylex.create({
   resetButton: { minWidth: "auto" },
   scroller: {
     width: "100%",
-    overflowX: "auto",
+    overflowX: "scroll",
+    overflowY: "hidden",
     borderRadius: "14px",
   },
   canvas: {
     display: "block",
     minWidth: "100%",
     maxWidth: "none",
-    height: "auto",
+    height: "300px",
     borderRadius: "14px",
   },
   canvasEditable: {

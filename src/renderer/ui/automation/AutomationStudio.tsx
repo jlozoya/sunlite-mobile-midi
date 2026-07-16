@@ -936,6 +936,11 @@ const styles = stylex.create({
   },
   curveButton: {
     flexShrink: 0,
+    display: "inline-grid",
+    placeItems: "center",
+    width: "112px",
+    minHeight: "36px",
+    boxSizing: "border-box",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "rgba(167,139,250,0.35)",
@@ -944,7 +949,8 @@ const styles = stylex.create({
     color: "#ddd6fe",
     cursor: "pointer",
     fontWeight: 800,
-    padding: "7px 9px",
+    padding: "7px 10px",
+    textAlign: "center",
     whiteSpace: "nowrap",
   },
   deleteCurveButton: {
