@@ -273,6 +273,10 @@ const styles = stylex.create({
   title: { margin: "4px 0", fontSize: "1.25rem" },
   description: { margin: 0, color: "#94a3b8", fontSize: "0.82rem" },
   closeButton: {
+    display: "inline-grid",
+    placeItems: "center",
+    minHeight: "32px",
+    boxSizing: "border-box",
     alignSelf: "flex-start",
     borderWidth: 0,
     borderRadius: "9px",
@@ -310,6 +314,10 @@ const styles = stylex.create({
     marginTop: "15px",
   },
   primaryButton: {
+    display: "inline-grid",
+    placeItems: "center",
+    minHeight: "38px",
+    boxSizing: "border-box",
     borderWidth: 0,
     borderRadius: "10px",
     backgroundColor: "#0891b2",
@@ -319,6 +327,10 @@ const styles = stylex.create({
     padding: "9px 12px",
   },
   secondaryButton: {
+    display: "inline-grid",
+    placeItems: "center",
+    minHeight: "38px",
+    boxSizing: "border-box",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "rgba(255,255,255,0.12)",

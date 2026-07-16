@@ -358,7 +358,11 @@ const styles = stylex.create({
     gap: "6px",
   },
   zoomButton: {
-    minWidth: "28px",
+    display: "inline-grid",
+    placeItems: "center",
+    width: "32px",
+    height: "32px",
+    boxSizing: "border-box",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "rgba(255,255,255,0.1)",
@@ -369,7 +373,7 @@ const styles = stylex.create({
     padding: "4px 7px",
     fontWeight: 800,
   },
-  resetButton: { minWidth: "auto" },
+  resetButton: { width: "72px" },
   scroller: {
     width: "100%",
     overflowX: "scroll",
