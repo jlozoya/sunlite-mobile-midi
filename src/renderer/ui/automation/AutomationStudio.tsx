@@ -7,6 +7,7 @@ import type {
   AutomationSocketCommand,
 } from "../../../shared/automation-types"
 import { Toast } from "../components/Toast"
+import { ActionButton, StatusBadge, Surface } from "../ui-kit"
 import { DeckWaveforms } from "./DeckWaveforms"
 import { SliderCurveEditor } from "./SliderCurveEditor"
 import { SpectrogramTimeline } from "./SpectrogramTimeline"
@@ -177,7 +178,12 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
       </div>
 
       <div {...stylex.props(styles.statusGrid)}>
-        <article {...stylex.props(styles.statusCard)}>
+        <Surface
+          as="article"
+          variant="subtle"
+          padding="custom"
+          {...stylex.props(styles.statusCard)}
+        >
           <div {...stylex.props(styles.cardHeading)}>
             <span {...stylex.props(styles.cardIcon)}>AUDIO</span>
             <strong>Entrada del mixer</strong>
@@ -198,18 +204,17 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
               <option value="">Entrada predeterminada</option>
             )}
           </select>
-          <button
-            type="button"
-            {...stylex.props(styles.primaryButton)}
-            disabled={automation.busy === "audio"}
-            onClick={() =>
+          <ActionButton
+            tone="cyan"
+            isDisabled={automation.busy === "audio"}
+            onPress={() =>
               automation.audioRunning
                 ? automation.stopAudio()
                 : void automation.startAudio()
             }
           >
             {automation.audioRunning ? "Detener audio" : "Activar audio"}
-          </button>
+          </ActionButton>
           <span {...stylex.props(styles.cardDetail)}>
             {status?.audioConnected
               ? "Señal recibida y analizada localmente"
@@ -217,9 +222,14 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                 ? "Opcional: el waveform PRO DJ LINK ya puede entrenar el modelo"
                 : "Selecciona el USB/REC OUT del mixer"}
           </span>
-        </article>
+        </Surface>
 
-        <article {...stylex.props(styles.statusCard)}>
+        <Surface
+          as="article"
+          variant="subtle"
+          padding="custom"
+          {...stylex.props(styles.statusCard)}
+        >
           <div {...stylex.props(styles.cardHeading)}>
             <span {...stylex.props(styles.cardIcon)}>LINK</span>
             <strong>PRO DJ LINK</strong>
@@ -230,20 +240,25 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
               {latestBeat ? `${latestBeat.bpm.toFixed(1)} BPM` : "Sin beat"}
             </strong>
           </div>
-          <button
-            type="button"
-            {...stylex.props(styles.secondaryButton)}
-            disabled={automation.busy === "bridge"}
-            onClick={() => void automation.restartBridge()}
+          <ActionButton
+            variant="secondary"
+            tone="cyan"
+            isDisabled={automation.busy === "bridge"}
+            onPress={() => void automation.restartBridge()}
           >
             Reiniciar listener
-          </button>
+          </ActionButton>
           <span {...stylex.props(styles.cardDetail)}>
             {status?.bridge.message ?? "Buscando los CDJ en la red Ethernet"}
           </span>
-        </article>
+        </Surface>
 
-        <article {...stylex.props(styles.statusCard)}>
+        <Surface
+          as="article"
+          variant="subtle"
+          padding="custom"
+          {...stylex.props(styles.statusCard)}
+        >
           <div {...stylex.props(styles.cardHeading)}>
             <span {...stylex.props(styles.cardIcon)}>AI</span>
             <strong>Modelo local</strong>
@@ -252,18 +267,18 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
             <span>Ejemplos</span>
             <strong>{status?.modelExampleCount ?? 0}</strong>
           </div>
-          <button
-            type="button"
-            {...stylex.props(styles.secondaryButton)}
-            disabled={automation.busy === "train"}
-            onClick={() => void automation.train()}
+          <ActionButton
+            variant="secondary"
+            tone="cyan"
+            isDisabled={automation.busy === "train"}
+            onPress={() => void automation.train()}
           >
             Reentrenar ahora
-          </button>
+          </ActionButton>
           <span {...stylex.props(styles.cardDetail)}>
             Se actualiza automáticamente al terminar cada sesión
           </span>
-        </article>
+        </Surface>
       </div>
 
       <DeckWaveforms waveforms={waveforms} />
@@ -294,24 +309,18 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
           </div>
         </div>
         {status?.recording ? (
-          <button
-            type="button"
-            {...stylex.props(styles.stopButton)}
-            disabled={automation.busy === "session"}
-            onClick={() => void automation.stopSession()}
+          <ActionButton
+            variant="danger"
+            isDisabled={automation.busy === "session"}
+            onPress={() => void automation.stopSession()}
           >
             Finalizar y aprender
-          </button>
+          </ActionButton>
         ) : (
           <div {...stylex.props(styles.trainingControls)}>
-            <span
-              {...stylex.props(
-                styles.sourceBadge,
-                sourceReady && styles.sourceBadgeReady,
-              )}
-            >
+            <StatusBadge tone={sourceReady ? "info" : "neutral"} dot={sourceReady}>
               {sourceLabel}
-            </span>
+            </StatusBadge>
             <input
               {...stylex.props(styles.input)}
               value={sessionName}
@@ -319,21 +328,17 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
               placeholder="Nombre (opcional)"
               disabled={!sourceReady}
             />
-            <button
-              type="button"
-              {...stylex.props(
-                styles.primaryButton,
-                !sourceReady && styles.disabledButton,
-              )}
-              disabled={automation.busy === "session" || !sourceReady}
-              onClick={() =>
+            <ActionButton
+              tone="cyan"
+              isDisabled={automation.busy === "session" || !sourceReady}
+              onPress={() =>
                 void automation.startSession(
                   sessionName || `Sesión ${new Date().toLocaleDateString()}`,
                 )
               }
             >
               Empezar entrenamiento
-            </button>
+            </ActionButton>
           </div>
         )}
       </div>
@@ -382,18 +387,20 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                     </span>
                   </div>
                   <div {...stylex.props(styles.sliderGestureActions)}>
-                    <button
-                      type="button"
+                    <ActionButton
+                      variant="secondary"
+                      size="small"
                       {...stylex.props(styles.curveButton)}
-                      onClick={() => setEditingSliderGestureId(gesture.id)}
+                      onPress={() => setEditingSliderGestureId(gesture.id)}
                     >
                       Editar curva
-                    </button>
-                    <button
-                      type="button"
-                      {...stylex.props(styles.curveButton, styles.deleteCurveButton)}
-                      disabled={automation.busy === "edit-examples"}
-                      onClick={() =>
+                    </ActionButton>
+                    <ActionButton
+                      variant="danger"
+                      size="small"
+                      {...stylex.props(styles.curveButton)}
+                      isDisabled={automation.busy === "edit-examples"}
+                      onPress={() =>
                         void removeSliderGesture(
                           gesture.controller,
                           gesture.points.map((point) => point.id),
@@ -401,7 +408,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                       }
                     >
                       Eliminar
-                    </button>
+                    </ActionButton>
                   </div>
                 </div>
               ))}
@@ -418,16 +425,17 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                   <small>
                     beat {event.beatWithinBar || "—"} · {event.bpm?.toFixed(1) || "—"} BPM
                   </small>
-                  <button
-                    type="button"
+                  <ActionButton
+                    variant="danger"
+                    size="small"
                     {...stylex.props(styles.excludeButton)}
-                    disabled={automation.busy === `exclude-${event.example?.id}`}
-                    onClick={() =>
+                    isDisabled={automation.busy === `exclude-${event.example?.id}`}
+                    onPress={() =>
                       event.example && void automation.excludeExample(event.example.id)
                     }
                   >
                     Excluir
-                  </button>
+                  </ActionButton>
                 </div>
               ))}
           </div>
@@ -475,7 +483,12 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
       ) : null}
 
       <div {...stylex.props(styles.lowerGrid)}>
-        <article {...stylex.props(styles.subPanel)}>
+        <Surface
+          as="article"
+          variant="subtle"
+          padding="custom"
+          {...stylex.props(styles.subPanel)}
+        >
           <div {...stylex.props(styles.cardHeading)}>
             <strong>Sesiones guardadas</strong>
             <span {...stylex.props(styles.cardDetail)}>
@@ -509,24 +522,26 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                         }}
                         aria-label="Nombre de la sesión"
                       />
-                      <button
-                        type="button"
+                      <ActionButton
+                        variant="secondary"
+                        size="small"
                         {...stylex.props(styles.sessionActionButton)}
-                        disabled={
+                        isDisabled={
                           !sessionNameDraft.trim() ||
                           automation.busy === `rename-${session.id}`
                         }
-                        onClick={() => void saveSessionName(session.id)}
+                        onPress={() => void saveSessionName(session.id)}
                       >
                         Guardar
-                      </button>
-                      <button
-                        type="button"
+                      </ActionButton>
+                      <ActionButton
+                        variant="ghost"
+                        size="small"
                         {...stylex.props(styles.sessionActionButton)}
-                        onClick={() => setEditingSessionId(null)}
+                        onPress={() => setEditingSessionId(null)}
                       >
                         Cancelar
-                      </button>
+                      </ActionButton>
                     </div>
                   ) : (
                     <>
@@ -542,27 +557,26 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                         </small>
                       </button>
                       <div {...stylex.props(styles.sessionActions)}>
-                        <button
-                          type="button"
+                        <ActionButton
+                          variant="ghost"
+                          size="small"
                           {...stylex.props(styles.sessionActionButton)}
-                          onClick={() => {
+                          onPress={() => {
                             setEditingSessionId(session.id)
                             setSessionNameDraft(session.name)
                           }}
                         >
                           Renombrar
-                        </button>
-                        <button
-                          type="button"
-                          {...stylex.props(
-                            styles.sessionActionButton,
-                            styles.sessionDeleteButton,
-                          )}
-                          disabled={automation.busy === `delete-${session.id}`}
-                          onClick={() => void removeSession(session.id, session.name)}
+                        </ActionButton>
+                        <ActionButton
+                          variant="danger"
+                          size="small"
+                          {...stylex.props(styles.sessionActionButton)}
+                          isDisabled={automation.busy === `delete-${session.id}`}
+                          onPress={() => void removeSession(session.id, session.name)}
                         >
                           Eliminar
-                        </button>
+                        </ActionButton>
                       </div>
                     </>
                   )}
@@ -575,9 +589,14 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
               </span>
             ) : null}
           </div>
-        </article>
+        </Surface>
 
-        <article {...stylex.props(styles.subPanel)}>
+        <Surface
+          as="article"
+          variant="subtle"
+          padding="custom"
+          {...stylex.props(styles.subPanel)}
+        >
           <div {...stylex.props(styles.cardHeading)}>
             <strong>Reglas de seguridad</strong>
             <span {...stylex.props(styles.cardDetail)}>
@@ -651,17 +670,17 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                   ))}
                 </select>
               </label>
-              <button
-                type="button"
-                {...stylex.props(styles.primaryButton, styles.saveButton)}
-                disabled={!settingsDirty || automation.busy === "settings"}
-                onClick={() => void saveSettings()}
+              <ActionButton
+                tone="cyan"
+                {...stylex.props(styles.saveButton)}
+                isDisabled={!settingsDirty || automation.busy === "settings"}
+                onPress={() => void saveSettings()}
               >
                 Guardar reglas
-              </button>
+              </ActionButton>
             </div>
           ) : null}
-        </article>
+        </Surface>
       </div>
 
       {automation.message ? (
@@ -735,11 +754,6 @@ const styles = stylex.create({
   statusCard: {
     display: "grid",
     gap: "10px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255,255,255,0.08)",
-    borderRadius: "18px",
-    backgroundColor: "rgba(255,255,255,0.035)",
     padding: "14px",
   },
   cardHeading: {
@@ -778,38 +792,6 @@ const styles = stylex.create({
     backgroundColor: "#0f172a",
     color: "#e2e8f0",
     padding: "9px 10px",
-  },
-  primaryButton: {
-    display: "inline-grid",
-    placeItems: "center",
-    minHeight: "38px",
-    boxSizing: "border-box",
-    borderWidth: 0,
-    borderRadius: "11px",
-    backgroundColor: "#0891b2",
-    color: "white",
-    cursor: "pointer",
-    fontWeight: 850,
-    padding: "10px 13px",
-  },
-  disabledButton: {
-    opacity: 0.45,
-    cursor: "not-allowed",
-  },
-  secondaryButton: {
-    display: "inline-grid",
-    placeItems: "center",
-    minHeight: "38px",
-    boxSizing: "border-box",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(34,211,238,0.35)",
-    borderRadius: "11px",
-    backgroundColor: "rgba(34,211,238,0.06)",
-    color: "#a5f3fc",
-    cursor: "pointer",
-    fontWeight: 800,
-    padding: "9px 12px",
   },
   recordingBar: {
     display: "flex",
@@ -855,32 +837,6 @@ const styles = stylex.create({
     justifyContent: "flex-end",
     gap: "8px",
     flexWrap: "wrap",
-  },
-  sourceBadge: {
-    borderRadius: "999px",
-    backgroundColor: "rgba(71, 85, 105, 0.16)",
-    color: "#94a3b8",
-    padding: "7px 10px",
-    fontSize: "0.72rem",
-    fontWeight: 800,
-    whiteSpace: "nowrap",
-  },
-  sourceBadgeReady: {
-    backgroundColor: "rgba(34, 211, 238, 0.12)",
-    color: "#a5f3fc",
-  },
-  stopButton: {
-    display: "inline-grid",
-    placeItems: "center",
-    minHeight: "38px",
-    boxSizing: "border-box",
-    borderWidth: 0,
-    borderRadius: "11px",
-    backgroundColor: "#dc2626",
-    color: "#fff",
-    cursor: "pointer",
-    fontWeight: 850,
-    padding: "10px 14px",
   },
   timelinePanel: {
     marginTop: "12px",
@@ -952,27 +908,9 @@ const styles = stylex.create({
   },
   curveButton: {
     flexShrink: 0,
-    display: "inline-grid",
-    placeItems: "center",
     width: "112px",
-    minHeight: "38px",
-    boxSizing: "border-box",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(167,139,250,0.35)",
-    borderRadius: "9px",
-    backgroundColor: "rgba(139,92,246,0.1)",
-    color: "#ddd6fe",
-    cursor: "pointer",
-    fontWeight: 800,
-    padding: "7px 10px",
     textAlign: "center",
     whiteSpace: "nowrap",
-  },
-  deleteCurveButton: {
-    borderColor: "rgba(248,113,113,0.35)",
-    backgroundColor: "rgba(127,29,29,0.12)",
-    color: "#fca5a5",
   },
   exampleRow: {
     display: "grid",
@@ -987,19 +925,7 @@ const styles = stylex.create({
   excludeButton: {
     gridColumn: "3",
     gridRow: "1 / span 2",
-    display: "inline-grid",
-    placeItems: "center",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(248,113,113,0.35)",
-    borderRadius: "8px",
-    backgroundColor: "rgba(127,29,29,0.15)",
-    color: "#fca5a5",
-    cursor: "pointer",
     width: "112px",
-    minHeight: "38px",
-    boxSizing: "border-box",
-    padding: "6px 8px",
   },
   suggestionResult: { display: "grid", justifyItems: "end", color: "#c4b5fd" },
   lowerGrid: {
@@ -1012,11 +938,6 @@ const styles = stylex.create({
     marginTop: "12px",
   },
   subPanel: {
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255,255,255,0.08)",
-    borderRadius: "17px",
-    backgroundColor: "rgba(255,255,255,0.025)",
     padding: "13px",
   },
   sessionList: {
@@ -1056,25 +977,8 @@ const styles = stylex.create({
     gap: "4px",
   },
   sessionActionButton: {
-    display: "inline-grid",
-    placeItems: "center",
     width: "82px",
-    minHeight: "32px",
-    boxSizing: "border-box",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255,255,255,0.1)",
-    borderRadius: "8px",
-    backgroundColor: "rgba(255,255,255,0.035)",
-    color: "#cbd5e1",
-    cursor: "pointer",
-    padding: "6px 8px",
     fontSize: "0.7rem",
-    fontWeight: 750,
-  },
-  sessionDeleteButton: {
-    borderColor: "rgba(248,113,113,0.24)",
-    color: "#fca5a5",
   },
   sessionEdit: {
     gridColumn: "1 / -1",

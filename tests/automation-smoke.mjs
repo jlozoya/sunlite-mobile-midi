@@ -122,6 +122,7 @@ deckOnly.handleDjLinkEvent({
     durationSeconds: 120,
     ...preview,
     positionMs: 5000,
+    pitchPercent: 0,
     isPlaying: true,
     isOnAir: true,
     isMaster: true,
@@ -133,6 +134,7 @@ deckOnly.handleDjLinkEvent({
   position: {
     deviceNumber: 2,
     positionMs: 5000,
+    pitchPercent: 0,
     isPlaying: true,
     isOnAir: true,
     isMaster: true,

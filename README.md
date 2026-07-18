@@ -173,8 +173,12 @@ Select a saved session to display its spectrogram, beats and MIDI actions. Incor
 
 ```bash
 bun install
-bun run start
+bun run dev
 ```
+
+`bun run dev` keeps the app running while watching the source code. Renderer changes
+are applied with Vite hot module replacement, and main-process changes recompile and
+restart Electron automatically. Use `bun run start` to run a regular production build.
 
 ## Format and check
 

@@ -1,6 +1,5 @@
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useRef, useState } from "react"
-import { Button } from "react-aria-components"
 import {
   DEFAULT_CONTROLLER_MODEL,
   getControllerModel,
@@ -12,6 +11,7 @@ import { AutomationStudio } from "./automation/AutomationStudio"
 import { useIsMobileView } from "./hooks/useIsMobileView"
 import { useControllerSocket } from "./useControllerSocket"
 import { useServerStatus } from "./useServerStatus"
+import { ActionButton, Notice, SectionHeader, StatusBadge, Surface } from "./ui-kit"
 
 type DesktopTab = "controller" | "automation" | "connection"
 
@@ -131,7 +131,7 @@ export function App() {
   return (
     <main {...stylex.props(styles.app)}>
       <header {...stylex.props(styles.header)}>
-        <div>
+        <div {...stylex.props(styles.headerCopy)}>
           <p {...stylex.props(styles.eyebrow)}>Sunlite Suite 2</p>
           <h1 {...stylex.props(styles.title)}>Mobile MIDI Controller</h1>
           <p {...stylex.props(styles.subtitle)}>
@@ -139,14 +139,9 @@ export function App() {
           </p>
         </div>
 
-        <div
-          {...stylex.props(
-            styles.status,
-            isOnline ? styles.statusOnline : styles.statusOffline,
-          )}
-        >
+        <StatusBadge tone={isOnline ? "success" : "danger"} dot>
           {statusLabel}
-        </div>
+        </StatusBadge>
       </header>
 
       {!isMobileView ? (
@@ -200,13 +195,11 @@ export function App() {
           {...stylex.props(activeDesktopTab !== "connection" && styles.tabPanelHidden)}
         >
           <section {...stylex.props(styles.heroGrid)}>
-            <section {...stylex.props(styles.panel, styles.qrPanel)}>
-              <div {...stylex.props(styles.sectionHeader)}>
-                <h2 {...stylex.props(styles.sectionTitle)}>Open on phone</h2>
-                <p {...stylex.props(styles.sectionDescription)}>
-                  Scan this QR from a device connected to the same Wi‑Fi network.
-                </p>
-              </div>
+            <Surface {...stylex.props(styles.qrPanel)}>
+              <SectionHeader
+                title="Open on phone"
+                description="Scan this QR from a device connected to the same Wi‑Fi network."
+              />
 
               {status?.qrDataUrl ? (
                 <div {...stylex.props(styles.qrWrap)}>
@@ -238,49 +231,45 @@ export function App() {
               {statusError ? (
                 <p {...stylex.props(styles.errorText)}>{statusError}</p>
               ) : null}
-            </section>
+            </Surface>
 
-            <section {...stylex.props(styles.panel)}>
-              <div {...stylex.props(styles.sectionHeader)}>
-                <h2 {...stylex.props(styles.sectionTitle)}>Conexión automática</h2>
-                <p {...stylex.props(styles.sectionDescription)}>
-                  La aplicación prepara y abre por sí sola los puertos necesarios para
-                  comunicarse con Sunlite.
-                </p>
-              </div>
+            <Surface {...stylex.props(styles.connectionPanel)}>
+              <SectionHeader
+                title="Conexión automática"
+                description="La aplicación prepara y abre por sí sola los puertos necesarios para comunicarse con Sunlite."
+              />
 
               <div {...stylex.props(styles.setupFlow)}>
                 {!status ? (
-                  <div {...stylex.props(styles.currentStep)}>
+                  <Notice>
                     <div {...stylex.props(styles.setupStepCopy)}>
                       <strong>Preparando la conexión</strong>
                       <span>Comprobando el puente MIDI y los puertos locales.</span>
                     </div>
-                  </div>
+                  </Notice>
                 ) : !status.loopMidiInstalled ? (
-                  <div {...stylex.props(styles.currentStep, styles.currentStepWarning)}>
+                  <Notice tone="warning">
                     <div {...stylex.props(styles.setupStepCopy)}>
                       <strong>Se necesita preparar el puente MIDI</strong>
                       <span>Solo tendrás que aceptar el permiso de Windows.</span>
                     </div>
                     {status.loopMidiInstallerAvailable ? (
-                      <Button
-                        {...stylex.props(styles.setupButton)}
+                      <ActionButton
                         isDisabled={setupBusy !== null}
                         onPress={() => void runSetupAction("install")}
                       >
                         {setupBusy === "install"
                           ? "Preparando..."
                           : "Preparar automáticamente"}
-                      </Button>
+                      </ActionButton>
                     ) : (
                       <span {...stylex.props(styles.setupUnavailable)}>
                         El componente MIDI no está incluido en esta compilación.
                       </span>
                     )}
-                  </div>
+                  </Notice>
                 ) : !status.midiReady ? (
-                  <div {...stylex.props(styles.currentStep, styles.currentStepWarning)}>
+                  <Notice tone="warning">
                     <div {...stylex.props(styles.setupStepCopy)}>
                       <strong>Terminando la conexión MIDI</strong>
                       <span>
@@ -289,26 +278,25 @@ export function App() {
                       </span>
                     </div>
                     <div {...stylex.props(styles.setupActions)}>
-                      <Button
-                        {...stylex.props(styles.setupButton)}
+                      <ActionButton
                         isDisabled={setupBusy !== null}
                         onPress={() => void runSetupAction("install")}
                       >
                         {setupBusy === "install" ? "Preparando..." : "Reintentar"}
-                      </Button>
-                      <Button
-                        {...stylex.props(styles.setupButton, styles.setupButtonSecondary)}
+                      </ActionButton>
+                      <ActionButton
+                        variant="secondary"
                         isDisabled={setupBusy !== null || isLoading}
                         onPress={() => void runSetupAction("refresh")}
                       >
                         {setupBusy === "refresh" || isLoading
                           ? "Actualizando..."
                           : "Comprobar puertos"}
-                      </Button>
+                      </ActionButton>
                     </div>
-                  </div>
+                  </Notice>
                 ) : (
-                  <div {...stylex.props(styles.currentStep, styles.currentStepReady)}>
+                  <Notice tone="success">
                     <div {...stylex.props(styles.setupStepCopy)}>
                       <strong>Puente MIDI listo</strong>
                       <span>
@@ -326,17 +314,17 @@ export function App() {
                       </span>
                     </div>
                     <div {...stylex.props(styles.setupActions)}>
-                      <Button
-                        {...stylex.props(styles.setupButton, styles.setupButtonSecondary)}
+                      <ActionButton
+                        variant="secondary"
                         isDisabled={setupBusy !== null || isLoading}
                         onPress={() => void runSetupAction("refresh")}
                       >
                         {setupBusy === "refresh" || isLoading
                           ? "Actualizando..."
                           : "Comprobar"}
-                      </Button>
+                      </ActionButton>
                     </div>
-                  </div>
+                  </Notice>
                 )}
               </div>
 
@@ -362,7 +350,7 @@ export function App() {
                   {status.feedbackDisabledReason}
                 </p>
               ) : null}
-            </section>
+            </Surface>
           </section>
         </section>
       ) : null}
@@ -395,11 +383,11 @@ export function App() {
             midiChannel={status?.midiChannel ?? 1}
           />
         ) : (
-          <section {...stylex.props(styles.panel, styles.controlsLockedPanel)}>
-            <div {...stylex.props(styles.sectionHeader)}>
-              <h2 {...stylex.props(styles.sectionTitle)}>Controlador no disponible</h2>
-              <p {...stylex.props(styles.sectionDescription)}>
-                {isMobileView ? (
+          <Surface {...stylex.props(styles.controlsLockedPanel)}>
+            <SectionHeader
+              title="Controlador no disponible"
+              description={
+                isMobileView ? (
                   <>
                     Termina la conexión con Sunlite desde la computadora. El controlador
                     aparecerá aquí en cuanto el puerto MIDI esté listo.
@@ -409,18 +397,15 @@ export function App() {
                     La conexión MIDI todavía no está lista. La aplicación puede preparar
                     los puertos automáticamente desde la pestaña Conexión.
                   </>
-                )}
-              </p>
-            </div>
+                )
+              }
+            />
             {!isMobileView ? (
-              <Button
-                {...stylex.props(styles.setupButton)}
-                onPress={() => setActiveDesktopTab("connection")}
-              >
+              <ActionButton onPress={() => setActiveDesktopTab("connection")}>
                 Ir a Conexión
-              </Button>
+              </ActionButton>
             ) : null}
-          </section>
+          </Surface>
         )
       ) : (
         <section
@@ -445,21 +430,15 @@ export function App() {
               midiChannel={status?.midiChannel ?? 1}
             />
           ) : (
-            <section {...stylex.props(styles.panel, styles.controlsLockedPanel)}>
-              <div {...stylex.props(styles.sectionHeader)}>
-                <h2 {...stylex.props(styles.sectionTitle)}>Controlador no disponible</h2>
-                <p {...stylex.props(styles.sectionDescription)}>
-                  La conexión MIDI todavía no está lista. La aplicación puede preparar los
-                  puertos automáticamente desde la pestaña Conexión.
-                </p>
-              </div>
-              <Button
-                {...stylex.props(styles.setupButton)}
-                onPress={() => setActiveDesktopTab("connection")}
-              >
+            <Surface {...stylex.props(styles.controlsLockedPanel)}>
+              <SectionHeader
+                title="Controlador no disponible"
+                description="La conexión MIDI todavía no está lista. La aplicación puede preparar los puertos automáticamente desde la pestaña Conexión."
+              />
+              <ActionButton onPress={() => setActiveDesktopTab("connection")}>
                 Ir a Conexión
-              </Button>
-            </section>
+              </ActionButton>
+            </Surface>
           )}
         </section>
       )}
@@ -475,7 +454,10 @@ const styles = stylex.create({
   app: {
     width: "100%",
     maxWidth: "none",
-    minWidth: "360px",
+    minWidth: {
+      default: "360px",
+      "@media (max-width: 400px)": 0,
+    },
     margin: 0,
     padding: {
       default: "18px",
@@ -493,12 +475,20 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: "16px",
+    flexWrap: {
+      default: "nowrap",
+      "@media (max-width: 760px)": "wrap",
+    },
     borderBottomWidth: "1px",
     borderBottomStyle: "solid",
     borderBottomColor: "rgba(255, 255, 255, 0.08)",
     backgroundColor: "rgba(8, 10, 18, 0.92)",
     backdropFilter: "blur(12px)",
     padding: "18px 0 16px",
+  },
+  headerCopy: {
+    flex: "1 1 260px",
+    minWidth: 0,
   },
   eyebrow: {
     margin: "0 0 4px",
@@ -517,25 +507,6 @@ const styles = stylex.create({
     margin: "8px 0 0",
     color: "#93c5fd",
     fontSize: "0.9rem",
-  },
-  status: {
-    flexShrink: 0,
-    borderRadius: "999px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    padding: "10px 14px",
-    fontSize: "0.84rem",
-    fontWeight: 900,
-  },
-  statusOnline: {
-    borderColor: "rgba(16, 185, 129, 0.32)",
-    backgroundColor: "rgba(16, 185, 129, 0.14)",
-    color: "#a7f3d0",
-  },
-  statusOffline: {
-    borderColor: "rgba(239, 68, 68, 0.34)",
-    backgroundColor: "rgba(239, 68, 68, 0.12)",
-    color: "#fecaca",
   },
   tabs: {
     display: "flex",
@@ -626,35 +597,11 @@ const styles = stylex.create({
     },
     gap: "16px",
   },
-  panel: {
-    marginTop: "16px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: "22px",
-    backgroundColor: "rgba(18, 22, 38, 0.86)",
-    boxShadow: "0 16px 48px rgba(0, 0, 0, 0.28)",
-    padding: "16px",
-  },
+  connectionPanel: { marginTop: "16px" },
   qrPanel: {
+    marginTop: "16px",
     display: "grid",
     justifyItems: "center",
-  },
-  sectionHeader: {
-    display: "grid",
-    gap: "4px",
-    marginBottom: "14px",
-    width: "100%",
-  },
-  sectionTitle: {
-    margin: 0,
-    fontSize: "1rem",
-  },
-  sectionDescription: {
-    margin: 0,
-    color: "#94a3b8",
-    fontSize: "0.9rem",
-    lineHeight: 1.5,
   },
   qrWrap: {
     width: "min(100%, 320px)",
@@ -713,29 +660,6 @@ const styles = stylex.create({
     gap: "10px",
     marginTop: "14px",
   },
-  currentStep: {
-    display: "grid",
-    gridTemplateColumns: {
-      default: "1fr",
-      "@media (min-width: 720px)": "1fr auto",
-    },
-    alignItems: "center",
-    gap: "14px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: "18px",
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    padding: "14px",
-  },
-  currentStepWarning: {
-    borderColor: "rgba(245, 158, 11, 0.34)",
-    backgroundColor: "rgba(245, 158, 11, 0.09)",
-  },
-  currentStepReady: {
-    borderColor: "rgba(16, 185, 129, 0.34)",
-    backgroundColor: "rgba(16, 185, 129, 0.1)",
-  },
   setupStepCopy: {
     display: "grid",
     gap: "6px",
@@ -747,21 +671,6 @@ const styles = stylex.create({
     gap: "10px",
     flexWrap: "wrap",
     justifyContent: "flex-end",
-  },
-  setupButton: {
-    borderWidth: 0,
-    borderRadius: "14px",
-    backgroundColor: "#8b5cf6",
-    color: "#ffffff",
-    cursor: "pointer",
-    fontWeight: 800,
-    padding: "12px 14px",
-  },
-  setupButtonSecondary: {
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(167, 139, 250, 0.5)",
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
   },
   setupUnavailable: {
     color: "#fecaca",
@@ -778,6 +687,7 @@ const styles = stylex.create({
     fontSize: "0.86rem",
   },
   controlsLockedPanel: {
+    marginTop: "16px",
     minHeight: "180px",
   },
   warningText: {

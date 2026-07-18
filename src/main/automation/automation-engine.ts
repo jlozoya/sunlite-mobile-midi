@@ -361,6 +361,7 @@ export class AutomationEngine {
         this.waveforms.set(event.position.deviceNumber, {
           ...waveform,
           positionMs: event.position.positionMs,
+          pitchPercent: event.position.pitchPercent,
           isPlaying: event.position.isPlaying,
           isOnAir: event.position.isOnAir,
           isMaster: event.position.isMaster,

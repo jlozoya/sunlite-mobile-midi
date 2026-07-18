@@ -5,6 +5,7 @@ import {
   type SliderCurvePoint,
   type SliderGesture,
 } from "./slider-curves"
+import { ActionButton, Surface } from "../ui-kit"
 
 type Props = {
   gesture: SliderGesture
@@ -112,7 +113,8 @@ export function SliderCurveEditor({ gesture, busy, onClose, onSave }: Props) {
 
   return (
     <div {...stylex.props(styles.overlay)} role="presentation" onMouseDown={onClose}>
-      <section
+      <Surface
+        variant="raised"
         {...stylex.props(styles.dialog)}
         role="dialog"
         aria-modal="true"
@@ -128,9 +130,9 @@ export function SliderCurveEditor({ gesture, busy, onClose, onSave }: Props) {
               El promedio suave reduce el ruido de los mensajes MIDI intermedios.
             </p>
           </div>
-          <button type="button" {...stylex.props(styles.closeButton)} onClick={onClose}>
+          <ActionButton variant="ghost" size="small" onPress={onClose}>
             Cerrar
-          </button>
+          </ActionButton>
         </div>
 
         <div {...stylex.props(styles.chartWrap)}>
@@ -200,35 +202,34 @@ export function SliderCurveEditor({ gesture, busy, onClose, onSave }: Props) {
           <span>Duración: {Math.round(duration)} ms</span>
         </div>
         <div {...stylex.props(styles.actions)}>
-          <button
-            type="button"
-            {...stylex.props(styles.secondaryButton)}
-            onClick={() => setPoints(averageSliderCurve(points))}
+          <ActionButton
+            variant="secondary"
+            tone="cyan"
+            onPress={() => setPoints(averageSliderCurve(points))}
           >
             Suavizar curva
-          </button>
-          <button
-            type="button"
-            {...stylex.props(styles.secondaryButton)}
-            onClick={() => {
+          </ActionButton>
+          <ActionButton
+            variant="secondary"
+            tone="cyan"
+            onPress={() => {
               setPoints(gesture.points.map((point) => ({ ...point })))
               setDeletedIds([])
             }}
           >
             Restaurar
-          </button>
-          <button
-            type="button"
-            {...stylex.props(styles.primaryButton)}
-            disabled={busy}
-            onClick={async () => {
+          </ActionButton>
+          <ActionButton
+            tone="cyan"
+            isDisabled={busy}
+            onPress={async () => {
               if (await onSave({ points, deletedIds })) onClose()
             }}
           >
             {busy ? "Guardando..." : "Guardar curva"}
-          </button>
+          </ActionButton>
         </div>
-      </section>
+      </Surface>
     </div>
   )
 }
@@ -249,13 +250,6 @@ const styles = stylex.create({
     width: "min(900px, 100%)",
     maxHeight: "calc(100vh - 36px)",
     overflowY: "auto",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(34, 211, 238, 0.3)",
-    borderRadius: "22px",
-    backgroundColor: "#0b1120",
-    boxShadow: "0 30px 100px rgba(0,0,0,0.65)",
-    padding: "18px",
     userSelect: "none",
   },
   heading: {
@@ -272,19 +266,6 @@ const styles = stylex.create({
   },
   title: { margin: "4px 0", fontSize: "1.25rem" },
   description: { margin: 0, color: "#94a3b8", fontSize: "0.82rem" },
-  closeButton: {
-    display: "inline-grid",
-    placeItems: "center",
-    minHeight: "32px",
-    boxSizing: "border-box",
-    alignSelf: "flex-start",
-    borderWidth: 0,
-    borderRadius: "9px",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    color: "#cbd5e1",
-    cursor: "pointer",
-    padding: "8px 10px",
-  },
   chartWrap: {
     marginTop: "16px",
     borderRadius: "14px",
@@ -312,33 +293,5 @@ const styles = stylex.create({
     gap: "8px",
     flexWrap: "wrap",
     marginTop: "15px",
-  },
-  primaryButton: {
-    display: "inline-grid",
-    placeItems: "center",
-    minHeight: "38px",
-    boxSizing: "border-box",
-    borderWidth: 0,
-    borderRadius: "10px",
-    backgroundColor: "#0891b2",
-    color: "#fff",
-    cursor: "pointer",
-    fontWeight: 800,
-    padding: "9px 12px",
-  },
-  secondaryButton: {
-    display: "inline-grid",
-    placeItems: "center",
-    minHeight: "38px",
-    boxSizing: "border-box",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255,255,255,0.12)",
-    borderRadius: "10px",
-    backgroundColor: "rgba(255,255,255,0.04)",
-    color: "#cbd5e1",
-    cursor: "pointer",
-    fontWeight: 750,
-    padding: "9px 12px",
   },
 })

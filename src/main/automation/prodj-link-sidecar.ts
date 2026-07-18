@@ -304,6 +304,7 @@ export class ProDjLinkSidecar {
       position: {
         deviceNumber: state.deviceId,
         positionMs,
+        pitchPercent: state.effectivePitch,
         isPlaying: playing,
         isOnAir: state.isOnAir,
         isMaster: state.isMaster,
@@ -359,6 +360,7 @@ export class ProDjLinkSidecar {
           durationSeconds: track.duration,
           ...preview,
           positionMs,
+          pitchPercent: state.effectivePitch,
           isPlaying: playerIsPlaying(state),
           isOnAir: state.isOnAir,
           isMaster: state.isMaster,

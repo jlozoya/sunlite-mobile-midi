@@ -4,13 +4,14 @@ import "./midi-led.css"
 import { createRoot } from "react-dom/client"
 import * as stylex from "@stylexjs/stylex"
 import { App } from "./ui/App"
+import { tokens } from "./ui/ui-kit/tokens.stylex"
 
 const globalStyles = stylex.create({
   base: {
     margin: 0,
     minHeight: "100%",
-    backgroundColor: "#080a12",
-    color: "#f8fafc",
+    backgroundColor: tokens.colorCanvas,
+    color: tokens.colorText,
     fontFamily:
       'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },

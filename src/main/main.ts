@@ -1468,7 +1468,7 @@ async function createWindow(status: ServerStatus) {
     return { action: "deny" }
   })
 
-  await mainWindow.loadURL(status.localUrl)
+  await mainWindow.loadURL(process.env.SUNLITE_DEV_RENDERER_URL || status.localUrl)
   mainWindow.maximize()
   mainWindow.show()
 }

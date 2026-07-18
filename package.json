@@ -18,6 +18,7 @@
     "build:sidecar": "powershell -ExecutionPolicy Bypass -File scripts/build-python-sidecar.ps1",
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
     "build": "bun run format:check && bun run build:main && bun run build:renderer",
+    "dev": "bun run build:main && bun run rebuild:electron && node scripts/dev.mjs",
     "start": "bun run build && bun run rebuild:electron && electron dist/main/main.js",
     "pack": "bun run build && electron-builder --dir",
     "dist": "bun run build && electron-builder",

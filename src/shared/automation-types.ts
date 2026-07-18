@@ -60,6 +60,7 @@ export type DjLinkWaveform = {
   heights: number[]
   colors: Array<[number, number, number]>
   positionMs: number
+  pitchPercent: number
   isPlaying: boolean
   isOnAir: boolean
   isMaster: boolean
@@ -69,6 +70,7 @@ export type DjLinkWaveform = {
 export type DjLinkWaveformPosition = {
   deviceNumber: number
   positionMs: number
+  pitchPercent: number
   isPlaying: boolean
   isOnAir: boolean
   isMaster: boolean

@@ -154,7 +154,7 @@ export function useControllerSocket() {
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws"
-    const url = `${protocol}://${window.location.host}`
+    const url = `${protocol}://${window.location.host}/ws`
     const socket = new WebSocket(url)
 
     socketRef.current = socket

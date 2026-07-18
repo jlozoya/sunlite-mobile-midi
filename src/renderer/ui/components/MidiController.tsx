@@ -11,6 +11,7 @@ import { ControllerConfigModal } from "./ControllerConfigModal"
 import { FaderStrip } from "./FaderStrip"
 import { PadButton } from "./PadButton"
 import { SceneButton } from "./SceneButton"
+import { Notice, Surface } from "../ui-kit"
 
 export type MidiControllerProps = {
   model: MidiControllerModel
@@ -54,9 +55,11 @@ export function MidiController({
   }
 
   return (
-    <section {...stylex.props(styles.controllerPanel)}>
+    <Surface variant="solid" padding="custom" {...stylex.props(styles.controllerPanel)}>
       {feedbackWarning ? (
-        <p {...stylex.props(styles.warningText)}>{feedbackWarning}</p>
+        <Notice tone="warning" layout="stack" {...stylex.props(styles.warningText)}>
+          {feedbackWarning}
+        </Notice>
       ) : null}
 
       <div {...stylex.props(styles.controllerSurface)}>
@@ -185,7 +188,7 @@ export function MidiController({
           }}
         />
       ) : null}
-    </section>
+    </Surface>
   )
 }
 
@@ -229,12 +232,6 @@ const styles = stylex.create({
     width: "100%",
     minWidth: 0,
     marginTop: "16px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255, 255, 255, 0.12)",
-    borderRadius: "26px",
-    backgroundColor: "#111827",
-    boxShadow: "0 20px 60px rgba(0, 0, 0, 0.34)",
     padding: {
       default: "clamp(10px, 1.2vw, 18px)",
       "@media (max-width: 760px)": "8px",
@@ -244,15 +241,6 @@ const styles = stylex.create({
   },
   warningText: {
     margin: "12px 0 0",
-    borderRadius: "14px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(245, 158, 11, 0.38)",
-    backgroundColor: "rgba(245, 158, 11, 0.1)",
-    color: "#fde68a",
-    padding: "10px 12px",
-    fontSize: "0.86rem",
-    lineHeight: 1.45,
   },
   controllerSurface: {
     width: "100%",

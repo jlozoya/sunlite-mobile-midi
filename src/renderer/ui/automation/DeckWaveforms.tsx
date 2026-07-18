@@ -13,6 +13,8 @@ function formatTime(milliseconds: number): string {
 
 function WaveformCanvas({ waveform }: { waveform: DjLinkWaveform }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const progressRef = useRef<HTMLDivElement | null>(null)
+  const playheadRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -38,25 +40,49 @@ function WaveformCanvas({ waveform }: { waveform: DjLinkWaveform }) {
       )
     }
 
-    const durationMs = Math.max(1, waveform.durationSeconds * 1000)
-    const playheadX = Math.max(
-      0,
-      Math.min(width - 1, (waveform.positionMs / durationMs) * width),
-    )
-    context.fillStyle = "rgba(255, 255, 255, 0.92)"
-    context.fillRect(playheadX - 1, 0, 2, height)
     context.fillStyle = "rgba(255, 255, 255, 0.18)"
     context.fillRect(0, height / 2, width, 1)
+  }, [waveform.colors, waveform.heights])
+
+  useEffect(() => {
+    const progress = progressRef.current
+    const playhead = playheadRef.current
+    if (!progress || !playhead) return
+
+    const durationMs = Math.max(1, waveform.durationSeconds * 1000)
+    const playbackRate = Math.max(0, 1 + waveform.pitchPercent / 100)
+    let animationFrame = 0
+
+    const drawPlayhead = () => {
+      const elapsedMs = waveform.isPlaying
+        ? Math.max(0, Date.now() - waveform.updatedAt) * playbackRate
+        : 0
+      const positionMs = Math.min(durationMs, waveform.positionMs + elapsedMs)
+      const progressRatio = Math.max(0, Math.min(1, positionMs / durationMs))
+
+      progress.style.transform = `scaleX(${progressRatio})`
+      playhead.style.left = `${progressRatio * 100}%`
+      animationFrame = window.requestAnimationFrame(drawPlayhead)
+    }
+
+    drawPlayhead()
+    return () => window.cancelAnimationFrame(animationFrame)
   }, [waveform])
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={1200}
-      height={118}
-      aria-label={`Waveform del deck ${waveform.deviceNumber}: ${waveform.title}`}
-      {...stylex.props(styles.canvas)}
-    />
+    <div {...stylex.props(styles.canvasFrame)}>
+      <canvas
+        ref={canvasRef}
+        width={1200}
+        height={118}
+        aria-label={`Waveform del deck ${waveform.deviceNumber}: ${waveform.title}`}
+        {...stylex.props(styles.canvas)}
+      />
+      <div ref={progressRef} aria-hidden="true" {...stylex.props(styles.progress)} />
+      <div ref={playheadRef} aria-hidden="true" {...stylex.props(styles.playhead)}>
+        <span {...stylex.props(styles.playheadDot)} />
+      </div>
+    </div>
   )
 }
 
@@ -211,7 +237,42 @@ const styles = stylex.create({
     display: "block",
     width: "100%",
     height: "82px",
+  },
+  canvasFrame: {
+    position: "relative",
+    overflow: "hidden",
     borderRadius: "9px",
+  },
+  progress: {
+    position: "absolute",
+    inset: 0,
+    transformOrigin: "left center",
+    backgroundColor: "rgba(34, 211, 238, 0.1)",
+    pointerEvents: "none",
+  },
+  playhead: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: "2px",
+    transform: "translateX(-1px)",
+    backgroundColor: "#f8fafc",
+    boxShadow: "0 0 8px rgba(34, 211, 238, 0.95)",
+    pointerEvents: "none",
+  },
+  playheadDot: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    width: "11px",
+    height: "11px",
+    transform: "translate(-50%, -50%)",
+    borderWidth: "2px",
+    borderStyle: "solid",
+    borderColor: "#22d3ee",
+    borderRadius: "50%",
+    backgroundColor: "#ffffff",
+    boxShadow: "0 0 0 3px rgba(34, 211, 238, 0.2), 0 0 12px #22d3ee",
   },
   timeRow: {
     display: "flex",
