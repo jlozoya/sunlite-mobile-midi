@@ -163,6 +163,7 @@ To obtain detailed player state and waveform data, the application announces its
 - Manual MIDI input suspends automatic output temporarily.
 - PRO DJ LINK decisions are quantized to the first beat of a bar.
 - Automatic output requires a trained model, a live CDJ waveform or mixer audio, and the configured confidence threshold.
+- Contexts that are too different from the recorded training examples remain below the automatic confidence threshold, even when the nearest examples agree on an action.
 - Sessions and the model are stored under the Electron user-data directory in `automation/`.
 
 ### Training data review

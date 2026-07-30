@@ -92,6 +92,52 @@ assert.equal(inference.getStatus().lastSuggestion?.command.type, "note")
 assert.equal(inference.getStatus().lastSuggestion?.executed, false)
 assert.match(inference.getStatus().lastSuggestion?.blockedReason ?? "", /asistido/)
 
+const distantExecutions = []
+const distantInference = new AutomationEngine(
+  testRoot,
+  () => {},
+  (command) => distantExecutions.push(command),
+)
+distantInference.setMode("auto")
+distantInference.handleDjLinkEvent({
+  type: "waveform-position",
+  position: {
+    deviceNumber: 1,
+    positionMs: 12000,
+    pitchPercent: 0,
+    isPlaying: true,
+    isOnAir: true,
+    isMaster: true,
+    features: {
+      rms: 1,
+      bass: 0,
+      mid: 1,
+      high: 1,
+      flux: 1,
+      centroid: 1,
+    },
+    receivedAt: Date.now(),
+  },
+})
+distantInference.handleDjLinkEvent({
+  type: "beat",
+  beat: {
+    deviceNumber: 1,
+    name: "CDJ-3000",
+    address: "192.168.10.10",
+    bpm: 220,
+    beatWithinBar: 1,
+    pitchPercent: 0,
+    receivedAt: Date.now(),
+  },
+})
+const distantSuggestion = distantInference.getStatus().lastSuggestion
+assert.ok(distantSuggestion)
+assert.equal(distantExecutions.length, 0)
+assert.equal(distantSuggestion.executed, false)
+assert.ok(distantSuggestion.confidence < 0.62)
+assert.match(distantSuggestion.blockedReason ?? "", /confianza/)
+
 const rawWaveform = Array.from({ length: 1800 }, (_, index) => ({
   height: 8 + (index % 24),
   color: [

@@ -160,10 +160,14 @@ export class ExamplePolicyEngine {
     const agreement = winner.score / totalScore
     const similarity = clamp01(1 - winner.closestDistance / 0.7)
     const coverage = clamp01(winner.count / 3)
+    const support = agreement * 0.75 + coverage * 0.25
 
     return {
       command: winner.command,
-      confidence: clamp01(agreement * 0.65 + similarity * 0.25 + coverage * 0.1),
+      // Agreement cannot make an unfamiliar context safe by itself. Requiring
+      // similarity keeps unanimous but out-of-distribution neighbors below the
+      // automatic execution threshold.
+      confidence: clamp01(support * similarity),
       neighborCount: winner.count,
       distance: winner.closestDistance,
     }
