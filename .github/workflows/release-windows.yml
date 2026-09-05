@@ -8,7 +8,13 @@ permissions:
   contents: read
 jobs:
   build:
-    runs-on: windows-latest
+    # Pinned, not windows-latest. That label now resolves to windows-2025-vs2026,
+    # and the node-gyp bundled with @electron/rebuild cannot detect Visual Studio
+    # 2026, so rebuilding the native MIDI and SQLite modules fails with
+    # "Could not find any Visual Studio installation to use". windows-2022 ships
+    # a Visual Studio this node-gyp recognises. Revisit when @electron/rebuild
+    # ships a node-gyp that knows VS2026.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
