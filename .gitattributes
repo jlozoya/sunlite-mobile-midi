@@ -1,0 +1,14 @@
+# Prettier is configured with endOfLine "lf". Without this file a Windows
+# checkout with core.autocrlf=true converts every text file to CRLF, and
+# `prettier --check` then fails on the whole tree. GitHub's Windows runners
+# set core.autocrlf=true, so the release build cannot pass without it.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.exe binary
+*.msi binary
+*.7z binary
+*.zip binary
+*.node binary
+*.dll binary
