@@ -1,15 +1,39 @@
 import * as stylex from "@stylexjs/stylex"
-import { useState } from "react"
-import { Button } from "react-aria-components"
+import { useEffect, useRef, useState } from "react"
 import {
   DEFAULT_CONTROLLER_MODEL,
   getControllerModel,
   type ControllerCustomization,
 } from "../../shared/controller-config.ts"
 import { MidiController } from "./components/MidiController"
+import { AppUpdates } from "./components/AppUpdates"
+import { Toast } from "./components/Toast"
+import { AutomationStudio } from "./automation/AutomationStudio"
 import { useIsMobileView } from "./hooks/useIsMobileView"
 import { useControllerSocket } from "./useControllerSocket"
 import { useServerStatus } from "./useServerStatus"
+import { ActionButton, Notice, SectionHeader, StatusBadge, Surface } from "./ui-kit"
+
+import {
+  LIGHTING_SOFTWARE_LABELS,
+  type LightingSoftware,
+} from "../../shared/lighting-software"
+
+type DesktopTab = "controller" | "automation" | "connection"
+
+const DESKTOP_TABS: Array<{
+  id: DesktopTab
+  label: string
+  description: string
+}> = [
+  { id: "controller", label: "Controlador", description: "Escenas y faders MIDI" },
+  {
+    id: "automation",
+    label: "Automatización",
+    description: "Audio, CDJ y entrenamiento",
+  },
+  { id: "connection", label: "Conexión", description: "Software, red y teléfono" },
+]
 
 export function App() {
   const { status, error: statusError, isLoading, refreshStatus } = useServerStatus()
@@ -22,21 +46,48 @@ export function App() {
     controllerCustomization,
     setControllerCustomization,
     sendCommand,
+    sendAutomationCommand,
   } = useControllerSocket()
   const [setupMessage, setSetupMessage] = useState<string | null>(null)
-  const [setupBusy, setSetupBusy] = useState<"install" | "open" | "refresh" | null>(null)
+  const [setupBusy, setSetupBusy] = useState<"install" | "refresh" | null>(null)
+  const [activeDesktopTab, setActiveDesktopTab] = useState<DesktopTab>("controller")
+  const initialTabSelected = useRef(false)
+  const [softwareBusy, setSoftwareBusy] = useState(false)
+  const software = status?.lightingSoftware ?? "sunlite"
+  const softwareLabel = LIGHTING_SOFTWARE_LABELS[software]
 
-  async function runSetupAction(action: "install" | "open" | "refresh") {
+  async function changeLightingSoftware(next: LightingSoftware) {
+    setSoftwareBusy(true)
+    try {
+      const response = await fetch("/api/lighting-software", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ software: next }),
+      })
+      if (!response.ok) {
+        const payload = await response.json()
+        throw new Error(payload.message ?? "No se pudo cambiar de software")
+      }
+      await refreshStatus()
+      setSetupMessage(
+        "Perfil cargado en modo Manual. Revisa el mapeo antes de activar Auto.",
+      )
+    } catch (error) {
+      setSetupMessage(
+        error instanceof Error ? error.message : "Error al cambiar de software",
+      )
+    } finally {
+      setSoftwareBusy(false)
+    }
+  }
+
+  async function runSetupAction(action: "install" | "refresh") {
     setSetupBusy(action)
     setSetupMessage(null)
 
     try {
       const endpoint =
-        action === "install"
-          ? "/api/loopmidi/install"
-          : action === "open"
-            ? "/api/loopmidi/open"
-            : "/api/midi/refresh"
+        action === "install" ? "/api/loopmidi/install" : "/api/midi/refresh"
       const response = await fetch(endpoint, { method: "POST" })
       const payload = (await response.json()) as {
         ok?: boolean
@@ -49,22 +100,20 @@ export function App() {
         throw new Error(payload.message ?? `Setup action failed: ${response.status}`)
       }
 
-      await refreshStatus()
+      const refreshedStatus = await refreshStatus()
+
+      if (refreshedStatus?.loopMidiInstalled && refreshedStatus.midiReady) {
+        setActiveDesktopTab("controller")
+      }
 
       if (action === "install") {
         setSetupMessage(
-          payload.skipped
-            ? "loopMIDI is already installed. Open it and create Sunlite Mobile In and Sunlite Mobile Out if they are not visible yet."
-            : payload.code === 0
-              ? "loopMIDI installer finished. Open loopMIDI and create Sunlite Mobile In and Sunlite Mobile Out if they are not visible yet."
-              : "loopMIDI installer was launched. Finish the installer, then refresh MIDI ports.",
-        )
-      } else if (action === "open") {
-        setSetupMessage(
-          "loopMIDI was opened. Create two ports named Sunlite Mobile In and Sunlite Mobile Out, then refresh MIDI ports.",
+          payload.code === 0 || payload.skipped
+            ? "El puente MIDI quedó configurado automáticamente."
+            : "Windows no pudo terminar la preparación del puente MIDI.",
         )
       } else {
-        setSetupMessage("MIDI ports refreshed.")
+        setSetupMessage("Puertos MIDI actualizados.")
       }
     } catch (error) {
       setSetupMessage(error instanceof Error ? error.message : "Unknown setup error")
@@ -101,258 +150,405 @@ export function App() {
     : connectionState === "connecting"
       ? "Connecting"
       : "Offline"
-  const shouldShowOpenLoopMidi = Boolean(status?.loopMidiExecutablePath)
   const isControllerReady = Boolean(status?.loopMidiInstalled && status?.midiReady)
   const isMobileView = useIsMobileView()
   const controllerModel = getControllerModel(
     controllerCustomization.modelId ?? DEFAULT_CONTROLLER_MODEL.id,
   )
 
+  useEffect(() => {
+    if (!status || initialTabSelected.current) return
+    initialTabSelected.current = true
+    setActiveDesktopTab(isControllerReady ? "controller" : "connection")
+  }, [isControllerReady, status])
+
   return (
     <main {...stylex.props(styles.app)}>
       <header {...stylex.props(styles.header)}>
-        <div>
-          <p {...stylex.props(styles.eyebrow)}>Sunlite Suite 2</p>
+        <div {...stylex.props(styles.headerCopy)}>
+          <p {...stylex.props(styles.eyebrow)}>{softwareLabel}</p>
           <h1 {...stylex.props(styles.title)}>Mobile MIDI Controller</h1>
           <p {...stylex.props(styles.subtitle)}>
             {serverMidiLabel ?? "Waiting for MIDI server"}
           </p>
         </div>
 
-        <div
-          {...stylex.props(
-            styles.status,
-            isOnline ? styles.statusOnline : styles.statusOffline,
-          )}
-        >
+        <StatusBadge tone={isOnline ? "success" : "danger"} dot>
           {statusLabel}
-        </div>
+        </StatusBadge>
       </header>
 
+      <AppUpdates />
+
       {!isMobileView ? (
-        <section {...stylex.props(styles.heroGrid)}>
-          <section {...stylex.props(styles.panel, styles.qrPanel)}>
-            <div {...stylex.props(styles.sectionHeader)}>
-              <h2 {...stylex.props(styles.sectionTitle)}>Open on phone</h2>
-              <p {...stylex.props(styles.sectionDescription)}>
-                Scan this QR from a device connected to the same Wi‑Fi network.
-              </p>
-            </div>
+        <nav {...stylex.props(styles.tabs)} aria-label="Secciones de la aplicación">
+          <div {...stylex.props(styles.tabList)} role="tablist">
+            {DESKTOP_TABS.map((tab) => {
+              const isActive = activeDesktopTab === tab.id
+              const needsAttention = tab.id === "connection" && !isControllerReady
 
-            {status?.qrDataUrl ? (
-              <div {...stylex.props(styles.qrWrap)}>
-                <img
-                  {...stylex.props(styles.qrImage)}
-                  src={status.qrDataUrl}
-                  alt="Mobile controller QR code"
-                />
-              </div>
-            ) : (
-              <div {...stylex.props(styles.qrPlaceholder)}>Loading QR</div>
-            )}
-
-            <div {...stylex.props(styles.urlBox)}>
-              {status?.preferredLanUrl ?? "Detecting LAN URL"}
-            </div>
-
-            {status?.networkUrlCandidates && status.networkUrlCandidates.length > 1 ? (
-              <div {...stylex.props(styles.networkList)}>
-                <strong>Other detected URLs</strong>
-                {status.networkUrlCandidates.slice(1).map((candidate) => (
-                  <span key={`${candidate.interfaceName}-${candidate.address}`}>
-                    {candidate.url} · {candidate.interfaceName} · {candidate.note}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-
-            {statusError ? (
-              <p {...stylex.props(styles.errorText)}>{statusError}</p>
-            ) : null}
-          </section>
-
-          <section {...stylex.props(styles.panel)}>
-            <div {...stylex.props(styles.sectionHeader)}>
-              <h2 {...stylex.props(styles.sectionTitle)}>Setup</h2>
-              <p {...stylex.props(styles.sectionDescription)}>
-                Configure two loopMIDI ports once. The controller appears after{" "}
-                <strong>Sunlite Mobile In</strong> is ready.{" "}
-                <strong>Sunlite Mobile Out</strong> is optional and only used for
-                feedback.
-              </p>
-            </div>
-
-            <div {...stylex.props(styles.setupFlow)}>
-              {!status ? (
-                <div {...stylex.props(styles.currentStep)}>
-                  <div {...stylex.props(styles.setupStepCopy)}>
-                    <strong>Loading setup status</strong>
-                    <span>
-                      Checking loopMIDI, available MIDI ports, and LAN controller URL.
-                    </span>
-                  </div>
-                </div>
-              ) : !status.loopMidiInstalled ? (
-                <div {...stylex.props(styles.currentStep, styles.currentStepWarning)}>
-                  <div {...stylex.props(styles.setupStepCopy)}>
-                    <strong>1. Install loopMIDI</strong>
-                    <span>Install the virtual MIDI driver first.</span>
-                  </div>
-                  {status.loopMidiInstallerAvailable ? (
-                    <Button
-                      {...stylex.props(styles.setupButton)}
-                      isDisabled={setupBusy !== null}
-                      onPress={() => void runSetupAction("install")}
-                    >
-                      {setupBusy === "install" ? "Installing..." : "Install loopMIDI"}
-                    </Button>
-                  ) : (
-                    <span {...stylex.props(styles.setupUnavailable)}>
-                      loopMIDI installer is not bundled with this app.
-                    </span>
+              return (
+                <button
+                  key={tab.id}
+                  id={`desktop-tab-${tab.id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  aria-controls={`desktop-panel-${tab.id}`}
+                  {...stylex.props(
+                    styles.tab,
+                    isActive && styles.tabActive,
+                    needsAttention && styles.tabAttention,
                   )}
-                </div>
-              ) : !status.midiReady ? (
-                <div {...stylex.props(styles.currentStep, styles.currentStepWarning)}>
-                  <div {...stylex.props(styles.setupStepCopy)}>
-                    <strong>2. Create the Sunlite Mobile MIDI ports</strong>
-                    <span>
-                      Open loopMIDI. Create <strong>Sunlite Mobile In</strong> first.
-                      Create <strong>Sunlite Mobile Out</strong> only if you want feedback
-                      from Sunlite. Then refresh.
-                    </span>
-                  </div>
-                  <div {...stylex.props(styles.setupActions)}>
-                    {shouldShowOpenLoopMidi ? (
-                      <Button
-                        {...stylex.props(styles.setupButton)}
-                        isDisabled={setupBusy !== null}
-                        onPress={() => void runSetupAction("open")}
-                      >
-                        {setupBusy === "open" ? "Opening..." : "Open loopMIDI"}
-                      </Button>
-                    ) : (
-                      <span {...stylex.props(styles.setupUnavailable)}>
-                        loopMIDI executable not found.
-                      </span>
-                    )}
-                    <Button
-                      {...stylex.props(styles.setupButton, styles.setupButtonSecondary)}
-                      isDisabled={setupBusy !== null || isLoading}
-                      onPress={() => void runSetupAction("refresh")}
-                    >
-                      {setupBusy === "refresh" || isLoading
-                        ? "Refreshing..."
-                        : "Refresh MIDI ports"}
-                    </Button>
-                  </div>
+                  onClick={() => setActiveDesktopTab(tab.id)}
+                >
+                  <span {...stylex.props(styles.tabLabel)}>{tab.label}</span>
+                  <span {...stylex.props(styles.tabDescription)}>{tab.description}</span>
+                </button>
+              )
+            })}
+          </div>
+          <div {...stylex.props(styles.tabConnectionSummary)}>
+            <span
+              {...stylex.props(
+                styles.tabConnectionDot,
+                isControllerReady
+                  ? styles.tabConnectionDotReady
+                  : styles.tabConnectionDotWarning,
+              )}
+            />
+            {isControllerReady ? "MIDI listo" : "Configuración pendiente"}
+          </div>
+        </nav>
+      ) : null}
+
+      {!isMobileView ? (
+        <section
+          id="desktop-panel-connection"
+          role="tabpanel"
+          aria-labelledby="desktop-tab-connection"
+          hidden={activeDesktopTab !== "connection"}
+          {...stylex.props(activeDesktopTab !== "connection" && styles.tabPanelHidden)}
+        >
+          <section {...stylex.props(styles.heroGrid)}>
+            <Surface {...stylex.props(styles.qrPanel)}>
+              <SectionHeader
+                title="Open on phone"
+                description="Scan this QR from a device connected to the same Wi‑Fi network."
+              />
+
+              {status?.qrDataUrl ? (
+                <div {...stylex.props(styles.qrWrap)}>
+                  <img
+                    {...stylex.props(styles.qrImage)}
+                    src={status.qrDataUrl}
+                    alt="Mobile controller QR code"
+                  />
                 </div>
               ) : (
-                <div {...stylex.props(styles.currentStep, styles.currentStepReady)}>
-                  <div {...stylex.props(styles.setupStepCopy)}>
-                    <strong>Setup complete</strong>
-                    <span>
-                      MIDI to Sunlite <strong>{status.midiOutputName}</strong> is ready.{" "}
-                      {status.feedbackReady ? (
-                        <>
-                          Feedback from Sunlite <strong>{status.midiInputName}</strong> is
-                          enabled.{" "}
-                        </>
-                      ) : (
-                        <>
-                          MIDI feedback is disabled or missing; buttons stay unlit until
-                          Sunlite MIDI OUT is configured.{" "}
-                        </>
-                      )}
-                      In Sunlite, use MIDI channel <strong>{status.midiChannel}</strong>.
-                    </span>
-                  </div>
-                  <div {...stylex.props(styles.setupActions)}>
-                    {shouldShowOpenLoopMidi ? (
-                      <Button
-                        {...stylex.props(styles.setupButton)}
-                        isDisabled={setupBusy !== null}
-                        onPress={() => void runSetupAction("open")}
-                      >
-                        {setupBusy === "open" ? "Opening..." : "Open loopMIDI"}
-                      </Button>
-                    ) : null}
-                    <Button
-                      {...stylex.props(styles.setupButton, styles.setupButtonSecondary)}
-                      isDisabled={setupBusy !== null || isLoading}
-                      onPress={() => void runSetupAction("refresh")}
-                    >
-                      {setupBusy === "refresh" || isLoading
-                        ? "Refreshing..."
-                        : "Refresh MIDI ports"}
-                    </Button>
-                  </div>
-                </div>
+                <div {...stylex.props(styles.qrPlaceholder)}>Loading QR</div>
               )}
-            </div>
 
-            {status && (!status.midiReady || !status.feedbackReady) ? (
-              <div {...stylex.props(styles.portList)}>
-                <strong>Available MIDI outputs</strong>
-                <span>
-                  {status.availableMidiOutputs.length
-                    ? status.availableMidiOutputs.join(", ")
-                    : "No MIDI outputs detected yet."}
-                </span>
-                <strong>Available MIDI inputs</strong>
-                <span>
-                  {status.availableMidiInputs.length
-                    ? status.availableMidiInputs.join(", ")
-                    : "No MIDI inputs detected yet."}
-                </span>
+              <div {...stylex.props(styles.urlBox)}>
+                {status?.preferredLanUrl ?? "Detecting LAN URL"}
               </div>
-            ) : null}
 
-            {status?.feedbackDisabledReason ? (
-              <p {...stylex.props(styles.warningText)}>{status.feedbackDisabledReason}</p>
-            ) : null}
-            {setupMessage ? (
-              <p {...stylex.props(styles.setupMessage)}>{setupMessage}</p>
-            ) : null}
+              {status?.networkUrlCandidates && status.networkUrlCandidates.length > 1 ? (
+                <div {...stylex.props(styles.networkList)}>
+                  <strong>Other detected URLs</strong>
+                  {status.networkUrlCandidates.slice(1).map((candidate) => (
+                    <span key={`${candidate.interfaceName}-${candidate.address}`}>
+                      {candidate.url} · {candidate.interfaceName} · {candidate.note}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              {statusError ? (
+                <p {...stylex.props(styles.errorText)}>{statusError}</p>
+              ) : null}
+            </Surface>
+
+            <Surface {...stylex.props(styles.connectionPanel)}>
+              <SectionHeader
+                title="Conexión automática"
+                description={`La aplicación prepara los puertos MIDI para ${softwareLabel}.`}
+              />
+
+              <div {...stylex.props(styles.setupFlow)}>
+                <div
+                  role="group"
+                  aria-label="Software de luces"
+                  {...stylex.props(styles.setupActions)}
+                >
+                  {(["sunlite", "freestyler"] as const).map((value) => (
+                    <ActionButton
+                      key={value}
+                      variant={software === value ? "primary" : "secondary"}
+                      aria-pressed={software === value}
+                      isDisabled={!status || softwareBusy}
+                      onPress={() => {
+                        if (software !== value) void changeLightingSoftware(value)
+                      }}
+                    >
+                      {LIGHTING_SOFTWARE_LABELS[value]}
+                    </ActionButton>
+                  ))}
+                </div>
+                <Notice layout="stack">
+                  <strong>Configurar {softwareLabel}</strong>
+                  {software === "freestyler" ? (
+                    <span>
+                      En Setup → FreeStyler Setup → External Control → MIDI Control, elige{" "}
+                      {status?.expectedMidiOutputName ?? "Sunlite Mobile In"} como entrada
+                      y {status?.expectedMidiInputName ?? "Sunlite Mobile Out"} como
+                      salida opcional. Activa Start y Learn, selecciona Note IN de la
+                      función, pulsa el control en esta app y guarda con Save. Usa Key Up
+                      como Note On con valor 0. Para automatización, asigna las funciones
+                      como Page independent.
+                    </span>
+                  ) : (
+                    <span>
+                      Selecciona {status?.expectedMidiOutputName ?? "Sunlite Mobile In"}{" "}
+                      como entrada y{" "}
+                      {status?.expectedMidiInputName ?? "Sunlite Mobile Out"} como retorno
+                      MIDI. Asigna los controles a las escenas de tu show.
+                    </span>
+                  )}
+                  <span>
+                    Los controles y el entrenamiento se guardan por software. Graba desde
+                    Controlador y prueba el modo Asistido antes de Auto. El retorno visual
+                    requiere que el software envíe feedback.
+                  </span>
+                </Notice>
+                {!status ? (
+                  <Notice>
+                    <div {...stylex.props(styles.setupStepCopy)}>
+                      <strong>Preparando la conexión</strong>
+                      <span>Comprobando el puente MIDI y los puertos locales.</span>
+                    </div>
+                  </Notice>
+                ) : !status.loopMidiInstalled ? (
+                  <Notice tone="warning">
+                    <div {...stylex.props(styles.setupStepCopy)}>
+                      <strong>Se necesita preparar el puente MIDI</strong>
+                      <span>
+                        {status.loopMidiInstallerAvailable
+                          ? "Solo tendrás que aceptar el permiso de Windows."
+                          : "Instala el puente MIDI una vez en este equipo."}
+                      </span>
+                    </div>
+                    {status.loopMidiInstallerAvailable ? (
+                      <ActionButton
+                        isDisabled={setupBusy !== null}
+                        onPress={() => void runSetupAction("install")}
+                      >
+                        {setupBusy === "install"
+                          ? "Preparando..."
+                          : "Preparar automáticamente"}
+                      </ActionButton>
+                    ) : (
+                      <span {...stylex.props(styles.setupUnavailable)}>
+                        Instala loopMIDI desde{" "}
+                        <a
+                          href="https://www.tobias-erichsen.de/software/loopmidi.html"
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          su sitio oficial
+                        </a>{" "}
+                        y pulsa Reintentar para crear los puertos.
+                        <ActionButton
+                          variant="secondary"
+                          isDisabled={setupBusy !== null}
+                          onPress={() => void runSetupAction("install")}
+                        >
+                          Reintentar
+                        </ActionButton>
+                      </span>
+                    )}
+                  </Notice>
+                ) : !status.midiReady ? (
+                  <Notice tone="warning">
+                    <div {...stylex.props(styles.setupStepCopy)}>
+                      <strong>Terminando la conexión MIDI</strong>
+                      <span>
+                        La configuración automática no terminó correctamente. Puedes
+                        volver a intentarlo sin crear puertos manualmente.
+                      </span>
+                    </div>
+                    <div {...stylex.props(styles.setupActions)}>
+                      <ActionButton
+                        isDisabled={setupBusy !== null}
+                        onPress={() => void runSetupAction("install")}
+                      >
+                        {setupBusy === "install" ? "Preparando..." : "Reintentar"}
+                      </ActionButton>
+                      <ActionButton
+                        variant="secondary"
+                        isDisabled={setupBusy !== null || isLoading}
+                        onPress={() => void runSetupAction("refresh")}
+                      >
+                        {setupBusy === "refresh" || isLoading
+                          ? "Actualizando..."
+                          : "Comprobar puertos"}
+                      </ActionButton>
+                    </div>
+                  </Notice>
+                ) : (
+                  <Notice tone="success">
+                    <div {...stylex.props(styles.setupStepCopy)}>
+                      <strong>Puente MIDI listo</strong>
+                      <span>
+                        {softwareLabel} puede recibir comandos por{" "}
+                        <strong>{status.midiOutputName}</strong>.{" "}
+                        {status.feedbackReady ? (
+                          <>
+                            El retorno por <strong>{status.midiInputName}</strong> está
+                            disponible.{" "}
+                          </>
+                        ) : (
+                          <>El retorno visual es opcional. </>
+                        )}
+                        Canal MIDI <strong>{status.midiChannel}</strong>.
+                      </span>
+                    </div>
+                    <div {...stylex.props(styles.setupActions)}>
+                      <ActionButton
+                        variant="secondary"
+                        isDisabled={setupBusy !== null || isLoading}
+                        onPress={() => void runSetupAction("refresh")}
+                      >
+                        {setupBusy === "refresh" || isLoading
+                          ? "Actualizando..."
+                          : "Comprobar"}
+                      </ActionButton>
+                    </div>
+                  </Notice>
+                )}
+              </div>
+
+              {status && (!status.midiReady || !status.feedbackReady) ? (
+                <div {...stylex.props(styles.portList)}>
+                  <strong>Available MIDI outputs</strong>
+                  <span>
+                    {status.availableMidiOutputs.length
+                      ? status.availableMidiOutputs.join(", ")
+                      : "No MIDI outputs detected yet."}
+                  </span>
+                  <strong>Available MIDI inputs</strong>
+                  <span>
+                    {status.availableMidiInputs.length
+                      ? status.availableMidiInputs.join(", ")
+                      : "No MIDI inputs detected yet."}
+                  </span>
+                </div>
+              ) : null}
+
+              {status?.feedbackDisabledReason ? (
+                <p {...stylex.props(styles.warningText)}>
+                  {status.feedbackDisabledReason}
+                </p>
+              ) : null}
+            </Surface>
           </section>
         </section>
       ) : null}
 
-      {isControllerReady ? (
-        <MidiController
-          model={controllerModel}
-          padStates={padStates}
-          ccValues={ccValues}
-          sendCommand={sendCommand}
-          lastCommand={lastCommand}
-          customization={controllerCustomization}
-          onSaveCustomization={saveControllerCustomization}
-          isMobileView={isMobileView}
-          feedbackReady={Boolean(status?.feedbackReady)}
-          feedbackWarning={status?.feedbackDisabledReason ?? null}
-          midiChannel={status?.midiChannel ?? 1}
-        />
+      {!isMobileView ? (
+        <section
+          id="desktop-panel-automation"
+          role="tabpanel"
+          aria-labelledby="desktop-tab-automation"
+          hidden={activeDesktopTab !== "automation"}
+          {...stylex.props(activeDesktopTab !== "automation" && styles.tabPanelHidden)}
+        >
+          <AutomationStudio
+            key={software}
+            sendAutomationCommand={sendAutomationCommand}
+          />
+        </section>
+      ) : null}
+
+      {isMobileView ? (
+        isControllerReady ? (
+          <MidiController
+            model={controllerModel}
+            padStates={padStates}
+            ccValues={ccValues}
+            sendCommand={sendCommand}
+            lastCommand={lastCommand}
+            customization={controllerCustomization}
+            onSaveCustomization={saveControllerCustomization}
+            isMobileView={isMobileView}
+            feedbackReady={Boolean(status?.feedbackReady)}
+            feedbackWarning={status?.feedbackDisabledReason ?? null}
+            midiChannel={status?.midiChannel ?? 1}
+          />
+        ) : (
+          <Surface {...stylex.props(styles.controlsLockedPanel)}>
+            <SectionHeader
+              title="Controlador no disponible"
+              description={
+                isMobileView ? (
+                  <>
+                    Termina la conexión con {softwareLabel} desde la computadora. El
+                    controlador aparecerá aquí en cuanto el puerto MIDI esté listo.
+                  </>
+                ) : (
+                  <>
+                    La conexión MIDI todavía no está lista. La aplicación puede preparar
+                    los puertos automáticamente desde la pestaña Conexión.
+                  </>
+                )
+              }
+            />
+            {!isMobileView ? (
+              <ActionButton onPress={() => setActiveDesktopTab("connection")}>
+                Ir a Conexión
+              </ActionButton>
+            ) : null}
+          </Surface>
+        )
       ) : (
-        <section {...stylex.props(styles.panel, styles.controlsLockedPanel)}>
-          <div {...stylex.props(styles.sectionHeader)}>
-            <h2 {...stylex.props(styles.sectionTitle)}>MIDI controls locked</h2>
-            <p {...stylex.props(styles.sectionDescription)}>
-              {isMobileView ? (
-                <>
-                  Finish loopMIDI and Sunlite setup on the computer first. This mobile
-                  view only shows the controller once the MIDI output port is ready.
-                </>
-              ) : (
-                <>
-                  The controller appears after loopMIDI is installed and{" "}
-                  <strong>Sunlite Mobile In</strong> is detected.{" "}
-                  <strong>Sunlite Mobile Out</strong> is optional for feedback.
-                </>
-              )}
-            </p>
-          </div>
+        <section
+          id="desktop-panel-controller"
+          role="tabpanel"
+          aria-labelledby="desktop-tab-controller"
+          hidden={activeDesktopTab !== "controller"}
+          {...stylex.props(activeDesktopTab !== "controller" && styles.tabPanelHidden)}
+        >
+          {isControllerReady ? (
+            <MidiController
+              model={controllerModel}
+              padStates={padStates}
+              ccValues={ccValues}
+              sendCommand={sendCommand}
+              lastCommand={lastCommand}
+              customization={controllerCustomization}
+              onSaveCustomization={saveControllerCustomization}
+              isMobileView={isMobileView}
+              feedbackReady={Boolean(status?.feedbackReady)}
+              feedbackWarning={status?.feedbackDisabledReason ?? null}
+              midiChannel={status?.midiChannel ?? 1}
+            />
+          ) : (
+            <Surface {...stylex.props(styles.controlsLockedPanel)}>
+              <SectionHeader
+                title="Controlador no disponible"
+                description="La conexión MIDI todavía no está lista. La aplicación puede preparar los puertos automáticamente desde la pestaña Conexión."
+              />
+              <ActionButton onPress={() => setActiveDesktopTab("connection")}>
+                Ir a Conexión
+              </ActionButton>
+            </Surface>
+          )}
         </section>
       )}
+
+      {setupMessage ? (
+        <Toast message={setupMessage} onDismiss={() => setSetupMessage(null)} />
+      ) : null}
     </main>
   )
 }
@@ -361,7 +557,10 @@ const styles = stylex.create({
   app: {
     width: "100%",
     maxWidth: "none",
-    minWidth: "360px",
+    minWidth: {
+      default: "360px",
+      "@media (max-width: 400px)": 0,
+    },
     margin: 0,
     padding: {
       default: "18px",
@@ -379,12 +578,20 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: "16px",
+    flexWrap: {
+      default: "nowrap",
+      "@media (max-width: 760px)": "wrap",
+    },
     borderBottomWidth: "1px",
     borderBottomStyle: "solid",
     borderBottomColor: "rgba(255, 255, 255, 0.08)",
     backgroundColor: "rgba(8, 10, 18, 0.92)",
     backdropFilter: "blur(12px)",
     padding: "18px 0 16px",
+  },
+  headerCopy: {
+    flex: "1 1 260px",
+    minWidth: 0,
   },
   eyebrow: {
     margin: "0 0 4px",
@@ -404,24 +611,86 @@ const styles = stylex.create({
     color: "#93c5fd",
     fontSize: "0.9rem",
   },
-  status: {
-    flexShrink: 0,
-    borderRadius: "999px",
+  tabs: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "14px",
+    marginTop: "16px",
     borderWidth: "1px",
     borderStyle: "solid",
-    padding: "10px 14px",
-    fontSize: "0.84rem",
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    borderRadius: "20px",
+    backgroundColor: "rgba(18, 22, 38, 0.82)",
+    boxShadow: "0 12px 36px rgba(0, 0, 0, 0.22)",
+    padding: "7px",
+  },
+  tabList: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(150px, 1fr))",
+    gap: "6px",
+    flex: 1,
+  },
+  tab: {
+    position: "relative",
+    display: "grid",
+    gap: "3px",
+    minWidth: 0,
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "transparent",
+    borderRadius: "14px",
+    backgroundColor: "transparent",
+    color: "#94a3b8",
+    cursor: "pointer",
+    padding: "11px 14px",
+    textAlign: "left",
+    transition: "background-color 150ms ease, border-color 150ms ease, color 150ms ease",
+  },
+  tabActive: {
+    borderColor: "rgba(139, 92, 246, 0.5)",
+    backgroundColor: "rgba(139, 92, 246, 0.16)",
+    color: "#f5f3ff",
+  },
+  tabAttention: {
+    color: "#fcd34d",
+  },
+  tabLabel: {
+    fontSize: "0.92rem",
     fontWeight: 900,
   },
-  statusOnline: {
-    borderColor: "rgba(16, 185, 129, 0.32)",
-    backgroundColor: "rgba(16, 185, 129, 0.14)",
-    color: "#a7f3d0",
+  tabDescription: {
+    color: "#94a3b8",
+    fontSize: "0.72rem",
+    lineHeight: 1.3,
   },
-  statusOffline: {
-    borderColor: "rgba(239, 68, 68, 0.34)",
-    backgroundColor: "rgba(239, 68, 68, 0.12)",
-    color: "#fecaca",
+  tabConnectionSummary: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flexShrink: 0,
+    padding: "0 12px 0 6px",
+    color: "#cbd5e1",
+    fontSize: "0.78rem",
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  },
+  tabConnectionDot: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "999px",
+    boxShadow: "0 0 12px currentColor",
+  },
+  tabConnectionDotReady: {
+    backgroundColor: "#34d399",
+    color: "#34d399",
+  },
+  tabConnectionDotWarning: {
+    backgroundColor: "#fbbf24",
+    color: "#fbbf24",
+  },
+  tabPanelHidden: {
+    display: "none",
   },
   heroGrid: {
     display: "grid",
@@ -431,35 +700,11 @@ const styles = stylex.create({
     },
     gap: "16px",
   },
-  panel: {
-    marginTop: "16px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: "22px",
-    backgroundColor: "rgba(18, 22, 38, 0.86)",
-    boxShadow: "0 16px 48px rgba(0, 0, 0, 0.28)",
-    padding: "16px",
-  },
+  connectionPanel: { marginTop: "16px" },
   qrPanel: {
+    marginTop: "16px",
     display: "grid",
     justifyItems: "center",
-  },
-  sectionHeader: {
-    display: "grid",
-    gap: "4px",
-    marginBottom: "14px",
-    width: "100%",
-  },
-  sectionTitle: {
-    margin: 0,
-    fontSize: "1rem",
-  },
-  sectionDescription: {
-    margin: 0,
-    color: "#94a3b8",
-    fontSize: "0.9rem",
-    lineHeight: 1.5,
   },
   qrWrap: {
     width: "min(100%, 320px)",
@@ -518,29 +763,6 @@ const styles = stylex.create({
     gap: "10px",
     marginTop: "14px",
   },
-  currentStep: {
-    display: "grid",
-    gridTemplateColumns: {
-      default: "1fr",
-      "@media (min-width: 720px)": "1fr auto",
-    },
-    alignItems: "center",
-    gap: "14px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: "18px",
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    padding: "14px",
-  },
-  currentStepWarning: {
-    borderColor: "rgba(245, 158, 11, 0.34)",
-    backgroundColor: "rgba(245, 158, 11, 0.09)",
-  },
-  currentStepReady: {
-    borderColor: "rgba(16, 185, 129, 0.34)",
-    backgroundColor: "rgba(16, 185, 129, 0.1)",
-  },
   setupStepCopy: {
     display: "grid",
     gap: "6px",
@@ -552,21 +774,6 @@ const styles = stylex.create({
     gap: "10px",
     flexWrap: "wrap",
     justifyContent: "flex-end",
-  },
-  setupButton: {
-    borderWidth: 0,
-    borderRadius: "14px",
-    backgroundColor: "#8b5cf6",
-    color: "#ffffff",
-    cursor: "pointer",
-    fontWeight: 800,
-    padding: "12px 14px",
-  },
-  setupButtonSecondary: {
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(167, 139, 250, 0.5)",
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
   },
   setupUnavailable: {
     color: "#fecaca",
@@ -582,12 +789,8 @@ const styles = stylex.create({
     color: "#cbd5e1",
     fontSize: "0.86rem",
   },
-  setupMessage: {
-    margin: "14px 0 0",
-    color: "#ddd6fe",
-    fontSize: "0.88rem",
-  },
   controlsLockedPanel: {
+    marginTop: "16px",
     minHeight: "180px",
   },
   warningText: {

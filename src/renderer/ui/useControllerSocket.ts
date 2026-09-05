@@ -9,6 +9,7 @@ import type {
   MidiPadFeedback,
   SocketMessage,
 } from "./types"
+import type { AutomationSocketCommand } from "../../shared/automation-types"
 
 type ConnectionState = "connecting" | "online" | "offline" | "error"
 
@@ -153,7 +154,7 @@ export function useControllerSocket() {
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws"
-    const url = `${protocol}://${window.location.host}`
+    const url = `${protocol}://${window.location.host}/ws`
     const socket = new WebSocket(url)
 
     socketRef.current = socket
@@ -188,9 +189,9 @@ export function useControllerSocket() {
           setConnectionState("online")
           const feedbackLabel = payload.feedbackDisabledReason
             ? `Feedback disabled: ${payload.feedbackDisabledReason}`
-            : `${payload.midiInputName ?? "No feedback input"} ← Sunlite`
+            : `MIDI IN: ${payload.midiInputName ?? "No feedback input"}`
           setServerMidiLabel(
-            `${payload.midiOutputName} → Sunlite · ${feedbackLabel} · Ch ${payload.midiChannel}`,
+            `MIDI OUT: ${payload.midiOutputName} · ${feedbackLabel} · Ch ${payload.midiChannel}`,
           )
           setLastCommand(
             payload.feedbackDisabledReason
@@ -272,6 +273,13 @@ export function useControllerSocket() {
     socket.send(JSON.stringify(command))
   }, [])
 
+  const sendAutomationCommand = useCallback((command: AutomationSocketCommand) => {
+    const socket = socketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false
+    socket.send(JSON.stringify(command))
+    return true
+  }, [])
+
   return {
     connectionState,
     lastCommand,
@@ -281,5 +289,6 @@ export function useControllerSocket() {
     controllerCustomization,
     setControllerCustomization,
     sendCommand,
+    sendAutomationCommand,
   }
 }

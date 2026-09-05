@@ -1,6 +1,5 @@
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react"
-import { Button, Input, Label, TextField } from "react-aria-components"
 import {
   getModelButtons,
   type ButtonCustomization,
@@ -9,6 +8,7 @@ import {
   type MidiControllerModel,
 } from "../../../shared/controller-config.ts"
 import type { EditableControl } from "../types"
+import { ActionButton, Notice, SectionHeader, Surface, TextInputField } from "../ui-kit"
 
 export type ControllerConfigModalProps = {
   control: EditableControl
@@ -104,7 +104,8 @@ export function ControllerConfigModal({
 
   return (
     <div {...stylex.props(styles.modalBackdrop)} onMouseDown={onClose}>
-      <section
+      <Surface
+        variant="solid"
         {...stylex.props(styles.modalPanel)}
         onMouseDown={(event) => event.stopPropagation()}
         role="dialog"
@@ -112,71 +113,66 @@ export function ControllerConfigModal({
         aria-label="MIDI control configuration"
       >
         <div {...stylex.props(styles.modalHeader)}>
-          <div>
-            <h2 {...stylex.props(styles.modalTitle)}>MIDI control configuration</h2>
-            <p {...stylex.props(styles.sectionDescription)}>
-              Right-click editing · Global MIDI channel {midiChannel}
-            </p>
-          </div>
-          <Button {...stylex.props(styles.iconButton)} onPress={onClose}>
+          <SectionHeader
+            title="MIDI control configuration"
+            description={`Right-click editing · Global MIDI channel ${midiChannel}`}
+          />
+          <ActionButton
+            variant="ghost"
+            size="small"
+            aria-label="Close configuration"
+            onPress={onClose}
+          >
             ×
-          </Button>
+          </ActionButton>
         </div>
 
         {target.kind === "button" && buttonDraft ? (
           <div {...stylex.props(styles.modalGrid)}>
-            <TextField
-              {...stylex.props(styles.fieldGroup)}
+            <TextInputField
+              label="Button text"
               value={buttonDraft.label}
               onChange={(label) => setButtonDraft({ ...buttonDraft, label })}
-            >
-              <Label>Button text</Label>
-              <Input {...stylex.props(styles.textInput)} onKeyDown={handleSaveOnEnter} />
-            </TextField>
+              inputProps={{ onKeyDown: handleSaveOnEnter }}
+            />
 
-            <div {...stylex.props(styles.helpBox)}>
+            <Notice tone="info" layout="stack" {...stylex.props(styles.helpBox)}>
               <strong>Standard {model.name} mapping</strong>
               <span>
                 This app uses the fixed {model.name} note for this button. Color and
-                lit/off state are controlled only by MIDI OUT feedback from Sunlite.
-                Configure Sunlite to send feedback to <strong>Sunlite Mobile Out</strong>.
+                lit/off state are controlled only by MIDI OUT feedback from your lighting
+                software. Configure Sunlite or FreeStyler to send feedback to{" "}
+                <strong>Sunlite Mobile Out</strong>.
               </span>
-            </div>
+            </Notice>
           </div>
         ) : null}
 
         {target.kind === "fader" && faderDraft ? (
           <div {...stylex.props(styles.modalGrid)}>
-            <TextField
-              {...stylex.props(styles.fieldGroup)}
+            <TextInputField
+              label="Fader text"
               value={faderDraft.label}
               onChange={(label) => setFaderDraft({ ...faderDraft, label })}
-            >
-              <Label>Fader text</Label>
-              <Input {...stylex.props(styles.textInput)} onKeyDown={handleSaveOnEnter} />
-            </TextField>
-            <div {...stylex.props(styles.helpBox)}>
+              inputProps={{ onKeyDown: handleSaveOnEnter }}
+            />
+            <Notice tone="info" layout="stack" {...stylex.props(styles.helpBox)}>
               <strong>Standard {model.name} mapping</strong>
               <span>
                 This fader keeps its fixed {model.name} CC number. Only the displayed text
                 is editable here.
               </span>
-            </div>
+            </Notice>
           </div>
         ) : null}
 
         <div {...stylex.props(styles.modalActions)}>
-          <Button
-            {...stylex.props(styles.setupButton, styles.setupButtonSecondary)}
-            onPress={onClose}
-          >
+          <ActionButton variant="secondary" onPress={onClose}>
             Cancel
-          </Button>
-          <Button {...stylex.props(styles.setupButton)} onPress={save}>
-            Save configuration
-          </Button>
+          </ActionButton>
+          <ActionButton onPress={save}>Save configuration</ActionButton>
         </div>
-      </section>
+      </Surface>
     </div>
   )
 }
@@ -256,24 +252,6 @@ function normalizeStandardButtonCustomization(
 }
 
 const styles = stylex.create({
-  fieldGroup: {
-    display: "grid",
-    gap: "6px",
-    color: "#cbd5e1",
-    fontSize: "0.84rem",
-    fontWeight: 800,
-  },
-  textInput: {
-    width: "100%",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255, 255, 255, 0.14)",
-    borderRadius: "12px",
-    backgroundColor: "#050814",
-    color: "#f8fafc",
-    padding: "10px 11px",
-    outline: "none",
-  },
   modalBackdrop: {
     position: "fixed",
     inset: 0,
@@ -287,13 +265,6 @@ const styles = stylex.create({
     width: "min(100%, 720px)",
     maxHeight: "min(92vh, 760px)",
     overflow: "auto",
-    borderRadius: "24px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255, 255, 255, 0.14)",
-    backgroundColor: "#111827",
-    boxShadow: "0 30px 80px rgba(0, 0, 0, 0.5)",
-    padding: "18px",
   },
   modalHeader: {
     display: "flex",
@@ -301,23 +272,6 @@ const styles = stylex.create({
     alignItems: "flex-start",
     gap: "14px",
     marginBottom: "16px",
-  },
-  modalTitle: {
-    margin: 0,
-    fontSize: "1.25rem",
-  },
-  iconButton: {
-    width: "36px",
-    height: "36px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255, 255, 255, 0.14)",
-    borderRadius: "12px",
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
-    color: "#f8fafc",
-    cursor: "pointer",
-    fontSize: "1.3rem",
-    lineHeight: 1,
   },
   modalGrid: {
     display: "grid",
@@ -335,37 +289,5 @@ const styles = stylex.create({
   },
   helpBox: {
     gridColumn: "1 / -1",
-    display: "grid",
-    gap: "6px",
-    borderRadius: "14px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(14, 165, 233, 0.28)",
-    backgroundColor: "rgba(14, 165, 233, 0.08)",
-    color: "#bae6fd",
-    padding: "12px",
-    fontSize: "0.86rem",
-    lineHeight: 1.45,
-  },
-  sectionDescription: {
-    margin: 0,
-    color: "#94a3b8",
-    fontSize: "0.9rem",
-    lineHeight: 1.5,
-  },
-  setupButton: {
-    borderWidth: 0,
-    borderRadius: "14px",
-    backgroundColor: "#8b5cf6",
-    color: "#ffffff",
-    cursor: "pointer",
-    fontWeight: 800,
-    padding: "12px 14px",
-  },
-  setupButtonSecondary: {
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(167, 139, 250, 0.5)",
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
   },
 })

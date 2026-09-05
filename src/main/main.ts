@@ -1,5 +1,6 @@
-import { app as electronApp, BrowserWindow, shell } from "electron"
+import { app as electronApp, BrowserWindow, ipcMain, session, shell } from "electron"
 import electronUpdater from "electron-updater"
+import { UpdateManager, validateUpdateFeed } from "./update-manager.js"
 import { spawn } from "node:child_process"
 import fs from "node:fs"
 import easymidi from "easymidi"
@@ -9,33 +10,58 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import QRCode from "qrcode"
+import type {
+  AutomationMidiCommand,
+  AutomationSocketCommand,
+} from "../shared/automation-types.js"
 import {
   DEFAULT_CONTROLLER_CUSTOMIZATION,
   mergeControllerCustomization,
   type ControllerCustomization,
 } from "../shared/controller-config.js"
+import { AutomationEngine } from "./automation/automation-engine.js"
+import { ProDjLinkSidecar } from "./automation/prodj-link-sidecar.js"
 import { WebSocketServer, type WebSocket } from "ws"
+import {
+  isLightingSoftware,
+  noteRelease,
+  type LightingSoftware,
+} from "../shared/lighting-software.js"
 
-type AutoUpdaterLike = {
-  autoDownload: boolean
-  autoInstallOnAppQuit: boolean
-  setFeedURL: (options: { provider: "generic"; url: string }) => void
-  on: (event: string, listener: (...args: unknown[]) => void) => void
-  checkForUpdatesAndNotify: () => Promise<unknown>
+let lightingSoftware: LightingSoftware = "sunlite"
+
+function lightingProfilePath(): string {
+  const root = electronApp.getPath("userData")
+  return lightingSoftware === "sunlite"
+    ? root
+    : path.join(root, "profiles", lightingSoftware)
 }
 
-const { autoUpdater } = electronUpdater as unknown as { autoUpdater: AutoUpdaterLike }
-
-function getUpdateInfoVersion(info: unknown): string {
-  if (info && typeof info === "object" && "version" in info) {
-    const version = (info as { version?: unknown }).version
-    if (typeof version === "string") {
-      return version
-    }
+function loadLightingSoftware(): void {
+  try {
+    const saved = JSON.parse(
+      fs.readFileSync(
+        path.join(electronApp.getPath("userData"), "lighting-software.json"),
+        "utf8",
+      ),
+    )
+    if (isLightingSoftware(saved.software)) lightingSoftware = saved.software
+  } catch {
+    /* Existing installations default to Sunlite. */
   }
-
-  return "unknown"
 }
+
+function createAutomationEngine(): AutomationEngine {
+  return new AutomationEngine(
+    lightingProfilePath(),
+    broadcastToAll,
+    (command: AutomationMidiCommand) => handleCommand(command as IncomingCommand),
+    lightingSoftware,
+  )
+}
+
+const { autoUpdater } = electronUpdater
+let updateManager: UpdateManager | null = null
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -47,6 +73,8 @@ const DEFAULT_MIDI_INPUT_NAME = "Sunlite Mobile Out"
 const MIDI_CHANNEL_ZERO_BASED = Number(process.env.MIDI_CHANNEL || 0)
 const MIDI_OUTPUT_NAME = process.env.MIDI_OUTPUT_NAME || DEFAULT_MIDI_OUTPUT_NAME
 const MIDI_INPUT_NAME = process.env.MIDI_INPUT_NAME || DEFAULT_MIDI_INPUT_NAME
+const LOOP_MIDI_REGISTRY_KEY = "HKCU\\Software\\Tobias Erichsen\\loopMIDI"
+const LOOP_MIDI_PORTS_REGISTRY_KEY = `${LOOP_MIDI_REGISTRY_KEY}\\Ports`
 
 const rendererDir = path.resolve(__dirname, "../renderer")
 
@@ -63,51 +91,55 @@ function getWindowIconPath(): string {
 }
 
 function configureAutoUpdates() {
-  if (!electronApp.isPackaged) {
-    return
+  let disabledReason = !electronApp.isPackaged
+    ? "Las actualizaciones están desactivadas en desarrollo."
+    : process.platform !== "win32"
+      ? "Las actualizaciones integradas requieren la instalación de Windows."
+      : process.env.PORTABLE_EXECUTABLE_FILE
+        ? "Edición portable: instala la edición Setup para recibir actualizaciones."
+        : !fs.existsSync(
+              path.join(process.resourcesPath, "..", "Uninstall Sunlite Mobile MIDI.exe"),
+            )
+          ? "Esta copia no está instalada. Ejecuta el instalador Setup para activar actualizaciones."
+          : null
+  if (!disabledReason && process.env.SUNLITE_UPDATE_FEED_URL) {
+    try {
+      autoUpdater.setFeedURL({
+        provider: "generic",
+        url: validateUpdateFeed(process.env.SUNLITE_UPDATE_FEED_URL),
+      })
+    } catch {
+      disabledReason = "El servidor de actualizaciones configurado no es válido."
+    }
   }
-
-  const updateFeedUrl = process.env.SUNLITE_UPDATE_FEED_URL
-
-  if (updateFeedUrl) {
-    autoUpdater.setFeedURL({
-      provider: "generic",
-      url: updateFeedUrl,
+  updateManager = new UpdateManager(
+    autoUpdater,
+    electronApp.getVersion(),
+    disabledReason,
+    () => {
+      const state = automationEngine?.getStatus()
+      if (state?.recording) throw new Error("Termina la grabación antes de instalar.")
+      if (state && state.mode !== "manual")
+        throw new Error("Cambia a modo Manual antes de instalar.")
+    },
+  )
+  const trustedUrl = process.env.SUNLITE_DEV_RENDERER_URL || serverStatus?.localUrl
+  for (const action of ["status", "check", "download", "install"] as const) {
+    ipcMain.handle(`updates:${action}`, (event) => {
+      const frame = event.senderFrame
+      if (
+        !mainWindow ||
+        event.sender !== mainWindow.webContents ||
+        frame !== mainWindow.webContents.mainFrame ||
+        !trustedUrl ||
+        new URL(frame.url).origin !== new URL(trustedUrl).origin
+      ) {
+        throw new Error("Solicitud de actualización no autorizada.")
+      }
+      return updateManager![action]()
     })
   }
-
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
-
-  autoUpdater.on("checking-for-update", () => {
-    console.info("Checking for Sunlite Mobile MIDI updates")
-  })
-
-  autoUpdater.on("update-available", (info: unknown) => {
-    console.info(`Sunlite Mobile MIDI update available: ${getUpdateInfoVersion(info)}`)
-  })
-
-  autoUpdater.on("update-not-available", () => {
-    console.info("Sunlite Mobile MIDI is up to date")
-  })
-
-  autoUpdater.on("error", (error: unknown) => {
-    console.warn("Sunlite Mobile MIDI update check failed", error)
-  })
-
-  autoUpdater.on("update-downloaded", (info: unknown) => {
-    console.info(
-      `Sunlite Mobile MIDI update downloaded: ${getUpdateInfoVersion(
-        info,
-      )}. It will install on app quit.`,
-    )
-  })
-
-  setTimeout(() => {
-    void autoUpdater.checkForUpdatesAndNotify().catch((error: unknown) => {
-      console.warn("Sunlite Mobile MIDI update check failed", error)
-    })
-  }, 3000)
+  updateManager.start()
 }
 
 type MidiConnection = {
@@ -127,6 +159,7 @@ type NetworkUrlCandidate = {
 }
 
 type ServerStatus = {
+  lightingSoftware: LightingSoftware
   port: number
   localUrl: string
   lanUrls: string[]
@@ -146,6 +179,8 @@ type ServerStatus = {
   loopMidiInstallerAvailable: boolean
   loopMidiExecutablePath: string | null
   loopMidiInstalled: boolean
+  midiAutoConfigured: boolean
+  midiProvisioningMessage: string | null
 }
 
 type IncomingCommand =
@@ -175,6 +210,10 @@ let midiConnection: MidiConnection | null = null
 let mainWindow: BrowserWindow | null = null
 let controllerCustomization: ControllerCustomization = DEFAULT_CONTROLLER_CUSTOMIZATION
 let feedbackDisabledReason: string | null = null
+let automationEngine: AutomationEngine | null = null
+let prodjLinkSidecar: ProDjLinkSidecar | null = null
+let midiAutoConfigured = false
+let midiProvisioningMessage: string | null = null
 
 type MidiGuardEvent = { at: number; fingerprint: string }
 type MidiPadFeedback = {
@@ -210,7 +249,7 @@ function cloneMidiFeedbackState(): MidiFeedbackState {
 }
 
 function getMidiFeedbackStatePath(): string {
-  return path.join(electronApp.getPath("userData"), "midi-feedback-state.json")
+  return path.join(lightingProfilePath(), "midi-feedback-state.json")
 }
 
 function normalizeStoredMidiFeedbackState(value: unknown): MidiFeedbackState {
@@ -381,7 +420,7 @@ function queueMidiFeedbackStateBroadcast() {
 }
 
 function getControllerConfigPath(): string {
-  return path.join(electronApp.getPath("userData"), "controller-config.json")
+  return path.join(lightingProfilePath(), "controller-config.json")
 }
 
 function loadControllerCustomization(): ControllerCustomization {
@@ -566,21 +605,31 @@ function createMidiSender(output: easymidi.Output) {
   }
 
   function sendNoteOff(note: number, velocity = 0) {
-    sendMidi(output, "noteoff", {
+    const release = noteRelease(lightingSoftware, clampMidiValue(velocity))
+    sendMidi(output, release.type, {
       note: clampMidiValue(note),
-      velocity: clampMidiValue(velocity),
+      velocity: release.velocity,
       channel: MIDI_CHANNEL_ZERO_BASED,
     })
   }
 
   function sendNote(note: number, velocity = 127, offDelayMs = 500) {
     sendNoteOn(note, velocity)
+    const release = noteRelease(lightingSoftware)
 
     setTimeout(
       () => {
-        sendNoteOff(note, 0)
+        try {
+          sendMidi(output, release.type, {
+            note: clampMidiValue(note),
+            velocity: release.velocity,
+            channel: MIDI_CHANNEL_ZERO_BASED,
+          })
+        } catch (error) {
+          console.warn("Could not release MIDI note", error)
+        }
       },
-      Math.max(0, Number(offDelayMs) || 500),
+      Math.max(0, Math.min(5000, Number.isFinite(offDelayMs) ? offDelayMs : 500)),
     )
   }
 
@@ -716,6 +765,11 @@ function refreshMidiConnection() {
         const record = midiMessageToRecord(message)
         if (!shouldAcceptMidiFeedback("noteon", record)) return
         updateMidiFeedbackState("noteon", record)
+        automationEngine?.recordFeedback({
+          type: "noteon",
+          note: clampMidiValue(message.note),
+          velocity: clampMidiValue(message.velocity),
+        })
         broadcastToAll({ event: "midi-input", message: { kind: "noteon", ...message } })
         queueMidiFeedbackStateBroadcast()
       })
@@ -724,6 +778,11 @@ function refreshMidiConnection() {
         const record = midiMessageToRecord(message)
         if (!shouldAcceptMidiFeedback("noteoff", record)) return
         updateMidiFeedbackState("noteoff", record)
+        automationEngine?.recordFeedback({
+          type: "noteoff",
+          note: clampMidiValue(message.note),
+          velocity: clampMidiValue(message.velocity),
+        })
         broadcastToAll({ event: "midi-input", message: { kind: "noteoff", ...message } })
         queueMidiFeedbackStateBroadcast()
       })
@@ -732,6 +791,11 @@ function refreshMidiConnection() {
         const record = midiMessageToRecord(message)
         if (!shouldAcceptMidiFeedback("cc", record)) return
         updateMidiFeedbackState("cc", record)
+        automationEngine?.recordFeedback({
+          type: "cc",
+          controller: clampMidiValue(message.controller),
+          value: clampMidiValue(message.value),
+        })
         broadcastToAll({ event: "midi-input", message: { kind: "cc", ...message } })
         queueMidiFeedbackStateBroadcast()
       })
@@ -760,6 +824,8 @@ function refreshMidiConnection() {
       feedbackDisabledReason,
       loopMidiExecutablePath,
       loopMidiInstalled: Boolean(loopMidiExecutablePath),
+      midiAutoConfigured,
+      midiProvisioningMessage,
     }
   }
 
@@ -813,11 +879,11 @@ function findLoopMidiExecutable(): string | null {
   return candidates.find((candidate) => candidate && fs.existsSync(candidate)) ?? null
 }
 
-function runProcess(command: string, args: string[]) {
+function runProcess(command: string, args: string[], windowsHide = true) {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>(
     (resolve, reject) => {
       const child = spawn(command, args, {
-        windowsHide: false,
+        windowsHide,
         shell: false,
       })
 
@@ -842,11 +908,106 @@ function runProcess(command: string, args: string[]) {
   )
 }
 
+async function configureLoopMidiPorts() {
+  if (process.platform !== "win32") return
+
+  const settings = [
+    [LOOP_MIDI_REGISTRY_KEY, "StartMinimized", "1"],
+    [LOOP_MIDI_PORTS_REGISTRY_KEY, MIDI_OUTPUT_NAME, "1"],
+    [LOOP_MIDI_PORTS_REGISTRY_KEY, MIDI_INPUT_NAME, "1"],
+  ] as const
+
+  for (const [key, name, value] of settings) {
+    const result = await runProcess("reg.exe", [
+      "ADD",
+      key,
+      "/v",
+      name,
+      "/t",
+      "REG_DWORD",
+      "/d",
+      value,
+      "/f",
+    ])
+
+    if (result.code !== 0) {
+      throw new Error(
+        `Could not configure the MIDI port "${name}": ${result.stderr || result.stdout}`,
+      )
+    }
+  }
+}
+
+function startLoopMidiInBackground(executablePath: string) {
+  spawn(executablePath, [], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  }).unref()
+}
+
+async function waitForMidiPorts(timeoutMs = 8000): Promise<boolean> {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const availableOutputs = getAvailableMidiOutputs()
+    if (availableOutputs.includes(MIDI_OUTPUT_NAME)) return true
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+
+  return false
+}
+
+async function provisionMidiBridge(options: { installIfMissing: boolean }) {
+  midiAutoConfigured = false
+  midiProvisioningMessage = "Preparing the local MIDI bridge..."
+
+  let executablePath = findLoopMidiExecutable()
+
+  if (!executablePath && options.installIfMissing) {
+    const installerPath = getLoopMidiInstallerPath()
+    if (!fs.existsSync(installerPath)) {
+      throw new Error("The bundled MIDI bridge installer is missing.")
+    }
+
+    const installResult = await runProcess(installerPath, ["/quiet", "/norestart"], false)
+    if (installResult.code !== 0) {
+      throw new Error(
+        installResult.stderr ||
+          installResult.stdout ||
+          `MIDI bridge installation exited with code ${installResult.code}.`,
+      )
+    }
+
+    executablePath = findLoopMidiExecutable()
+  }
+
+  if (!executablePath) {
+    midiProvisioningMessage = "The local MIDI bridge is not installed."
+    return false
+  }
+
+  await configureLoopMidiPorts()
+  startLoopMidiInBackground(executablePath)
+
+  if (!(await waitForMidiPorts())) {
+    midiProvisioningMessage =
+      "The MIDI bridge is installed but did not expose its ports. Restart Windows and reopen the application."
+    return false
+  }
+
+  midiAutoConfigured = true
+  midiProvisioningMessage =
+    "Local MIDI bridge ready. Sunlite / FreeStyler can use the Sunlite Mobile In port."
+  refreshMidiConnection()
+  return true
+}
+
 async function installLoopMidi() {
   const existingExecutablePath = findLoopMidiExecutable()
 
   if (existingExecutablePath) {
-    refreshMidiConnection()
+    await provisionMidiBridge({ installIfMissing: false })
     return {
       code: 0,
       stdout: existingExecutablePath,
@@ -861,9 +1022,10 @@ async function installLoopMidi() {
     throw new Error(`loopMIDI installer was not found at: ${installerPath}`)
   }
 
-  const result = await runProcess(installerPath, ["/quiet", "/norestart"])
-
-  refreshMidiConnection()
+  const result = await runProcess(installerPath, ["/quiet", "/norestart"], false)
+  if (result.code === 0) {
+    await provisionMidiBridge({ installIfMissing: false })
+  }
 
   return result
 }
@@ -901,7 +1063,8 @@ function handleCommand(payload: IncomingCommand) {
   if (payload.type === "note") {
     const note = clampMidiValue(payload.note)
     const velocity = clampMidiValue(payload.velocity ?? 127)
-    const offDelayMs = Math.max(0, Number(payload.offDelayMs ?? 500) || 500)
+    const delay = Number(payload.offDelayMs ?? 500)
+    const offDelayMs = Math.max(0, Math.min(5000, Number.isFinite(delay) ? delay : 500))
     midiConnection.midi.sendNote(note, velocity, offDelayMs)
 
     return { ok: true, type: "note", note, velocity, offDelayMs }
@@ -939,6 +1102,12 @@ function handleCommand(payload: IncomingCommand) {
   }
 
   throw new Error("Unsupported MIDI command.")
+}
+
+function isAutomationSocketCommand(value: unknown): value is AutomationSocketCommand {
+  if (!value || typeof value !== "object" || !("type" in value)) return false
+  const type = (value as { type?: unknown }).type
+  return type === "automation-audio-frame" || type === "automation-audio-disconnected"
 }
 
 function isPortInUseError(error: unknown): boolean {
@@ -998,18 +1167,85 @@ function listenWithPortFallback(
 }
 
 async function startControllerServer(): Promise<ServerStatus> {
+  loadLightingSoftware()
   loadControllerCustomization()
   loadMidiFeedbackState()
+
+  try {
+    await provisionMidiBridge({ installIfMissing: electronApp.isPackaged })
+  } catch (error) {
+    midiAutoConfigured = false
+    midiProvisioningMessage =
+      error instanceof Error ? error.message : "Automatic MIDI setup failed."
+    console.warn("Automatic MIDI provisioning failed", error)
+  }
 
   const appServer = express()
   const httpServer = http.createServer(appServer)
   const wss = new WebSocketServer({ server: httpServer })
+
+  activeWebSocketServer = wss
+  automationEngine = createAutomationEngine()
+
+  const projectRoot = path.resolve(__dirname, "../..")
+  prodjLinkSidecar = new ProDjLinkSidecar({
+    isPackaged: electronApp.isPackaged,
+    resourcesPath: process.resourcesPath,
+    projectRoot,
+    onEvent: (event) => automationEngine?.handleDjLinkEvent(event),
+    onStatus: (status) => automationEngine?.setBridgeStatus(status),
+  })
 
   appServer.use(express.json())
   appServer.use(express.static(rendererDir))
 
   appServer.get("/api/status", (_request, response) => {
     refreshMidiConnection()
+    response.json(serverStatus)
+  })
+
+  appServer.put("/api/lighting-software", (request, response) => {
+    const software = request.body?.software
+    if (!isLightingSoftware(software)) {
+      response.status(400).json({ message: "Software de luces no válido" })
+      return
+    }
+    if (software === lightingSoftware) {
+      response.json(serverStatus)
+      return
+    }
+    if (automationEngine?.getStatus().recording) {
+      response
+        .status(409)
+        .json({ message: "Detén la grabación antes de cambiar de software" })
+      return
+    }
+    const previousSoftware = lightingSoftware
+    let nextEngine: AutomationEngine
+    try {
+      lightingSoftware = software
+      nextEngine = createAutomationEngine()
+      fs.writeFileSync(
+        path.join(electronApp.getPath("userData"), "lighting-software.json"),
+        JSON.stringify({ software }),
+        "utf8",
+      )
+    } catch (error) {
+      lightingSoftware = previousSoftware
+      response.status(500).json({
+        message:
+          error instanceof Error ? error.message : "No se pudo cambiar de software",
+      })
+      return
+    }
+    automationEngine?.dispose()
+    automationEngine = nextEngine
+    loadControllerCustomization()
+    midiFeedbackState = { padStates: {}, ccValues: {} }
+    if (serverStatus) serverStatus.lightingSoftware = software
+    broadcastToAll({ event: "controller-config", config: controllerCustomization })
+    broadcastMidiFeedbackState()
+    broadcastToAll({ event: "automation-status", status: automationEngine.getStatus() })
     response.json(serverStatus)
   })
 
@@ -1070,16 +1306,114 @@ async function startControllerServer(): Promise<ServerStatus> {
     response.json({ ok: true, state: cloneMidiFeedbackState() })
   })
 
+  appServer.get("/api/automation/status", (_request, response) => {
+    response.json(automationEngine?.getStatus())
+  })
+
+  appServer.put("/api/automation/mode", (request, response) => {
+    try {
+      response.json(automationEngine?.setMode(request.body?.mode))
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : "Invalid automation mode",
+      })
+    }
+  })
+
+  appServer.put("/api/automation/settings", (request, response) => {
+    try {
+      response.json(automationEngine?.updateSettings(request.body))
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : "Invalid automation settings",
+      })
+    }
+  })
+
+  appServer.post("/api/automation/session/start", (request, response) => {
+    response.json(automationEngine?.startSession(request.body?.name))
+  })
+
+  appServer.post("/api/automation/session/stop", (_request, response) => {
+    response.json(automationEngine?.stopSession())
+  })
+
+  appServer.post("/api/automation/train", (_request, response) => {
+    response.json(automationEngine?.train())
+  })
+
+  appServer.get("/api/automation/sessions/:id", (request, response) => {
+    response.json({
+      id: request.params.id,
+      events: automationEngine?.readTimeline(request.params.id) ?? [],
+    })
+  })
+
+  appServer.put("/api/automation/sessions/:id", (request, response) => {
+    try {
+      response.json(
+        automationEngine?.renameSession(request.params.id, request.body?.name),
+      )
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : "Invalid training session",
+      })
+    }
+  })
+
+  appServer.delete("/api/automation/sessions/:id", (request, response) => {
+    try {
+      response.json(automationEngine?.deleteSession(request.params.id))
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : "Invalid training session",
+      })
+    }
+  })
+
+  appServer.patch("/api/automation/sessions/:id/examples", (request, response) => {
+    try {
+      response.json(
+        automationEngine?.updateTrainingExamples(request.params.id, request.body?.edits),
+      )
+    } catch (error) {
+      response.status(400).json({
+        message:
+          error instanceof Error ? error.message : "Invalid training example edits",
+      })
+    }
+  })
+
+  appServer.post("/api/automation/examples/:id/exclude", (request, response) => {
+    try {
+      response.json(automationEngine?.excludeTrainingExample(request.params.id))
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : "Invalid example",
+      })
+    }
+  })
+
+  appServer.post("/api/automation/prodj-link/restart", (_request, response) => {
+    prodjLinkSidecar?.stop()
+    prodjLinkSidecar?.start()
+    response.json(automationEngine?.getStatus())
+  })
+
   appServer.get("*", (_request, response) => {
     response.sendFile(path.join(rendererDir, "index.html"))
   })
-
-  activeWebSocketServer = wss
 
   wss.on("connection", (socket) => {
     refreshMidiConnection()
     safeSend(socket, { event: "controller-config", config: controllerCustomization })
     safeSend(socket, { event: "midi-feedback-state", state: cloneMidiFeedbackState() })
+    if (automationEngine) {
+      safeSend(socket, {
+        event: "automation-status",
+        status: automationEngine.getStatus(),
+      })
+    }
 
     setTimeout(
       () =>
@@ -1120,8 +1454,20 @@ async function startControllerServer(): Promise<ServerStatus> {
 
     socket.on("message", (rawMessage) => {
       try {
-        const payload = JSON.parse(rawMessage.toString()) as IncomingCommand
-        const result = handleCommand(payload)
+        const payload = JSON.parse(rawMessage.toString()) as unknown
+
+        if (isAutomationSocketCommand(payload)) {
+          if (payload.type === "automation-audio-frame") {
+            automationEngine?.handleAudioFrame(payload.frame)
+          } else {
+            automationEngine?.handleAudioDisconnected()
+          }
+          return
+        }
+
+        const midiPayload = payload as IncomingCommand
+        const result = handleCommand(midiPayload)
+        automationEngine?.recordManualCommand(midiPayload)
 
         safeSend(socket, { event: "command-result", command: result })
         broadcast(wss, { event: "last-command", command: result })
@@ -1149,6 +1495,7 @@ async function startControllerServer(): Promise<ServerStatus> {
   const loopMidiExecutablePath = findLoopMidiExecutable()
 
   serverStatus = {
+    lightingSoftware,
     port,
     localUrl,
     lanUrls,
@@ -1168,9 +1515,12 @@ async function startControllerServer(): Promise<ServerStatus> {
     loopMidiInstallerAvailable: fs.existsSync(loopMidiInstallerPath),
     loopMidiExecutablePath,
     loopMidiInstalled: Boolean(loopMidiExecutablePath),
+    midiAutoConfigured,
+    midiProvisioningMessage,
   }
 
   refreshMidiConnection()
+  prodjLinkSidecar.start()
 
   return serverStatus
 }
@@ -1181,6 +1531,7 @@ async function createWindow(status: ServerStatus) {
     height: 860,
     minWidth: 420,
     minHeight: 680,
+    show: false,
     title: "Sunlite Mobile MIDI",
     icon: getWindowIconPath(),
     autoHideMenuBar: true,
@@ -1188,36 +1539,60 @@ async function createWindow(status: ServerStatus) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(__dirname, "preload.cjs"),
     },
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    if (["https:", "http:"].includes(new URL(url).protocol)) void shell.openExternal(url)
     return { action: "deny" }
   })
 
-  await mainWindow.loadURL(status.localUrl)
+  const rendererUrl = process.env.SUNLITE_DEV_RENDERER_URL || status.localUrl
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (new URL(url).origin !== new URL(rendererUrl).origin) event.preventDefault()
+  })
+  configureAutoUpdates()
+  await mainWindow.loadURL(rendererUrl)
+  mainWindow.maximize()
+  mainWindow.show()
 }
 
-electronApp.whenReady().then(async () => {
-  try {
-    const status = await startControllerServer()
-    await createWindow(status)
-    configureAutoUpdates()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown startup error"
-    console.error(message)
+const hasSingleInstanceLock = electronApp.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) electronApp.quit()
+else
+  electronApp.whenReady().then(async () => {
+    try {
+      session.defaultSession.setPermissionRequestHandler(
+        (webContents, permission, callback) => {
+          const currentUrl = webContents.getURL()
+          let isLocalController = false
+          try {
+            const parsed = new URL(currentUrl)
+            isLocalController =
+              parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost"
+          } catch {
+            isLocalController = false
+          }
+          callback(permission === "media" && isLocalController)
+        },
+      )
+      const status = await startControllerServer()
+      await createWindow(status)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown startup error"
+      console.error(message)
 
-    const errorWindow = new BrowserWindow({
-      width: 760,
-      height: 420,
-      title: "Sunlite Mobile MIDI - Startup Error",
-      icon: getWindowIconPath(),
-      autoHideMenuBar: true,
-    })
+      const errorWindow = new BrowserWindow({
+        width: 760,
+        height: 420,
+        title: "Sunlite Mobile MIDI - Startup Error",
+        icon: getWindowIconPath(),
+        autoHideMenuBar: true,
+      })
 
-    await errorWindow.loadURL(
-      `data:text/html;charset=utf-8,${encodeURIComponent(`
+      await errorWindow.loadURL(
+        `data:text/html;charset=utf-8,${encodeURIComponent(`
         <html>
           <body style="font-family: system-ui; padding: 24px; line-height: 1.5; background: #0f172a; color: #e2e8f0;">
             <h1>Startup error</h1>
@@ -1225,11 +1600,25 @@ electronApp.whenReady().then(async () => {
           </body>
         </html>
       `)}`,
-    )
-  }
+      )
+    }
+  })
+
+electronApp.on("second-instance", () => {
+  if (mainWindow?.isMinimized()) mainWindow.restore()
+  mainWindow?.focus()
+})
+
+electronApp.on("before-quit", () => {
+  updateManager?.stop()
+  prodjLinkSidecar?.stop()
+  if (automationEngine?.getStatus().recording) automationEngine.stopSession()
+  closeMidiConnection()
 })
 
 electronApp.on("window-all-closed", () => {
+  prodjLinkSidecar?.stop()
+  if (automationEngine?.getStatus().recording) automationEngine.stopSession()
   closeMidiConnection()
 
   if (process.platform !== "darwin") {

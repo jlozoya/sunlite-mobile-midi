@@ -1,6 +1,6 @@
 {
   "name": "sunlite-mobile-midi",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Installable and update-ready mobile MIDI controller for Sunlite Suite 2.",
   "author": "jlozoya",
@@ -11,21 +11,28 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "test:automation": "bun run build:main && node tests/automation-smoke.mjs && node tests/lighting-automation-regression.mjs",
     "check": "bun run format:check && bun run typecheck",
     "build:main": "tsc -p tsconfig.node.json",
     "build:renderer": "vite build",
+    "build:sidecar": "powershell -ExecutionPolicy Bypass -File scripts/build-python-sidecar.ps1",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
     "build": "bun run format:check && bun run build:main && bun run build:renderer",
-    "start": "bun run build && electron dist/main/main.js",
-    "pack": "bun run build && electron-builder --dir",
-    "dist": "bun run build && electron-builder",
-    "dist:win": "bun run build && electron-builder --win",
-    "release:win": "bun run build && electron-builder --win --publish never"
+    "dev": "bun run build:main && bun run rebuild:electron && node scripts/dev.mjs",
+    "start": "bun run build && bun run rebuild:electron && electron dist/main/main.js",
+    "pack": "bun run build && electron-builder --win --x64 --dir --publish never",
+    "dist": "bun run dist:win",
+    "dist:win": "bun run build && electron-builder --win nsis --x64 --publish never && node scripts/verify-release.mjs",
+    "release:win": "bun run dist:win",
+    "test:updates": "bun run build:main && node --test tests/updates.test.mjs",
+    "dist:portable": "bun run build && electron-builder --win portable --x64 --publish never"
   },
   "dependencies": {
     "@stylexjs/stylex": "^0.9.3",
     "easymidi": "^3.1.0",
     "electron-updater": "^6.3.9",
     "express": "^4.19.2",
+    "prolink-connect": "^0.11.0",
     "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-aria-components": "^1.8.0",
@@ -48,6 +55,9 @@
     "vite": "^6.2.0",
     "vite-plugin-stylex": "^0.13.0"
   },
+  "overrides": {
+    "better-sqlite3": "12.11.1"
+  },
   "build": {
     "appId": "com.lozoya.sunlite.mobilemidi",
     "productName": "Sunlite Mobile MIDI",
@@ -67,16 +77,11 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
         }
       ]
     },
     "nsis": {
+      "artifactName": "Sunlite-Mobile-MIDI-Setup-${version}-${arch}.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowElevation": true,
@@ -84,16 +89,13 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Sunlite Mobile MIDI",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
     },
     "extraResources": [
-      {
-        "from": "resources/installers",
-        "to": "installers",
-        "filter": [
-          "**/*"
-        ]
-      },
       {
         "from": "resources/icon.png",
         "to": "icon.png"
@@ -103,12 +105,17 @@
         "to": "icon.ico"
       }
     ],
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "publish": [
       {
-        "provider": "generic",
-        "url": "https://example.com/sunlite-mobile-midi/updates"
+        "provider": "github",
+        "owner": "jlozoya",
+        "repo": "sunlite-mobile-midi",
+        "releaseType": "release"
       }
     ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jlozoya/sunlite-mobile-midi.git"
   }
 }
