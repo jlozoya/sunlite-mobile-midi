@@ -189,9 +189,9 @@ export function useControllerSocket() {
           setConnectionState("online")
           const feedbackLabel = payload.feedbackDisabledReason
             ? `Feedback disabled: ${payload.feedbackDisabledReason}`
-            : `${payload.midiInputName ?? "No feedback input"} ← Sunlite`
+            : `MIDI IN: ${payload.midiInputName ?? "No feedback input"}`
           setServerMidiLabel(
-            `${payload.midiOutputName} → Sunlite · ${feedbackLabel} · Ch ${payload.midiChannel}`,
+            `MIDI OUT: ${payload.midiOutputName} · ${feedbackLabel} · Ch ${payload.midiChannel}`,
           )
           setLastCommand(
             payload.feedbackDisabledReason

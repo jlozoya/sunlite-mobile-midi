@@ -23,10 +23,45 @@ function parseMidiList(value: string): number[] {
     ...new Set(
       value
         .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
         .map(Number)
         .filter((item) => Number.isFinite(item)),
     ),
   ].map((item) => Math.max(0, Math.min(127, Math.round(item))))
+}
+
+function MidiListField({
+  label,
+  values,
+  onChange,
+}: {
+  label: string
+  values: number[]
+  onChange: (values: number[]) => void
+}) {
+  const serialized = values.join(",")
+  const [draft, setDraft] = useState(serialized)
+  useEffect(() => setDraft(serialized), [serialized])
+  return (
+    <label {...stylex.props(styles.field)}>
+      {label}
+      <input
+        {...stylex.props(styles.input)}
+        value={draft}
+        placeholder="Ej. 36,37"
+        onChange={(event) => {
+          setDraft(event.target.value)
+          onChange(parseMidiList(event.target.value))
+        }}
+        onBlur={() => {
+          const parsed = parseMidiList(draft)
+          setDraft(parsed.join(","))
+          onChange(parsed)
+        }}
+      />
+    </label>
+  )
 }
 
 function formatDuration(milliseconds: number): string {
@@ -600,7 +635,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
           <div {...stylex.props(styles.cardHeading)}>
             <strong>Reglas de seguridad</strong>
             <span {...stylex.props(styles.cardDetail)}>
-              Se aplican antes de enviar MIDI
+              Ajusta notas y CC a tu mapeo de luces; se aplican antes de enviar MIDI
             </span>
           </div>
           {settings ? (
@@ -630,26 +665,45 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                   }
                 />
               </label>
-              <label {...stylex.props(styles.field)}>
-                Notas protegidas
-                <input
-                  {...stylex.props(styles.input)}
-                  value={settings.blockedNotes.join(",")}
-                  onChange={(event) =>
-                    setSetting("blockedNotes", parseMidiList(event.target.value))
-                  }
-                />
-              </label>
-              <label {...stylex.props(styles.field)}>
-                Notas strobe
-                <input
-                  {...stylex.props(styles.input)}
-                  value={settings.strobeNotes.join(",")}
-                  onChange={(event) =>
-                    setSetting("strobeNotes", parseMidiList(event.target.value))
-                  }
-                />
-              </label>
+              <MidiListField
+                label="Notas protegidas"
+                values={settings.blockedNotes}
+                onChange={(values) => setSetting("blockedNotes", values)}
+              />
+              <MidiListField
+                label="Notas strobe"
+                values={settings.strobeNotes}
+                onChange={(values) => setSetting("strobeNotes", values)}
+              />
+              <MidiListField
+                label="CC protegidos"
+                values={settings.blockedControllers}
+                onChange={(values) => setSetting("blockedControllers", values)}
+              />
+              {(
+                [
+                  ["manualOverrideMs", "Pausa tras control manual (ms)", 1000, 60000],
+                  [
+                    "repeatActionCooldownMs",
+                    "Espera para repetir acción (ms)",
+                    500,
+                    120000,
+                  ],
+                  ["strobeCooldownMs", "Espera entre strobes (ms)", 1000, 120000],
+                ] as const
+              ).map(([key, label, min, max]) => (
+                <label key={key} {...stylex.props(styles.field)}>
+                  {label}
+                  <input
+                    type="number"
+                    min={min}
+                    max={max}
+                    {...stylex.props(styles.input)}
+                    value={settings[key]}
+                    onChange={(event) => setSetting(key, Number(event.target.value))}
+                  />
+                </label>
+              ))}
               <label {...stylex.props(styles.field)}>
                 Deck preferido
                 <select

@@ -151,7 +151,7 @@ export type AutomationTimelineEvent = {
   t: number
   at: string
   kind: "audio" | "midi" | "feedback" | "beat" | "position" | "example"
-  source?: "manual" | "automatic" | "sunlite"
+  source?: "manual" | "automatic" | "sunlite" | "freestyler"
   frame?: AutomationAudioFrame
   command?: AutomationMidiCommand
   beat?: DjLinkBeat

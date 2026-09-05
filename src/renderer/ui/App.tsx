@@ -6,12 +6,18 @@ import {
   type ControllerCustomization,
 } from "../../shared/controller-config.ts"
 import { MidiController } from "./components/MidiController"
+import { AppUpdates } from "./components/AppUpdates"
 import { Toast } from "./components/Toast"
 import { AutomationStudio } from "./automation/AutomationStudio"
 import { useIsMobileView } from "./hooks/useIsMobileView"
 import { useControllerSocket } from "./useControllerSocket"
 import { useServerStatus } from "./useServerStatus"
 import { ActionButton, Notice, SectionHeader, StatusBadge, Surface } from "./ui-kit"
+
+import {
+  LIGHTING_SOFTWARE_LABELS,
+  type LightingSoftware,
+} from "../../shared/lighting-software"
 
 type DesktopTab = "controller" | "automation" | "connection"
 
@@ -26,7 +32,7 @@ const DESKTOP_TABS: Array<{
     label: "Automatización",
     description: "Audio, CDJ y entrenamiento",
   },
-  { id: "connection", label: "Conexión", description: "Sunlite, red y teléfono" },
+  { id: "connection", label: "Conexión", description: "Software, red y teléfono" },
 ]
 
 export function App() {
@@ -46,6 +52,34 @@ export function App() {
   const [setupBusy, setSetupBusy] = useState<"install" | "refresh" | null>(null)
   const [activeDesktopTab, setActiveDesktopTab] = useState<DesktopTab>("controller")
   const initialTabSelected = useRef(false)
+  const [softwareBusy, setSoftwareBusy] = useState(false)
+  const software = status?.lightingSoftware ?? "sunlite"
+  const softwareLabel = LIGHTING_SOFTWARE_LABELS[software]
+
+  async function changeLightingSoftware(next: LightingSoftware) {
+    setSoftwareBusy(true)
+    try {
+      const response = await fetch("/api/lighting-software", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ software: next }),
+      })
+      if (!response.ok) {
+        const payload = await response.json()
+        throw new Error(payload.message ?? "No se pudo cambiar de software")
+      }
+      await refreshStatus()
+      setSetupMessage(
+        "Perfil cargado en modo Manual. Revisa el mapeo antes de activar Auto.",
+      )
+    } catch (error) {
+      setSetupMessage(
+        error instanceof Error ? error.message : "Error al cambiar de software",
+      )
+    } finally {
+      setSoftwareBusy(false)
+    }
+  }
 
   async function runSetupAction(action: "install" | "refresh") {
     setSetupBusy(action)
@@ -132,7 +166,7 @@ export function App() {
     <main {...stylex.props(styles.app)}>
       <header {...stylex.props(styles.header)}>
         <div {...stylex.props(styles.headerCopy)}>
-          <p {...stylex.props(styles.eyebrow)}>Sunlite Suite 2</p>
+          <p {...stylex.props(styles.eyebrow)}>{softwareLabel}</p>
           <h1 {...stylex.props(styles.title)}>Mobile MIDI Controller</h1>
           <p {...stylex.props(styles.subtitle)}>
             {serverMidiLabel ?? "Waiting for MIDI server"}
@@ -143,6 +177,8 @@ export function App() {
           {statusLabel}
         </StatusBadge>
       </header>
+
+      <AppUpdates />
 
       {!isMobileView ? (
         <nav {...stylex.props(styles.tabs)} aria-label="Secciones de la aplicación">
@@ -236,10 +272,55 @@ export function App() {
             <Surface {...stylex.props(styles.connectionPanel)}>
               <SectionHeader
                 title="Conexión automática"
-                description="La aplicación prepara y abre por sí sola los puertos necesarios para comunicarse con Sunlite."
+                description={`La aplicación prepara los puertos MIDI para ${softwareLabel}.`}
               />
 
               <div {...stylex.props(styles.setupFlow)}>
+                <div
+                  role="group"
+                  aria-label="Software de luces"
+                  {...stylex.props(styles.setupActions)}
+                >
+                  {(["sunlite", "freestyler"] as const).map((value) => (
+                    <ActionButton
+                      key={value}
+                      variant={software === value ? "primary" : "secondary"}
+                      aria-pressed={software === value}
+                      isDisabled={!status || softwareBusy}
+                      onPress={() => {
+                        if (software !== value) void changeLightingSoftware(value)
+                      }}
+                    >
+                      {LIGHTING_SOFTWARE_LABELS[value]}
+                    </ActionButton>
+                  ))}
+                </div>
+                <Notice layout="stack">
+                  <strong>Configurar {softwareLabel}</strong>
+                  {software === "freestyler" ? (
+                    <span>
+                      En Setup → FreeStyler Setup → External Control → MIDI Control, elige{" "}
+                      {status?.expectedMidiOutputName ?? "Sunlite Mobile In"} como entrada
+                      y {status?.expectedMidiInputName ?? "Sunlite Mobile Out"} como
+                      salida opcional. Activa Start y Learn, selecciona Note IN de la
+                      función, pulsa el control en esta app y guarda con Save. Usa Key Up
+                      como Note On con valor 0. Para automatización, asigna las funciones
+                      como Page independent.
+                    </span>
+                  ) : (
+                    <span>
+                      Selecciona {status?.expectedMidiOutputName ?? "Sunlite Mobile In"}{" "}
+                      como entrada y{" "}
+                      {status?.expectedMidiInputName ?? "Sunlite Mobile Out"} como retorno
+                      MIDI. Asigna los controles a las escenas de tu show.
+                    </span>
+                  )}
+                  <span>
+                    Los controles y el entrenamiento se guardan por software. Graba desde
+                    Controlador y prueba el modo Asistido antes de Auto. El retorno visual
+                    requiere que el software envíe feedback.
+                  </span>
+                </Notice>
                 {!status ? (
                   <Notice>
                     <div {...stylex.props(styles.setupStepCopy)}>
@@ -251,7 +332,11 @@ export function App() {
                   <Notice tone="warning">
                     <div {...stylex.props(styles.setupStepCopy)}>
                       <strong>Se necesita preparar el puente MIDI</strong>
-                      <span>Solo tendrás que aceptar el permiso de Windows.</span>
+                      <span>
+                        {status.loopMidiInstallerAvailable
+                          ? "Solo tendrás que aceptar el permiso de Windows."
+                          : "Instala el puente MIDI una vez en este equipo."}
+                      </span>
                     </div>
                     {status.loopMidiInstallerAvailable ? (
                       <ActionButton
@@ -264,7 +349,22 @@ export function App() {
                       </ActionButton>
                     ) : (
                       <span {...stylex.props(styles.setupUnavailable)}>
-                        El componente MIDI no está incluido en esta compilación.
+                        Instala loopMIDI desde{" "}
+                        <a
+                          href="https://www.tobias-erichsen.de/software/loopmidi.html"
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          su sitio oficial
+                        </a>{" "}
+                        y pulsa Reintentar para crear los puertos.
+                        <ActionButton
+                          variant="secondary"
+                          isDisabled={setupBusy !== null}
+                          onPress={() => void runSetupAction("install")}
+                        >
+                          Reintentar
+                        </ActionButton>
                       </span>
                     )}
                   </Notice>
@@ -300,7 +400,7 @@ export function App() {
                     <div {...stylex.props(styles.setupStepCopy)}>
                       <strong>Puente MIDI listo</strong>
                       <span>
-                        Sunlite puede recibir comandos por{" "}
+                        {softwareLabel} puede recibir comandos por{" "}
                         <strong>{status.midiOutputName}</strong>.{" "}
                         {status.feedbackReady ? (
                           <>
@@ -363,7 +463,10 @@ export function App() {
           hidden={activeDesktopTab !== "automation"}
           {...stylex.props(activeDesktopTab !== "automation" && styles.tabPanelHidden)}
         >
-          <AutomationStudio sendAutomationCommand={sendAutomationCommand} />
+          <AutomationStudio
+            key={software}
+            sendAutomationCommand={sendAutomationCommand}
+          />
         </section>
       ) : null}
 
@@ -389,8 +492,8 @@ export function App() {
               description={
                 isMobileView ? (
                   <>
-                    Termina la conexión con Sunlite desde la computadora. El controlador
-                    aparecerá aquí en cuanto el puerto MIDI esté listo.
+                    Termina la conexión con {softwareLabel} desde la computadora. El
+                    controlador aparecerá aquí en cuanto el puerto MIDI esté listo.
                   </>
                 ) : (
                   <>

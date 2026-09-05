@@ -1,5 +1,6 @@
-import { app as electronApp, BrowserWindow, session, shell } from "electron"
+import { app as electronApp, BrowserWindow, ipcMain, session, shell } from "electron"
 import electronUpdater from "electron-updater"
+import { UpdateManager, validateUpdateFeed } from "./update-manager.js"
 import { spawn } from "node:child_process"
 import fs from "node:fs"
 import easymidi from "easymidi"
@@ -21,27 +22,46 @@ import {
 import { AutomationEngine } from "./automation/automation-engine.js"
 import { ProDjLinkSidecar } from "./automation/prodj-link-sidecar.js"
 import { WebSocketServer, type WebSocket } from "ws"
+import {
+  isLightingSoftware,
+  noteRelease,
+  type LightingSoftware,
+} from "../shared/lighting-software.js"
 
-type AutoUpdaterLike = {
-  autoDownload: boolean
-  autoInstallOnAppQuit: boolean
-  setFeedURL: (options: { provider: "generic"; url: string }) => void
-  on: (event: string, listener: (...args: unknown[]) => void) => void
-  checkForUpdatesAndNotify: () => Promise<unknown>
+let lightingSoftware: LightingSoftware = "sunlite"
+
+function lightingProfilePath(): string {
+  const root = electronApp.getPath("userData")
+  return lightingSoftware === "sunlite"
+    ? root
+    : path.join(root, "profiles", lightingSoftware)
 }
 
-const { autoUpdater } = electronUpdater as unknown as { autoUpdater: AutoUpdaterLike }
-
-function getUpdateInfoVersion(info: unknown): string {
-  if (info && typeof info === "object" && "version" in info) {
-    const version = (info as { version?: unknown }).version
-    if (typeof version === "string") {
-      return version
-    }
+function loadLightingSoftware(): void {
+  try {
+    const saved = JSON.parse(
+      fs.readFileSync(
+        path.join(electronApp.getPath("userData"), "lighting-software.json"),
+        "utf8",
+      ),
+    )
+    if (isLightingSoftware(saved.software)) lightingSoftware = saved.software
+  } catch {
+    /* Existing installations default to Sunlite. */
   }
-
-  return "unknown"
 }
+
+function createAutomationEngine(): AutomationEngine {
+  return new AutomationEngine(
+    lightingProfilePath(),
+    broadcastToAll,
+    (command: AutomationMidiCommand) => handleCommand(command as IncomingCommand),
+    lightingSoftware,
+  )
+}
+
+const { autoUpdater } = electronUpdater
+let updateManager: UpdateManager | null = null
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -71,51 +91,55 @@ function getWindowIconPath(): string {
 }
 
 function configureAutoUpdates() {
-  if (!electronApp.isPackaged) {
-    return
+  let disabledReason = !electronApp.isPackaged
+    ? "Las actualizaciones están desactivadas en desarrollo."
+    : process.platform !== "win32"
+      ? "Las actualizaciones integradas requieren la instalación de Windows."
+      : process.env.PORTABLE_EXECUTABLE_FILE
+        ? "Edición portable: instala la edición Setup para recibir actualizaciones."
+        : !fs.existsSync(
+              path.join(process.resourcesPath, "..", "Uninstall Sunlite Mobile MIDI.exe"),
+            )
+          ? "Esta copia no está instalada. Ejecuta el instalador Setup para activar actualizaciones."
+          : null
+  if (!disabledReason && process.env.SUNLITE_UPDATE_FEED_URL) {
+    try {
+      autoUpdater.setFeedURL({
+        provider: "generic",
+        url: validateUpdateFeed(process.env.SUNLITE_UPDATE_FEED_URL),
+      })
+    } catch {
+      disabledReason = "El servidor de actualizaciones configurado no es válido."
+    }
   }
-
-  const updateFeedUrl = process.env.SUNLITE_UPDATE_FEED_URL
-
-  if (updateFeedUrl) {
-    autoUpdater.setFeedURL({
-      provider: "generic",
-      url: updateFeedUrl,
+  updateManager = new UpdateManager(
+    autoUpdater,
+    electronApp.getVersion(),
+    disabledReason,
+    () => {
+      const state = automationEngine?.getStatus()
+      if (state?.recording) throw new Error("Termina la grabación antes de instalar.")
+      if (state && state.mode !== "manual")
+        throw new Error("Cambia a modo Manual antes de instalar.")
+    },
+  )
+  const trustedUrl = process.env.SUNLITE_DEV_RENDERER_URL || serverStatus?.localUrl
+  for (const action of ["status", "check", "download", "install"] as const) {
+    ipcMain.handle(`updates:${action}`, (event) => {
+      const frame = event.senderFrame
+      if (
+        !mainWindow ||
+        event.sender !== mainWindow.webContents ||
+        frame !== mainWindow.webContents.mainFrame ||
+        !trustedUrl ||
+        new URL(frame.url).origin !== new URL(trustedUrl).origin
+      ) {
+        throw new Error("Solicitud de actualización no autorizada.")
+      }
+      return updateManager![action]()
     })
   }
-
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
-
-  autoUpdater.on("checking-for-update", () => {
-    console.info("Checking for Sunlite Mobile MIDI updates")
-  })
-
-  autoUpdater.on("update-available", (info: unknown) => {
-    console.info(`Sunlite Mobile MIDI update available: ${getUpdateInfoVersion(info)}`)
-  })
-
-  autoUpdater.on("update-not-available", () => {
-    console.info("Sunlite Mobile MIDI is up to date")
-  })
-
-  autoUpdater.on("error", (error: unknown) => {
-    console.warn("Sunlite Mobile MIDI update check failed", error)
-  })
-
-  autoUpdater.on("update-downloaded", (info: unknown) => {
-    console.info(
-      `Sunlite Mobile MIDI update downloaded: ${getUpdateInfoVersion(
-        info,
-      )}. It will install on app quit.`,
-    )
-  })
-
-  setTimeout(() => {
-    void autoUpdater.checkForUpdatesAndNotify().catch((error: unknown) => {
-      console.warn("Sunlite Mobile MIDI update check failed", error)
-    })
-  }, 3000)
+  updateManager.start()
 }
 
 type MidiConnection = {
@@ -135,6 +159,7 @@ type NetworkUrlCandidate = {
 }
 
 type ServerStatus = {
+  lightingSoftware: LightingSoftware
   port: number
   localUrl: string
   lanUrls: string[]
@@ -224,7 +249,7 @@ function cloneMidiFeedbackState(): MidiFeedbackState {
 }
 
 function getMidiFeedbackStatePath(): string {
-  return path.join(electronApp.getPath("userData"), "midi-feedback-state.json")
+  return path.join(lightingProfilePath(), "midi-feedback-state.json")
 }
 
 function normalizeStoredMidiFeedbackState(value: unknown): MidiFeedbackState {
@@ -395,7 +420,7 @@ function queueMidiFeedbackStateBroadcast() {
 }
 
 function getControllerConfigPath(): string {
-  return path.join(electronApp.getPath("userData"), "controller-config.json")
+  return path.join(lightingProfilePath(), "controller-config.json")
 }
 
 function loadControllerCustomization(): ControllerCustomization {
@@ -580,21 +605,31 @@ function createMidiSender(output: easymidi.Output) {
   }
 
   function sendNoteOff(note: number, velocity = 0) {
-    sendMidi(output, "noteoff", {
+    const release = noteRelease(lightingSoftware, clampMidiValue(velocity))
+    sendMidi(output, release.type, {
       note: clampMidiValue(note),
-      velocity: clampMidiValue(velocity),
+      velocity: release.velocity,
       channel: MIDI_CHANNEL_ZERO_BASED,
     })
   }
 
   function sendNote(note: number, velocity = 127, offDelayMs = 500) {
     sendNoteOn(note, velocity)
+    const release = noteRelease(lightingSoftware)
 
     setTimeout(
       () => {
-        sendNoteOff(note, 0)
+        try {
+          sendMidi(output, release.type, {
+            note: clampMidiValue(note),
+            velocity: release.velocity,
+            channel: MIDI_CHANNEL_ZERO_BASED,
+          })
+        } catch (error) {
+          console.warn("Could not release MIDI note", error)
+        }
       },
-      Math.max(0, Number(offDelayMs) || 500),
+      Math.max(0, Math.min(5000, Number.isFinite(offDelayMs) ? offDelayMs : 500)),
     )
   }
 
@@ -963,7 +998,7 @@ async function provisionMidiBridge(options: { installIfMissing: boolean }) {
 
   midiAutoConfigured = true
   midiProvisioningMessage =
-    "Local MIDI bridge ready. Sunlite can use the Sunlite Mobile In port."
+    "Local MIDI bridge ready. Sunlite / FreeStyler can use the Sunlite Mobile In port."
   refreshMidiConnection()
   return true
 }
@@ -1028,7 +1063,8 @@ function handleCommand(payload: IncomingCommand) {
   if (payload.type === "note") {
     const note = clampMidiValue(payload.note)
     const velocity = clampMidiValue(payload.velocity ?? 127)
-    const offDelayMs = Math.max(0, Number(payload.offDelayMs ?? 500) || 500)
+    const delay = Number(payload.offDelayMs ?? 500)
+    const offDelayMs = Math.max(0, Math.min(5000, Number.isFinite(delay) ? delay : 500))
     midiConnection.midi.sendNote(note, velocity, offDelayMs)
 
     return { ok: true, type: "note", note, velocity, offDelayMs }
@@ -1131,6 +1167,7 @@ function listenWithPortFallback(
 }
 
 async function startControllerServer(): Promise<ServerStatus> {
+  loadLightingSoftware()
   loadControllerCustomization()
   loadMidiFeedbackState()
 
@@ -1148,11 +1185,7 @@ async function startControllerServer(): Promise<ServerStatus> {
   const wss = new WebSocketServer({ server: httpServer })
 
   activeWebSocketServer = wss
-  automationEngine = new AutomationEngine(
-    electronApp.getPath("userData"),
-    broadcastToAll,
-    (command: AutomationMidiCommand) => handleCommand(command as IncomingCommand),
-  )
+  automationEngine = createAutomationEngine()
 
   const projectRoot = path.resolve(__dirname, "../..")
   prodjLinkSidecar = new ProDjLinkSidecar({
@@ -1168,6 +1201,51 @@ async function startControllerServer(): Promise<ServerStatus> {
 
   appServer.get("/api/status", (_request, response) => {
     refreshMidiConnection()
+    response.json(serverStatus)
+  })
+
+  appServer.put("/api/lighting-software", (request, response) => {
+    const software = request.body?.software
+    if (!isLightingSoftware(software)) {
+      response.status(400).json({ message: "Software de luces no válido" })
+      return
+    }
+    if (software === lightingSoftware) {
+      response.json(serverStatus)
+      return
+    }
+    if (automationEngine?.getStatus().recording) {
+      response
+        .status(409)
+        .json({ message: "Detén la grabación antes de cambiar de software" })
+      return
+    }
+    const previousSoftware = lightingSoftware
+    let nextEngine: AutomationEngine
+    try {
+      lightingSoftware = software
+      nextEngine = createAutomationEngine()
+      fs.writeFileSync(
+        path.join(electronApp.getPath("userData"), "lighting-software.json"),
+        JSON.stringify({ software }),
+        "utf8",
+      )
+    } catch (error) {
+      lightingSoftware = previousSoftware
+      response.status(500).json({
+        message:
+          error instanceof Error ? error.message : "No se pudo cambiar de software",
+      })
+      return
+    }
+    automationEngine?.dispose()
+    automationEngine = nextEngine
+    loadControllerCustomization()
+    midiFeedbackState = { padStates: {}, ccValues: {} }
+    if (serverStatus) serverStatus.lightingSoftware = software
+    broadcastToAll({ event: "controller-config", config: controllerCustomization })
+    broadcastMidiFeedbackState()
+    broadcastToAll({ event: "automation-status", status: automationEngine.getStatus() })
     response.json(serverStatus)
   })
 
@@ -1417,6 +1495,7 @@ async function startControllerServer(): Promise<ServerStatus> {
   const loopMidiExecutablePath = findLoopMidiExecutable()
 
   serverStatus = {
+    lightingSoftware,
     port,
     localUrl,
     lanUrls,
@@ -1460,52 +1539,60 @@ async function createWindow(status: ServerStatus) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(__dirname, "preload.cjs"),
     },
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    if (["https:", "http:"].includes(new URL(url).protocol)) void shell.openExternal(url)
     return { action: "deny" }
   })
 
-  await mainWindow.loadURL(process.env.SUNLITE_DEV_RENDERER_URL || status.localUrl)
+  const rendererUrl = process.env.SUNLITE_DEV_RENDERER_URL || status.localUrl
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (new URL(url).origin !== new URL(rendererUrl).origin) event.preventDefault()
+  })
+  configureAutoUpdates()
+  await mainWindow.loadURL(rendererUrl)
   mainWindow.maximize()
   mainWindow.show()
 }
 
-electronApp.whenReady().then(async () => {
-  try {
-    session.defaultSession.setPermissionRequestHandler(
-      (webContents, permission, callback) => {
-        const currentUrl = webContents.getURL()
-        let isLocalController = false
-        try {
-          const parsed = new URL(currentUrl)
-          isLocalController =
-            parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost"
-        } catch {
-          isLocalController = false
-        }
-        callback(permission === "media" && isLocalController)
-      },
-    )
-    const status = await startControllerServer()
-    await createWindow(status)
-    configureAutoUpdates()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown startup error"
-    console.error(message)
+const hasSingleInstanceLock = electronApp.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) electronApp.quit()
+else
+  electronApp.whenReady().then(async () => {
+    try {
+      session.defaultSession.setPermissionRequestHandler(
+        (webContents, permission, callback) => {
+          const currentUrl = webContents.getURL()
+          let isLocalController = false
+          try {
+            const parsed = new URL(currentUrl)
+            isLocalController =
+              parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost"
+          } catch {
+            isLocalController = false
+          }
+          callback(permission === "media" && isLocalController)
+        },
+      )
+      const status = await startControllerServer()
+      await createWindow(status)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown startup error"
+      console.error(message)
 
-    const errorWindow = new BrowserWindow({
-      width: 760,
-      height: 420,
-      title: "Sunlite Mobile MIDI - Startup Error",
-      icon: getWindowIconPath(),
-      autoHideMenuBar: true,
-    })
+      const errorWindow = new BrowserWindow({
+        width: 760,
+        height: 420,
+        title: "Sunlite Mobile MIDI - Startup Error",
+        icon: getWindowIconPath(),
+        autoHideMenuBar: true,
+      })
 
-    await errorWindow.loadURL(
-      `data:text/html;charset=utf-8,${encodeURIComponent(`
+      await errorWindow.loadURL(
+        `data:text/html;charset=utf-8,${encodeURIComponent(`
         <html>
           <body style="font-family: system-ui; padding: 24px; line-height: 1.5; background: #0f172a; color: #e2e8f0;">
             <h1>Startup error</h1>
@@ -1513,8 +1600,20 @@ electronApp.whenReady().then(async () => {
           </body>
         </html>
       `)}`,
-    )
-  }
+      )
+    }
+  })
+
+electronApp.on("second-instance", () => {
+  if (mainWindow?.isMinimized()) mainWindow.restore()
+  mainWindow?.focus()
+})
+
+electronApp.on("before-quit", () => {
+  updateManager?.stop()
+  prodjLinkSidecar?.stop()
+  if (automationEngine?.getStatus().recording) automationEngine.stopSession()
+  closeMidiConnection()
 })
 
 electronApp.on("window-all-closed", () => {

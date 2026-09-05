@@ -32,6 +32,8 @@ export function useServerStatus() {
 
   useEffect(() => {
     void loadStatus()
+    const timer = window.setInterval(() => void loadStatus(), 5000)
+    return () => window.clearInterval(timer)
   }, [loadStatus])
 
   return { status, error, isLoading, refreshStatus: loadStatus }

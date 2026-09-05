@@ -18,6 +18,59 @@ export type PolicyPrediction = {
   distance: number
 }
 
+function isMidiValue(value: unknown): value is number {
+  return (
+    typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 127
+  )
+}
+
+function isValidExample(value: unknown): value is AutomationTrainingExample {
+  if (!value || typeof value !== "object") return false
+  const example = value as AutomationTrainingExample
+  const features = example.features
+  if (
+    !features ||
+    ![
+      features.rms,
+      features.bass,
+      features.mid,
+      features.high,
+      features.flux,
+      features.centroid,
+    ].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)
+  )
+    return false
+  if (
+    !Number.isFinite(example.createdAt) ||
+    typeof example.id !== "string" ||
+    !Number.isInteger(example.beatWithinBar) ||
+    example.beatWithinBar < 0 ||
+    example.beatWithinBar > 4 ||
+    !Number.isFinite(example.bpm) ||
+    example.bpm < 0 ||
+    example.bpm > 400
+  )
+    return false
+  const command = example.command
+  if (!command || typeof command !== "object") return false
+  if (command.type === "cc")
+    return isMidiValue(command.controller) && isMidiValue(command.value)
+  if (command.type === "program") return isMidiValue(command.number)
+  if (command.type === "note" || command.type === "noteon") {
+    return (
+      isMidiValue(command.note) &&
+      (command.velocity === undefined ||
+        (isMidiValue(command.velocity) && command.velocity > 0)) &&
+      (command.type !== "note" ||
+        command.offDelayMs === undefined ||
+        (Number.isFinite(command.offDelayMs) &&
+          command.offDelayMs >= 0 &&
+          command.offDelayMs <= 5000))
+    )
+  }
+  return false
+}
+
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
 }
@@ -81,6 +134,7 @@ function normalizeAutomaticCommand(
 export class ExamplePolicyEngine {
   private readonly modelPath: string
   private examples: AutomationTrainingExample[] = []
+  private vectors: number[][] = []
 
   constructor(modelPath: string) {
     this.modelPath = modelPath
@@ -92,16 +146,18 @@ export class ExamplePolicyEngine {
   }
 
   train(examples: AutomationTrainingExample[]): number {
-    this.examples = examples
-      .filter((example) => normalizeAutomaticCommand(example.command) !== null)
-      .slice(-8000)
+    const validExamples = examples.filter(isValidExample).slice(-8000)
 
     const model: StoredModel = {
       version: 1,
       trainedAt: new Date().toISOString(),
-      examples: this.examples,
+      examples: validExamples,
     }
-    fs.writeFileSync(this.modelPath, JSON.stringify(model), "utf8")
+    const temporaryPath = this.modelPath + ".tmp"
+    fs.writeFileSync(temporaryPath, JSON.stringify(model), "utf8")
+    fs.renameSync(temporaryPath, this.modelPath)
+    this.examples = validExamples
+    this.cacheVectors()
     return this.examples.length
   }
 
@@ -114,12 +170,9 @@ export class ExamplePolicyEngine {
 
     const target = featureVector(features, beatWithinBar, bpm)
     const neighbors = this.examples
-      .map((example) => ({
+      .map((example, index) => ({
         example,
-        distance: distance(
-          target,
-          featureVector(example.features, example.beatWithinBar, example.bpm),
-        ),
+        distance: distance(target, this.vectors[index]),
       }))
       .sort((a, b) => a.distance - b.distance)
       .slice(0, Math.min(9, this.examples.length))
@@ -129,7 +182,7 @@ export class ExamplePolicyEngine {
       {
         score: number
         command: AutomationMidiCommand
-        closestDistance: number
+        distances: number[]
         count: number
       }
     >()
@@ -145,10 +198,7 @@ export class ExamplePolicyEngine {
       votes.set(key, {
         score: (current?.score ?? 0) + score,
         command: current?.command ?? command,
-        closestDistance: Math.min(
-          current?.closestDistance ?? Infinity,
-          neighbor.distance,
-        ),
+        distances: [...(current?.distances ?? []), neighbor.distance],
         count: (current?.count ?? 0) + 1,
       })
       totalScore += score
@@ -158,9 +208,13 @@ export class ExamplePolicyEngine {
     if (!winner || totalScore <= 0) return null
 
     const agreement = winner.score / totalScore
-    const similarity = clamp01(1 - winner.closestDistance / 0.7)
+    const supportingDistances = winner.distances.slice(0, 3)
+    const supportDistance =
+      supportingDistances.reduce((sum, value) => sum + value, 0) /
+      supportingDistances.length
+    const similarity = clamp01(1 - supportDistance / 0.7)
     const coverage = clamp01(winner.count / 3)
-    const support = agreement * 0.75 + coverage * 0.25
+    const support = agreement * coverage
 
     return {
       command: winner.command,
@@ -169,15 +223,22 @@ export class ExamplePolicyEngine {
       // automatic execution threshold.
       confidence: clamp01(support * similarity),
       neighborCount: winner.count,
-      distance: winner.closestDistance,
+      distance: supportDistance,
     }
+  }
+
+  private cacheVectors(): void {
+    this.vectors = this.examples.map((example) =>
+      featureVector(example.features, example.beatWithinBar, example.bpm),
+    )
   }
 
   private load(): void {
     try {
       const stored = JSON.parse(fs.readFileSync(this.modelPath, "utf8")) as StoredModel
       if (stored.version === 1 && Array.isArray(stored.examples)) {
-        this.examples = stored.examples.slice(-8000)
+        this.examples = stored.examples.filter(isValidExample).slice(-8000)
+        this.cacheVectors()
       }
     } catch {
       this.examples = []

@@ -140,8 +140,9 @@ export function ControllerConfigModal({
               <strong>Standard {model.name} mapping</strong>
               <span>
                 This app uses the fixed {model.name} note for this button. Color and
-                lit/off state are controlled only by MIDI OUT feedback from Sunlite.
-                Configure Sunlite to send feedback to <strong>Sunlite Mobile Out</strong>.
+                lit/off state are controlled only by MIDI OUT feedback from your lighting
+                software. Configure Sunlite or FreeStyler to send feedback to{" "}
+                <strong>Sunlite Mobile Out</strong>.
               </span>
             </Notice>
           </div>

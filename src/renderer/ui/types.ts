@@ -13,6 +13,7 @@ export type NetworkUrlCandidate = {
 }
 
 export type ServerStatus = {
+  lightingSoftware: import("../../shared/lighting-software").LightingSoftware
   port: number
   localUrl: string
   lanUrls: string[]
