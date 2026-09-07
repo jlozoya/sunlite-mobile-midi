@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex"
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import type {
   AutomationMidiCommand,
   AutomationMode,
@@ -31,13 +31,99 @@ function parseMidiList(value: string): number[] {
   ].map((item) => Math.max(0, Math.min(127, Math.round(item))))
 }
 
+/** Renders a duration the way a person reads it, next to the raw millisecond input. */
+function formatMilliseconds(milliseconds: number): string {
+  if (!Number.isFinite(milliseconds)) return "—"
+  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`
+  if (milliseconds >= 60000) {
+    const minutes = milliseconds / 60000
+    const rounded = Math.round(minutes * 10) / 10
+    return `${String(rounded).replace(".", ",")} min`
+  }
+  const seconds = milliseconds / 1000
+  const rounded = seconds >= 10 ? Math.round(seconds) : Math.round(seconds * 10) / 10
+  return `${String(rounded).replace(".", ",")} s`
+}
+
+/** One themed block of related rules, so the panel reads as four questions, not nine inputs. */
+function SettingsGroup({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description: string
+  children: ReactNode
+}) {
+  return (
+    <section {...stylex.props(styles.settingsGroup)}>
+      <div {...stylex.props(styles.groupHeading)}>
+        <span {...stylex.props(styles.groupTitle)}>{title}</span>
+        <span {...stylex.props(styles.groupDescription)}>{description}</span>
+      </div>
+      <div {...stylex.props(styles.settingsGrid)}>{children}</div>
+    </section>
+  )
+}
+
+function NumberField({
+  label,
+  unit,
+  value,
+  min,
+  max,
+  help,
+  isDuration,
+  isDisabled,
+  onChange,
+}: {
+  label: string
+  unit: string
+  value: number
+  min: number
+  max: number
+  help: string
+  /** Renders the value and the accepted range in seconds and minutes, not raw ms. */
+  isDuration?: boolean
+  isDisabled?: boolean
+  onChange: (value: number) => void
+}) {
+  const range = isDuration
+    ? `${formatMilliseconds(value)} · entre ${formatMilliseconds(min)} y ${formatMilliseconds(max)}`
+    : `Entre ${min} y ${max} ${unit}`
+
+  return (
+    <label {...stylex.props(styles.field, isDisabled && styles.fieldDisabled)}>
+      <span {...stylex.props(styles.fieldLabel)}>
+        {label}
+        <span {...stylex.props(styles.fieldUnit)}>{unit}</span>
+      </span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        disabled={isDisabled}
+        {...stylex.props(styles.input)}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+      <span {...stylex.props(styles.fieldHelp)}>{help}</span>
+      <span {...stylex.props(styles.fieldRange)}>{range}</span>
+    </label>
+  )
+}
+
 function MidiListField({
   label,
   values,
+  help,
+  kind,
   onChange,
 }: {
   label: string
   values: number[]
+  help: string
+  kind: "notas" | "CC"
   onChange: (values: number[]) => void
 }) {
   const serialized = values.join(",")
@@ -45,7 +131,7 @@ function MidiListField({
   useEffect(() => setDraft(serialized), [serialized])
   return (
     <label {...stylex.props(styles.field)}>
-      {label}
+      <span {...stylex.props(styles.fieldLabel)}>{label}</span>
       <input
         {...stylex.props(styles.input)}
         value={draft}
@@ -60,6 +146,10 @@ function MidiListField({
           onChange(parsed)
         }}
       />
+      <span {...stylex.props(styles.fieldHelp)}>{help}</span>
+      <span {...stylex.props(styles.fieldRange)}>
+        {values.length === 0 ? "Ninguno" : `${values.length} en la lista`} · {kind} 0–127
+      </span>
     </label>
   )
 }
@@ -632,107 +722,154 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
           padding="custom"
           {...stylex.props(styles.subPanel)}
         >
-          <div {...stylex.props(styles.cardHeading)}>
+          <div {...stylex.props(styles.rulesHeading)}>
             <strong>Reglas de seguridad</strong>
             <span {...stylex.props(styles.cardDetail)}>
-              Ajusta notas y CC a tu mapeo de luces; se aplican antes de enviar MIDI
+              Cada acción que propone la automatización tiene que pasar estos filtros
+              antes de que se envíe MIDI. Si no pasa uno, se descarta y verás el motivo en
+              la sugerencia.
             </span>
           </div>
           {settings ? (
-            <div {...stylex.props(styles.settingsGrid)}>
-              <label {...stylex.props(styles.field)}>
-                Confianza mínima
-                <input
-                  type="number"
-                  min="25"
-                  max="98"
-                  {...stylex.props(styles.input)}
-                  value={Math.round(settings.confidenceThreshold * 100)}
-                  onChange={(event) =>
-                    setSetting("confidenceThreshold", Number(event.target.value) / 100)
-                  }
-                />
-              </label>
-              <label {...stylex.props(styles.field)}>
-                Intervalo mínimo (ms)
-                <input
-                  type="number"
-                  min="250"
-                  {...stylex.props(styles.input)}
-                  value={settings.minActionIntervalMs}
-                  onChange={(event) =>
-                    setSetting("minActionIntervalMs", Number(event.target.value))
-                  }
-                />
-              </label>
-              <MidiListField
-                label="Notas protegidas"
-                values={settings.blockedNotes}
-                onChange={(values) => setSetting("blockedNotes", values)}
-              />
-              <MidiListField
-                label="Notas strobe"
-                values={settings.strobeNotes}
-                onChange={(values) => setSetting("strobeNotes", values)}
-              />
-              <MidiListField
-                label="CC protegidos"
-                values={settings.blockedControllers}
-                onChange={(values) => setSetting("blockedControllers", values)}
-              />
-              {(
-                [
-                  ["manualOverrideMs", "Pausa tras control manual (ms)", 1000, 60000],
-                  [
-                    "repeatActionCooldownMs",
-                    "Espera para repetir acción (ms)",
-                    500,
-                    120000,
-                  ],
-                  ["strobeCooldownMs", "Espera entre strobes (ms)", 1000, 120000],
-                ] as const
-              ).map(([key, label, min, max]) => (
-                <label key={key} {...stylex.props(styles.field)}>
-                  {label}
-                  <input
-                    type="number"
-                    min={min}
-                    max={max}
-                    {...stylex.props(styles.input)}
-                    value={settings[key]}
-                    onChange={(event) => setSetting(key, Number(event.target.value))}
-                  />
-                </label>
-              ))}
-              <label {...stylex.props(styles.field)}>
-                Deck preferido
-                <select
-                  {...stylex.props(styles.select)}
-                  value={settings.preferredDeck ?? ""}
-                  onChange={(event) =>
-                    setSetting(
-                      "preferredDeck",
-                      event.target.value ? Number(event.target.value) : null,
-                    )
-                  }
-                >
-                  <option value="">Automático</option>
-                  {[1, 2, 3, 4, 5, 6].map((deck) => (
-                    <option key={deck} value={deck}>
-                      Deck {deck}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <ActionButton
-                tone="cyan"
-                {...stylex.props(styles.saveButton)}
-                isDisabled={!settingsDirty || automation.busy === "settings"}
-                onPress={() => void saveSettings()}
+            <>
+              <SettingsGroup
+                title="Cuándo puede actuar"
+                description="Evita que la automatización dispare de más o con poca certeza."
               >
-                Guardar reglas
-              </ActionButton>
-            </div>
+                <NumberField
+                  label="Confianza mínima"
+                  unit="%"
+                  min={25}
+                  max={98}
+                  value={Math.round(settings.confidenceThreshold * 100)}
+                  help="Descarta la sugerencia si el modelo está menos seguro que esto."
+                  onChange={(value) => setSetting("confidenceThreshold", value / 100)}
+                />
+                <NumberField
+                  label="Intervalo mínimo"
+                  unit="ms"
+                  min={250}
+                  max={30000}
+                  value={settings.minActionIntervalMs}
+                  isDuration
+                  help="Tiempo que debe pasar entre dos acciones automáticas cualesquiera."
+                  onChange={(value) => setSetting("minActionIntervalMs", value)}
+                />
+                <NumberField
+                  label="Espera para repetir"
+                  unit="ms"
+                  min={500}
+                  max={120000}
+                  value={settings.repeatActionCooldownMs}
+                  isDuration
+                  help="Igual que el anterior, pero solo para repetir la misma nota o CC."
+                  onChange={(value) => setSetting("repeatActionCooldownMs", value)}
+                />
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="Qué no debe tocar nunca"
+                description="Números MIDI de tu mapeo de luces, separados por comas."
+              >
+                <MidiListField
+                  label="Notas protegidas"
+                  kind="notas"
+                  values={settings.blockedNotes}
+                  help="La automatización nunca envía estas notas. Reserva aquí lo que quieras controlar solo a mano."
+                  onChange={(values) => setSetting("blockedNotes", values)}
+                />
+                <MidiListField
+                  label="CC protegidos"
+                  kind="CC"
+                  values={settings.blockedControllers}
+                  help="Controles continuos que la automatización nunca mueve, como el máster de intensidad."
+                  onChange={(values) => setSetting("blockedControllers", values)}
+                />
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="Strobe"
+                description="Los strobes llevan su propio límite, aparte del resto de acciones."
+              >
+                <MidiListField
+                  label="Notas strobe"
+                  kind="notas"
+                  values={settings.strobeNotes}
+                  help="Notas que se tratan como strobe y quedan sujetas a la espera de abajo."
+                  onChange={(values) => setSetting("strobeNotes", values)}
+                />
+                <NumberField
+                  label="Espera entre strobes"
+                  unit="ms"
+                  min={1000}
+                  max={120000}
+                  value={settings.strobeCooldownMs}
+                  isDuration
+                  isDisabled={settings.strobeNotes.length === 0}
+                  help={
+                    settings.strobeNotes.length === 0
+                      ? "Sin efecto mientras no haya ninguna nota strobe declarada."
+                      : "Tiempo mínimo entre dos disparos de cualquier nota strobe."
+                  }
+                  onChange={(value) => setSetting("strobeCooldownMs", value)}
+                />
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="Control manual y deck"
+                description="Quién manda cuando intervienes tú, y de qué deck se lee el audio."
+              >
+                <NumberField
+                  label="Pausa tras control manual"
+                  unit="ms"
+                  min={1000}
+                  max={60000}
+                  value={settings.manualOverrideMs}
+                  isDuration
+                  help="Al tocar un control a mano, la automatización se detiene este tiempo."
+                  onChange={(value) => setSetting("manualOverrideMs", value)}
+                />
+                <label {...stylex.props(styles.field)}>
+                  <span {...stylex.props(styles.fieldLabel)}>Deck preferido</span>
+                  <select
+                    {...stylex.props(styles.select)}
+                    value={settings.preferredDeck ?? ""}
+                    onChange={(event) =>
+                      setSetting(
+                        "preferredDeck",
+                        event.target.value ? Number(event.target.value) : null,
+                      )
+                    }
+                  >
+                    <option value="">Automático</option>
+                    {[1, 2, 3, 4, 5, 6].map((deck) => (
+                      <option key={deck} value={deck}>
+                        Deck {deck}
+                      </option>
+                    ))}
+                  </select>
+                  <span {...stylex.props(styles.fieldHelp)}>
+                    Automático sigue al deck que esté sonando. Fíjalo si siempre pinchas
+                    desde el mismo.
+                  </span>
+                </label>
+              </SettingsGroup>
+
+              <div {...stylex.props(styles.rulesFooter)}>
+                <span {...stylex.props(styles.dirtyHint)}>
+                  {settingsDirty
+                    ? "Tienes cambios sin guardar; se aplican al pulsar Guardar."
+                    : "Sin cambios pendientes."}
+                </span>
+                <ActionButton
+                  tone="cyan"
+                  isDisabled={!settingsDirty || automation.busy === "settings"}
+                  onPress={() => void saveSettings()}
+                >
+                  Guardar reglas
+                </ActionButton>
+              </div>
+            </>
           ) : null}
         </Surface>
       </div>
@@ -1044,13 +1181,53 @@ const styles = stylex.create({
     width: "100%",
   },
   emptyText: { color: "#64748b", fontSize: "0.8rem", padding: "10px 2px" },
+  rulesHeading: { display: "grid", gap: "4px" },
+  settingsGroup: {
+    marginTop: "12px",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: "rgba(255, 255, 255, 0.07)",
+    paddingTop: "11px",
+  },
+  groupHeading: { display: "grid", gap: "2px", marginBottom: "9px" },
+  groupTitle: { color: "#e2e8f0", fontSize: "0.78rem", fontWeight: 700 },
+  groupDescription: { color: "#7c8ba1", fontSize: "0.72rem", lineHeight: 1.4 },
   settingsGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-    alignItems: "end",
-    gap: "9px",
-    marginTop: "10px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(216px, 1fr))",
+    alignItems: "start",
+    gap: "12px",
   },
-  field: { display: "grid", gap: "5px", color: "#94a3b8", fontSize: "0.74rem" },
-  saveButton: { alignSelf: "end" },
+  field: {
+    display: "grid",
+    gap: "4px",
+    alignContent: "start",
+    color: "#94a3b8",
+    fontSize: "0.74rem",
+  },
+  fieldDisabled: { opacity: 0.5 },
+  fieldLabel: {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: "6px",
+    color: "#cbd5e1",
+    fontWeight: 600,
+  },
+  fieldUnit: { color: "#64748b", fontSize: "0.68rem", fontWeight: 500 },
+  fieldHelp: { color: "#8496ad", fontSize: "0.7rem", lineHeight: 1.35 },
+  fieldRange: { color: "#5c6b82", fontSize: "0.66rem" },
+  rulesFooter: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: "9px",
+    marginTop: "14px",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: "rgba(255, 255, 255, 0.07)",
+    paddingTop: "12px",
+  },
+  dirtyHint: { color: "#94a3b8", fontSize: "0.72rem" },
 })

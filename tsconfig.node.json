@@ -13,5 +13,10 @@
     "rootDir": "src",
     "types": ["node"]
   },
-  "include": ["src/main/**/*.ts", "src/main/**/*.cts", "src/shared/**/*.ts"]
+  "include": [
+    "src/main/**/*.ts",
+    "src/main/**/*.cts",
+    "src/router/**/*.ts",
+    "src/shared/**/*.ts"
+  ]
 }

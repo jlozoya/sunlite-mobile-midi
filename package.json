@@ -16,8 +16,11 @@
     "build:main": "tsc -p tsconfig.node.json",
     "build:renderer": "vite build",
     "build:sidecar": "powershell -ExecutionPolicy Bypass -File scripts/build-python-sidecar.ps1",
-    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:electron": "electron-rebuild -f -o better-sqlite3",
     "build": "bun run format:check && bun run build:main && bun run build:renderer",
+    "router": "bun run build:main && node dist/router/cli.js",
+    "router:list": "bun run build:main && node dist/router/cli.js list",
+    "router:run": "bun run build:main && node dist/router/cli.js run --monitor",
     "dev": "bun run build:main && bun run rebuild:electron && node scripts/dev.mjs",
     "start": "bun run build && bun run rebuild:electron && electron dist/main/main.js",
     "pack": "bun run build && electron-builder --win --x64 --dir --publish never",
@@ -25,9 +28,11 @@
     "dist:win": "bun run build && electron-builder --win nsis --x64 --publish never && node scripts/verify-release.mjs",
     "release:win": "bun run dist:win",
     "test:updates": "bun run build:main && node --test tests/updates.test.mjs",
-    "dist:portable": "bun run build && electron-builder --win portable --x64 --publish never"
+    "dist:portable": "bun run build && electron-builder --win portable --x64 --publish never",
+    "test:router": "bun run build:main && node --test tests/midi-router.test.mjs"
   },
   "dependencies": {
+    "@julusian/midi": "^3.6.1",
     "@stylexjs/stylex": "^0.9.3",
     "easymidi": "^3.1.0",
     "electron-updater": "^6.3.9",
