@@ -9,6 +9,7 @@ import { MidiController } from "./components/MidiController"
 import { AppUpdates } from "./components/AppUpdates"
 import { Toast } from "./components/Toast"
 import { AutomationStudio } from "./automation/AutomationStudio"
+import { RouterPanel } from "./router/RouterPanel"
 import { useIsMobileView } from "./hooks/useIsMobileView"
 import { useControllerSocket } from "./useControllerSocket"
 import { useServerStatus } from "./useServerStatus"
@@ -32,7 +33,11 @@ const DESKTOP_TABS: Array<{
     label: "Automatización",
     description: "Audio, CDJ y entrenamiento",
   },
-  { id: "connection", label: "Conexión", description: "Software, red y teléfono" },
+  {
+    id: "connection",
+    label: "Conexión",
+    description: "Software, red, teléfono y router MIDI",
+  },
 ]
 
 export function App() {
@@ -452,6 +457,8 @@ export function App() {
               ) : null}
             </Surface>
           </section>
+
+          <RouterPanel />
         </section>
       ) : null}
 

@@ -104,6 +104,27 @@ export function startLoopMidi(executablePath: string): void {
   }).unref()
 }
 
+async function isLoopMidiRunning(): Promise<boolean> {
+  const result = await runProcess("tasklist.exe", [
+    "/FI",
+    "IMAGENAME eq loopMIDI.exe",
+    "/NH",
+  ])
+  return result.stdout.toLowerCase().includes("loopmidi.exe")
+}
+
+/**
+ * loopMIDI reads its port list from the registry only at startup, so a port registered
+ * while it is running does not appear until it is restarted. Every port comes back
+ * afterwards, including the ones the controller uses, but they do blink out for a moment
+ * and any application holding them has to reopen.
+ */
+async function restartLoopMidi(executablePath: string): Promise<void> {
+  await runProcess("taskkill.exe", ["/IM", "loopMIDI.exe", "/F"])
+  await new Promise((resolve) => setTimeout(resolve, 600))
+  startLoopMidi(executablePath)
+}
+
 function missingPorts(requests: readonly VirtualPortRequest[]): string[] {
   // Only probe the roles that were asked for: enumerating inputs on a machine that has
   // none makes RtMidi print a warning, and this runs on a polling loop.
@@ -145,7 +166,14 @@ async function waitForPorts(
  */
 export async function ensureVirtualPorts(
   requests: readonly VirtualPortRequest[],
-  options?: { installerPath?: string; timeoutMs?: number },
+  options?: {
+    installerPath?: string
+    timeoutMs?: number
+    /** Release any loopMIDI port this process holds; it is about to be restarted. */
+    onBeforeRestart?: () => void | Promise<void>
+    /** Reopen what was released once loopMIDI is back. */
+    onAfterRestart?: () => void | Promise<void>
+  },
 ): Promise<ProvisionResult> {
   if (requests.length === 0) {
     return { ok: true, message: "No virtual ports requested.", missing: [] }
@@ -201,16 +229,33 @@ export async function ensureVirtualPorts(
 
   const names = [...new Set(requests.map((request) => request.name))]
   await registerVirtualPorts(names)
-  startLoopMidi(executablePath)
+
+  // Registering is not enough on its own: loopMIDI only reads the port list at startup,
+  // so an instance that is already running has to be restarted to expose the new ports.
+  //
+  // Anything still holding a loopMIDI port when it dies takes the device out from under
+  // RtMidi, which crashes the process on Windows. The caller gets a chance to release
+  // its ports first and reopen them afterwards.
+  const wasRunning = await isLoopMidiRunning()
+  if (wasRunning) {
+    await options?.onBeforeRestart?.()
+    await restartLoopMidi(executablePath)
+    await options?.onAfterRestart?.()
+  } else {
+    startLoopMidi(executablePath)
+  }
 
   const missing = await waitForPorts(requests, options?.timeoutMs ?? 8000)
+  const restarted = wasRunning
+    ? " loopMIDI se reinició para exponerlos, así que los puertos existentes parpadearon un momento."
+    : ""
 
   return {
     ok: missing.length === 0,
     message:
       missing.length === 0
-        ? `Virtual ports ready: ${names.join(", ")}.`
-        : `loopMIDI did not expose these ports: ${missing.join(", ")}. Restart Windows and try again.`,
+        ? `Puertos virtuales listos: ${names.join(", ")}.${restarted}`
+        : `loopMIDI no expuso estos puertos: ${missing.join(", ")}. Ciérralo desde la bandeja del sistema y vuelve a arrancar el router.`,
     missing,
   }
 }

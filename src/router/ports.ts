@@ -9,17 +9,9 @@
 import { Input, Output } from "@julusian/midi"
 import { EventEmitter } from "node:events"
 import { findDevice, listInputDevices, listOutputDevices } from "./devices.js"
-import type { PortDefinition } from "./types.js"
+import type { PortDefinition, PortStatus } from "./types.js"
 
-export type PortStatus = {
-  id: string
-  role: "input" | "output"
-  deviceName: string
-  /** The device name Windows actually reported, once resolved. */
-  resolvedName: string | null
-  connected: boolean
-  error: string | null
-}
+export type { PortStatus } from "./types.js"
 
 type OpenInput = { definition: PortDefinition; port: Input; resolvedName: string }
 type OpenOutput = { definition: PortDefinition; port: Output; resolvedName: string }

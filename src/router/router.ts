@@ -12,23 +12,9 @@ import {
 import { describeMessage, getChannel } from "./message.js"
 import { MidiPortHub, type PortStatus } from "./ports.js"
 import { validateRouterConfig } from "./config.js"
-import type { RouterConfig } from "./types.js"
+import type { RouterConfig, RouterMonitorEvent, RouterStats } from "./types.js"
 
-export type MonitorEvent = {
-  at: number
-  direction: "in" | "out"
-  portId: string
-  routeId: string | null
-  channel: number | null
-  text: string
-}
-
-export type RouterStats = {
-  received: number
-  sent: number
-  dropped: number
-  undelivered: number
-}
+export type { RouterMonitorEvent as MonitorEvent, RouterStats } from "./types.js"
 
 /**
  * Sustained rate above which a source is treated as a feedback loop. A busy controller
@@ -48,7 +34,12 @@ export class MidiRouter extends EventEmitter {
 
   constructor(
     config: RouterConfig,
-    private readonly options?: { installerPath?: string; rescanIntervalMs?: number },
+    private readonly options?: {
+      installerPath?: string
+      rescanIntervalMs?: number
+      onBeforeRestart?: () => void | Promise<void>
+      onAfterRestart?: () => void | Promise<void>
+    },
   ) {
     super()
     this.config = config
@@ -85,6 +76,8 @@ export class MidiRouter extends EventEmitter {
 
     const provisioning = await ensureVirtualPorts(requests, {
       installerPath: this.options?.installerPath,
+      onBeforeRestart: this.options?.onBeforeRestart,
+      onAfterRestart: this.options?.onAfterRestart,
     })
 
     this.hub.setPorts(this.config.ports)
@@ -184,7 +177,7 @@ export class MidiRouter extends EventEmitter {
   ) {
     if (this.listenerCount("monitor") === 0) return
 
-    const event: MonitorEvent = {
+    const event: RouterMonitorEvent = {
       at: Date.now(),
       direction,
       portId,

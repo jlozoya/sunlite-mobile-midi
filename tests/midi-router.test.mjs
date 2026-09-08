@@ -17,6 +17,13 @@ import {
   normalizeRouterConfig,
   validateRouterConfig,
 } from "../dist/router/config.js"
+import {
+  buildMergeConfig,
+  buildSplitConfig,
+  defaultChannelAssignments,
+  MAX_SLOTS,
+  MIN_SLOTS,
+} from "../dist/shared/router-setup.js"
 
 const NOTE_ON_CH1 = 0x90
 const NOTE_OFF_CH1 = 0x80
@@ -450,4 +457,69 @@ test("normalization repairs hand-edited configuration files", () => {
   assert.equal(route.transforms.channelRemap, 16)
   assert.equal(route.transforms.transpose, 48)
   assert.equal(route.transforms.velocityScale, 4)
+})
+
+// ---------------------------------------------------------------- guided setups
+
+test("the merge setup wires every application into one device", () => {
+  const config = buildMergeConfig("APC mini mk2", 3)
+
+  assert.deepEqual(validateRouterConfig(config), [], "must be runnable as generated")
+  assert.equal(config.ports.filter((port) => port.kind === "virtual").length, 3)
+  assert.equal(config.routes.length, 3)
+
+  const destinations = new Set(config.routes.map((route) => route.destination))
+  assert.equal(destinations.size, 1, "every route lands on the single physical device")
+
+  const device = config.ports.find((port) => port.id === [...destinations][0])
+  assert.equal(device.kind, "hardware")
+  assert.equal(device.deviceName, "APC mini mk2")
+
+  // The generated routing really merges, not just on paper.
+  const engine = new RoutingEngine(config)
+  const fromFirst = engine.route("app-1", [NOTE_ON_CH1, 60, 100])
+  const fromSecond = engine.route("app-2", [CC_CH1, 7, 64])
+  assert.equal(fromFirst[0].destination, "device-out")
+  assert.equal(fromSecond[0].destination, "device-out")
+})
+
+test("the split setup sends each channel to its own destination", () => {
+  const config = buildSplitConfig("APC mini mk2", [[1], [2], [3, 4]])
+
+  assert.deepEqual(validateRouterConfig(config), [])
+  assert.equal(config.ports.filter((port) => port.role === "output").length, 3)
+
+  const engine = new RoutingEngine(config)
+  assert.deepEqual(
+    engine.route("device-in", [0x90, 60, 100]).map((message) => message.destination),
+    ["dest-1"],
+  )
+  assert.deepEqual(
+    engine.route("device-in", [0x91, 60, 100]).map((message) => message.destination),
+    ["dest-2"],
+  )
+  assert.deepEqual(
+    engine.route("device-in", [0x93, 60, 100]).map((message) => message.destination),
+    ["dest-3"],
+    "channel 4 also reaches the destination that claims 3 and 4",
+  )
+  assert.deepEqual(
+    engine.route("device-in", [0x9f, 60, 100]),
+    [],
+    "channel 16 is unrouted",
+  )
+})
+
+test("an empty channel list means that destination takes everything", () => {
+  const config = buildSplitConfig("Device", [[], [5]])
+  const engine = new RoutingEngine(config)
+
+  const routed = engine.route("device-in", [0x9a, 60, 100]).map((m) => m.destination)
+  assert.deepEqual(routed, ["dest-1"], "omni destination still receives channel 11")
+})
+
+test("slot counts are clamped to a range the setup can actually build", () => {
+  assert.equal(buildMergeConfig("Device", 99).routes.length, MAX_SLOTS)
+  assert.equal(buildMergeConfig("Device", 0).routes.length, MIN_SLOTS)
+  assert.deepEqual(defaultChannelAssignments(3), [[1], [2], [3]])
 })

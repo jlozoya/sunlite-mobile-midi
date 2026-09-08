@@ -21,6 +21,7 @@ import {
 } from "../shared/controller-config.js"
 import { AutomationEngine } from "./automation/automation-engine.js"
 import { ProDjLinkSidecar } from "./automation/prodj-link-sidecar.js"
+import { RouterService } from "./router-service.js"
 import { WebSocketServer, type WebSocket } from "ws"
 import {
   isLightingSoftware,
@@ -211,6 +212,7 @@ let mainWindow: BrowserWindow | null = null
 let controllerCustomization: ControllerCustomization = DEFAULT_CONTROLLER_CUSTOMIZATION
 let feedbackDisabledReason: string | null = null
 let automationEngine: AutomationEngine | null = null
+let routerService: RouterService | null = null
 let prodjLinkSidecar: ProDjLinkSidecar | null = null
 let midiAutoConfigured = false
 let midiProvisioningMessage: string | null = null
@@ -1186,6 +1188,10 @@ async function startControllerServer(): Promise<ServerStatus> {
 
   activeWebSocketServer = wss
   automationEngine = createAutomationEngine()
+  routerService = new RouterService(
+    path.join(electronApp.getPath("userData"), "midi-router.config.json"),
+    (payload) => broadcastToAll(payload),
+  )
 
   const projectRoot = path.resolve(__dirname, "../..")
   prodjLinkSidecar = new ProDjLinkSidecar({
@@ -1400,6 +1406,53 @@ async function startControllerServer(): Promise<ServerStatus> {
     response.json(automationEngine?.getStatus())
   })
 
+  const routerReservedDevices = () => [MIDI_OUTPUT_NAME, MIDI_INPUT_NAME]
+
+  const routerPayload = () => ({
+    ...routerService!.getState(routerReservedDevices()),
+    monitor: routerService!.getMonitor(),
+  })
+
+  appServer.get("/api/router/state", (_request, response) => {
+    response.json(routerPayload())
+  })
+
+  appServer.put("/api/router/config", (request, response) => {
+    try {
+      routerService!.updateConfig(request.body)
+      response.json(routerPayload())
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : "Invalid router configuration",
+      })
+    }
+  })
+
+  appServer.post("/api/router/start", async (_request, response) => {
+    try {
+      await routerService!.start({
+        installerPath: getLoopMidiInstallerPath(),
+        // Creating a new virtual port can require restarting loopMIDI, and RtMidi
+        // crashes the process if a port disappears while it is open. Release the
+        // controller's pair first, then reopen once the bridge is back.
+        onBeforeRestart: () => closeMidiConnection(),
+        onAfterRestart: () => {
+          refreshMidiConnection()
+        },
+      })
+      response.json(routerPayload())
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : "Could not start the router",
+      })
+    }
+  })
+
+  appServer.post("/api/router/stop", (_request, response) => {
+    routerService!.stop()
+    response.json(routerPayload())
+  })
+
   appServer.get("*", (_request, response) => {
     response.sendFile(path.join(rendererDir, "index.html"))
   })
@@ -1612,12 +1665,14 @@ electronApp.on("second-instance", () => {
 electronApp.on("before-quit", () => {
   updateManager?.stop()
   prodjLinkSidecar?.stop()
+  routerService?.dispose()
   if (automationEngine?.getStatus().recording) automationEngine.stopSession()
   closeMidiConnection()
 })
 
 electronApp.on("window-all-closed", () => {
   prodjLinkSidecar?.stop()
+  routerService?.dispose()
   if (automationEngine?.getStatus().recording) automationEngine.stopSession()
   closeMidiConnection()
 
