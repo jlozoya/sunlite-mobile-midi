@@ -15,6 +15,7 @@ import {
   validateRouterConfig,
 } from "../router/config.js"
 import { listInputDevices, listOutputDevices } from "../router/devices.js"
+import { isReservedMidiPort } from "../shared/router-setup.js"
 import { MidiRouter } from "../router/router.js"
 import type {
   RouterConfig,
@@ -97,8 +98,12 @@ export class RouterService {
       errors: validateRouterConfig(this.config),
       warnings: this.conflictWarnings(reserved),
       devices: {
-        inputs: listInputDevices().map((device) => device.name),
-        outputs: listOutputDevices().map((device) => device.name),
+        inputs: listInputDevices()
+          .map((device) => device.name)
+          .filter((name) => !isReservedMidiPort(name, reserved)),
+        outputs: listOutputDevices()
+          .map((device) => device.name)
+          .filter((name) => !isReservedMidiPort(name, reserved)),
       },
     }
   }

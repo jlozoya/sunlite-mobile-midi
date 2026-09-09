@@ -21,6 +21,7 @@ import {
   buildRouterSetup,
   matchingDeviceOutput,
   isProgramPort,
+  isReservedMidiPort,
   defaultChannelAssignments,
   MAX_SLOTS,
   MIN_SLOTS,
@@ -665,4 +666,29 @@ test("duplicate channel selections never accidentally turn a filter into omni", 
     engine.route("device-in", [0x91, 60, 100]).map((m) => m.destination),
     ["dest-2"],
   )
+})
+
+test("available devices exclude the controller bridge but preserve other MIDI ports", () => {
+  const names = [
+    "Sunlite Mobile In",
+    "Sunlite Mobile Out",
+    "sunlite mobile in 2",
+    "Sunlite Mobile Out 3",
+    "APC mini mk2",
+    "Sunlite Mobile Interface",
+    "Sunlite Mobile In Custom",
+    "Router Entrada 1",
+  ]
+  const reserved = ["Sunlite Mobile In", "Sunlite Mobile Out"]
+  assert.deepEqual(
+    names.filter((name) => !isReservedMidiPort(name, reserved)),
+    [
+      "APC mini mk2",
+      "Sunlite Mobile Interface",
+      "Sunlite Mobile In Custom",
+      "Router Entrada 1",
+    ],
+  )
+  assert.equal(isReservedMidiPort("Custom Bridge 2", ["Custom Bridge"]), true)
+  assert.equal(isReservedMidiPort("APC mini mk2", ["", " "]), false)
 })

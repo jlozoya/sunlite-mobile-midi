@@ -52,6 +52,20 @@ export function isProgramPort(name: string): boolean {
   return /^Router (Entrada|Salida) \d+(?:\s|$)/i.test(name)
 }
 
+/** Hide the controller bridge, including numeric suffixes added by Windows. */
+export function isReservedMidiPort(name: string, reserved: readonly string[]): boolean {
+  const candidate = name.trim().toLowerCase()
+  return reserved.some((entry) => {
+    const port = entry.trim().toLowerCase()
+    if (!port) return false
+    return (
+      candidate === port ||
+      (candidate.startsWith(port + " ") &&
+        /^\d+$/.test(candidate.slice(port.length).trim()))
+    )
+  })
+}
+
 export type RouterSetup = {
   /**
    * Device the router writes into, as the MIDI output list exposes it. Everything the
