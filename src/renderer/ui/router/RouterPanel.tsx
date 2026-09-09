@@ -210,9 +210,9 @@ function Wizard({
               : "Conecta un dispositivo con entrada y salida MIDI para compartirlo en ambos sentidos."}
           </span>
         </label>
-        <div {...stylex.props(styles.cardActions)}>
+        <div {...stylex.props(styles.deviceActions)}>
           <ActionButton
-            variant="ghost"
+            variant="secondary"
             size="small"
             onPress={onRefresh}
             isDisabled={busy}
@@ -220,7 +220,7 @@ function Wizard({
             Actualizar dispositivos
           </ActionButton>
           {inputs.length === 0 ? (
-            <span role="status" {...stylex.props(styles.fieldHelp)}>
+            <span role="status" {...stylex.props(styles.fieldHelp, styles.deviceStatus)}>
               No se detectan dispositivos MIDI de entrada.
             </span>
           ) : null}
@@ -352,7 +352,7 @@ function ProgramConnections({ slots }: { slots: number }) {
       <table {...stylex.props(styles.connectionTable)}>
         <thead>
           <tr>
-            <th scope="col" {...stylex.props(styles.tableCell)}>
+            <th scope="col" {...stylex.props(styles.tableCell, styles.programColumn)}>
               Programa
             </th>
             <th scope="col" {...stylex.props(styles.tableCell)}>
@@ -1096,14 +1096,18 @@ const styles = stylex.create({
   connectionTable: {
     width: "100%",
     borderCollapse: "collapse",
+    tableLayout: "fixed",
     fontSize: "0.74rem",
     color: "#cbd5e1",
   },
   tableCell: {
     textAlign: "left",
-    padding: "9px",
+    verticalAlign: "top",
+    padding: "9px 12px 9px 0",
+    lineHeight: 1.35,
     borderBottom: "1px solid rgba(255,255,255,0.08)",
   },
+  programColumn: { width: "24%" },
   panel: {
     marginTop: "16px",
     borderWidth: "1px",
@@ -1150,7 +1154,19 @@ const styles = stylex.create({
     textDecoration: "underline",
   },
   wizard: { padding: "14px", display: "grid", gap: "11px" },
-  wizardActions: { display: "flex", justifyContent: "flex-end", gap: "8px" },
+  wizardActions: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: "8px",
+  },
+  deviceActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+  deviceStatus: { display: "flex", alignItems: "center", minHeight: "32px" },
   assignmentRow: {
     display: "grid",
     gridTemplateColumns: "90px 1fr",
