@@ -315,10 +315,8 @@ function Wizard({
         </Notice>
       ) : null}
       <div {...stylex.props(styles.field)}>
-        <strong {...stylex.props(styles.fieldLabel)}>
-          Así lo configurarás en cada programa
-        </strong>
-        <ProgramConnections slots={slots} />
+        <strong {...stylex.props(styles.fieldLabel)}>Conexión en los programas</strong>
+        <ProgramConnectionGuide slots={slots} />
         <span {...stylex.props(styles.fieldHelp)}>
           Se prepararán {slots * 2} puertos virtuales, dos por programa. Cada programa usa
           un par distinto. Desactiva MIDI Thru si reenvía automáticamente lo recibido.
@@ -346,39 +344,14 @@ function Wizard({
   )
 }
 
-function ProgramConnections({ slots }: { slots: number }) {
+function ProgramConnectionGuide({ slots }: { slots: number }) {
   return (
-    <div {...stylex.props(styles.tableScroll)}>
-      <table {...stylex.props(styles.connectionTable)}>
-        <thead>
-          <tr>
-            <th scope="col" {...stylex.props(styles.tableCell, styles.programColumn)}>
-              Programa
-            </th>
-            <th scope="col" {...stylex.props(styles.tableCell)}>
-              Entrada MIDI (recibe)
-            </th>
-            <th scope="col" {...stylex.props(styles.tableCell)}>
-              Salida MIDI (envía)
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {Array.from({ length: slots }, (_, index) => index + 1).map((slot) => (
-            <tr key={slot}>
-              <th scope="row" {...stylex.props(styles.tableCell)}>
-                Programa {slot}
-              </th>
-              <td {...stylex.props(styles.tableCell)}>
-                {PROGRAM_RECEIVE_PREFIX} {slot}
-              </td>
-              <td {...stylex.props(styles.tableCell)}>
-                {PROGRAM_SEND_PREFIX} {slot}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div {...stylex.props(styles.connectionGuide)}>
+      <span>Asigna a cada programa un número del 1 al {slots}.</span>
+      <span>
+        <strong>Entrada MIDI:</strong> {PROGRAM_RECEIVE_PREFIX} N ·{" "}
+        <strong>Salida MIDI:</strong> {PROGRAM_SEND_PREFIX} N
+      </span>
     </div>
   )
 }
@@ -848,7 +821,7 @@ export function RouterPanel() {
                   el programa, no desde el router.
                 </span>
                 {hasProgramPairs ? (
-                  <ProgramConnections slots={programCount} />
+                  <ProgramConnectionGuide slots={programCount} />
                 ) : (
                   <ul {...stylex.props(styles.noticeList)}>
                     {/* A router input is where the program writes, so in the program it is
@@ -1092,22 +1065,15 @@ const styles = stylex.create({
     fontSize: "0.76rem",
     paddingBlock: "10px",
   },
-  tableScroll: { overflowX: "auto", minWidth: 0 },
-  connectionTable: {
-    width: "100%",
-    borderCollapse: "collapse",
-    tableLayout: "fixed",
-    fontSize: "0.74rem",
+  connectionGuide: {
+    display: "flex",
+    flexWrap: "wrap",
+    columnGap: "14px",
+    rowGap: "4px",
     color: "#cbd5e1",
+    fontSize: "0.74rem",
+    lineHeight: 1.4,
   },
-  tableCell: {
-    textAlign: "left",
-    verticalAlign: "top",
-    padding: "9px 12px 9px 0",
-    lineHeight: 1.35,
-    borderBottom: "1px solid rgba(255,255,255,0.08)",
-  },
-  programColumn: { width: "24%" },
   panel: {
     marginTop: "16px",
     borderWidth: "1px",
