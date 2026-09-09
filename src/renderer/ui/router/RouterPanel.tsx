@@ -179,51 +179,52 @@ function Wizard({
         reciben lo que envía y pueden responder al mismo dispositivo.
       </p>
       <fieldset disabled={busy} {...stylex.props(styles.wizardFields)}>
-        <label {...stylex.props(styles.field)}>
-          <span {...stylex.props(styles.fieldLabel)}>
+        <div {...stylex.props(styles.field)}>
+          <label htmlFor="router-device" {...stylex.props(styles.fieldLabel)}>
             1. Dispositivo MIDI que quieres compartir
-          </span>
-          <select
-            {...stylex.props(styles.select)}
-            value={listenTo}
-            onChange={(event) => {
-              const next = event.target.value
-              const output = matchingDeviceOutput(next, outputs)
-              setListenTo(next)
-              setWriteTo(output)
-              if (next && !output) setAdvanced(true)
-            }}
+          </label>
+          <div {...stylex.props(styles.deviceSelectRow)}>
+            <select
+              id="router-device"
+              {...stylex.props(styles.select)}
+              value={listenTo}
+              onChange={(event) => {
+                const next = event.target.value
+                const output = matchingDeviceOutput(next, outputs)
+                setListenTo(next)
+                setWriteTo(output)
+                if (next && !output) setAdvanced(true)
+              }}
+            >
+              <option value="">Selecciona un dispositivo</option>
+              {listenTo && !inputs.includes(listenTo) ? (
+                <option value={listenTo}>{listenTo} (desconectado)</option>
+              ) : null}
+              {inputs.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <ActionButton
+              variant="secondary"
+              size="small"
+              onPress={onRefresh}
+              isDisabled={busy}
+            >
+              Actualizar dispositivos
+            </ActionButton>
+          </div>
+          <span
+            role={inputs.length === 0 ? "status" : undefined}
+            {...stylex.props(styles.fieldHelp)}
           >
-            <option value="">Selecciona un dispositivo</option>
-            {listenTo && !inputs.includes(listenTo) ? (
-              <option value={listenTo}>{listenTo} (desconectado)</option>
-            ) : null}
-            {inputs.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-          <span {...stylex.props(styles.fieldHelp)}>
-            {ready
-              ? "Entrada y salida seleccionadas: comunicación en ambos sentidos."
-              : "Conecta un dispositivo con entrada y salida MIDI para compartirlo en ambos sentidos."}
+            {inputs.length === 0
+              ? "No se detectan dispositivos MIDI de entrada. Conecta uno y actualiza la lista."
+              : ready
+                ? "Entrada y salida seleccionadas: comunicación en ambos sentidos."
+                : "Selecciona un dispositivo con entrada y salida MIDI para compartirlo en ambos sentidos."}
           </span>
-        </label>
-        <div {...stylex.props(styles.deviceActions)}>
-          <ActionButton
-            variant="secondary"
-            size="small"
-            onPress={onRefresh}
-            isDisabled={busy}
-          >
-            Actualizar dispositivos
-          </ActionButton>
-          {inputs.length === 0 ? (
-            <span role="status" {...stylex.props(styles.fieldHelp, styles.deviceStatus)}>
-              No se detectan dispositivos MIDI de entrada.
-            </span>
-          ) : null}
         </div>
         <label {...stylex.props(styles.field)}>
           <span {...stylex.props(styles.fieldLabel)}>
@@ -1126,13 +1127,12 @@ const styles = stylex.create({
     justifyContent: "flex-end",
     gap: "8px",
   },
-  deviceActions: {
-    display: "flex",
+  deviceSelectRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
     alignItems: "center",
     gap: "10px",
-    flexWrap: "wrap",
   },
-  deviceStatus: { display: "flex", alignItems: "center", minHeight: "32px" },
   assignmentRow: {
     display: "grid",
     gridTemplateColumns: "90px 1fr",
