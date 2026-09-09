@@ -86,7 +86,7 @@ Do not use the same port for both input and output.
 
 ## MIDI Router (channel split and merge)
 
-`src/router/` is a MIDI router that runs on its own, without Electron. It covers the two
+`src/router/` is a MIDI router that runs on its own, without Electron. It covers the
 routing problems the controller itself does not:
 
 - **Merge** — several applications write to their own virtual ports and the router
@@ -96,17 +96,58 @@ routing problems the controller itself does not:
 - **Split** — one input is copied to several destinations, optionally filtered by
   channel, note range, controller number or message type.
 
-```txt
-App A  ->  Router App A  ─┐
-App B  ->  Router App B  ─┼─>  MIDI Router  ->  Physical MIDI OUT
-App C  ->  Router App C  ─┘
-```
+The engine routes any graph of ports you hand it. The guided setup in
+`src/shared/router-setup.ts` builds the one shape people actually ask for: N programs on
+one side, one device on the other, in both directions.
 
 ```txt
-                                  ┌─ CH 1  ->  Router Split 1  ->  Sunlite
-Physical MIDI IN  ->  MIDI Router ─┼─ CH 2  ->  Router Split 2  ->  Ableton
-                                  └─ CH 3  ->  Router Split 3  ->  Resolume
+App A  ->  Router Entrada 1  ─┐                ┌─  Router Salida 1  ->  App A
+App B  ->  Router Entrada 2  ─┼─>  device  ─>  ┼─  Router Salida 2  ->  App B
+App C  ->  Router Entrada 3  ─┘                └─  Router Salida 3  ->  App C
+                                    (each Salida takes every channel, or only its own)
 ```
+
+In **Conexión → Comparte un dispositivo MIDI**:
+
+1. Select the MIDI device. The wizard pairs its input and output when their names match,
+   including Windows numbered endpoints such as `MIDIIN2 (X)` / `MIDIOUT2 (X)`.
+   For different or ambiguous names, select its output in **Opciones avanzadas**.
+2. Choose 2–8 programs and press **Compartir dispositivo**. This saves the configuration,
+   prepares two virtual ports per program and starts the router. Rebuilding a running
+   setup briefly stops routing while it prepares the new connections.
+3. In each program, choose the pair shown in the table. For example:
+
+| Program   | MIDI input (receives) | MIDI output (sends) |
+| --------- | --------------------- | ------------------- |
+| Sunlite   | Router Salida 1       | Router Entrada 1    |
+| rekordbox | Router Salida 2       | Router Entrada 2    |
+| Ableton   | Router Salida 3       | Router Entrada 3    |
+
+Only the router opens the physical device; each program opens its own virtual pair.
+All channels and message types are copied by default. Channel splitting is optional
+under **Opciones avanzadas**. Disable automatic MIDI Thru in the programs to avoid echoes.
+Use **Actualizar dispositivos** after plugging in a controller. Missing connections and
+virtual-port preparation errors are shown in the panel.
+
+### Both directions
+
+A controller is not a one-way device: it lights its pads, moves its motorised faders and
+answers its own transport buttons from what the software sends back. So each program gets
+two virtual ports, `Router Entrada N` to write into and `Router Salida N` to listen to.
+
+Two ports and not one, because a loopMIDI port hands everything written to it back to
+every listener, the writer included: a single port carrying both directions is a feedback
+loop. Their names are also unrelated rather than one deriving from the other, since ports
+resolve by substring — `Router Entrada 1 Retorno` would satisfy a definition asking for
+`Router Entrada 1`, and the two could swap devices under the router's feet.
+
+The direction toward the device is never filtered by channel: a program answering on a
+channel other than the one it was given would otherwise be dropped in silence, which
+debugs far worse than the crosstalk it avoids.
+
+The wizard requires both directions. One-way setups remain available through manual
+port/route configuration and the underlying builder. Physical endpoints selected by the
+wizard match their full enumerated names so another similarly named device is not opened.
 
 The virtual ports are created through the same loopMIDI bridge the controller uses, so
 the redistribution constraint in [MIDI driver distribution](#midi-driver-distribution)

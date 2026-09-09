@@ -18,11 +18,13 @@ import {
   validateRouterConfig,
 } from "../dist/router/config.js"
 import {
-  buildMergeConfig,
-  buildSplitConfig,
+  buildRouterSetup,
+  matchingDeviceOutput,
+  isProgramPort,
   defaultChannelAssignments,
   MAX_SLOTS,
   MIN_SLOTS,
+  sharedAssignments,
 } from "../dist/shared/router-setup.js"
 
 const NOTE_ON_CH1 = 0x90
@@ -459,35 +461,44 @@ test("normalization repairs hand-edited configuration files", () => {
   assert.equal(route.transforms.velocityScale, 4)
 })
 
-// ---------------------------------------------------------------- guided setups
+// ---------------------------------------------------------------- the guided setup
 
-test("the merge setup wires every application into one device", () => {
-  const config = buildMergeConfig("APC mini mk2", 3)
+test("the setup folds every program into the device and answers them all", () => {
+  const config = buildRouterSetup({
+    writeTo: "APC mini mk2",
+    listenTo: "APC mini mk2",
+    channelsPerProgram: sharedAssignments(3),
+  })
 
-  assert.deepEqual(validateRouterConfig(config), [], "must be runnable as generated")
-  assert.equal(config.ports.filter((port) => port.kind === "virtual").length, 3)
-  assert.equal(config.routes.length, 3)
+  assert.deepEqual(
+    validateRouterConfig(config),
+    [],
+    "the two directions must not read as a feedback loop",
+  )
+  assert.equal(config.ports.filter((port) => port.kind === "virtual").length, 6)
+  assert.equal(config.routes.length, 6)
 
-  const destinations = new Set(config.routes.map((route) => route.destination))
-  assert.equal(destinations.size, 1, "every route lands on the single physical device")
-
-  const device = config.ports.find((port) => port.id === [...destinations][0])
-  assert.equal(device.kind, "hardware")
-  assert.equal(device.deviceName, "APC mini mk2")
-
-  // The generated routing really merges, not just on paper.
   const engine = new RoutingEngine(config)
-  const fromFirst = engine.route("app-1", [NOTE_ON_CH1, 60, 100])
-  const fromSecond = engine.route("app-2", [CC_CH1, 7, 64])
-  assert.equal(fromFirst[0].destination, "device-out")
-  assert.equal(fromSecond[0].destination, "device-out")
+  assert.deepEqual(
+    engine.route("app-2", [CC_CH1, 7, 64]).map((message) => message.destination),
+    ["device-out"],
+    "everything the programs write lands on the one device",
+  )
+  assert.deepEqual(
+    engine.route("device-in", [NOTE_ON_CH1, 60, 100]).map((m) => m.destination),
+    ["dest-1", "dest-2", "dest-3"],
+    "the device cannot address one program, so its answers reach all of them",
+  )
 })
 
-test("the split setup sends each channel to its own destination", () => {
-  const config = buildSplitConfig("APC mini mk2", [[1], [2], [3, 4]])
+test("channels split what each program receives, never what it sends", () => {
+  const config = buildRouterSetup({
+    writeTo: "APC mini mk2",
+    listenTo: "APC mini mk2",
+    channelsPerProgram: [[1], [2], [3, 4]],
+  })
 
   assert.deepEqual(validateRouterConfig(config), [])
-  assert.equal(config.ports.filter((port) => port.role === "output").length, 3)
 
   const engine = new RoutingEngine(config)
   assert.deepEqual(
@@ -495,31 +506,163 @@ test("the split setup sends each channel to its own destination", () => {
     ["dest-1"],
   )
   assert.deepEqual(
-    engine.route("device-in", [0x91, 60, 100]).map((message) => message.destination),
-    ["dest-2"],
-  )
-  assert.deepEqual(
     engine.route("device-in", [0x93, 60, 100]).map((message) => message.destination),
     ["dest-3"],
-    "channel 4 also reaches the destination that claims 3 and 4",
+    "channel 4 also reaches the program that claims 3 and 4",
   )
   assert.deepEqual(
     engine.route("device-in", [0x9f, 60, 100]),
     [],
     "channel 16 is unrouted",
   )
+  assert.deepEqual(
+    engine.route("app-3", [0x9f, 60, 100]).map((message) => message.destination),
+    ["device-out"],
+    "a program answering on another channel is not silently dropped",
+  )
 })
 
-test("an empty channel list means that destination takes everything", () => {
-  const config = buildSplitConfig("Device", [[], [5]])
+test("an empty channel list means that program takes everything", () => {
+  const config = buildRouterSetup({
+    listenTo: "Device",
+    channelsPerProgram: [[], [5]],
+  })
   const engine = new RoutingEngine(config)
 
   const routed = engine.route("device-in", [0x9a, 60, 100]).map((m) => m.destination)
-  assert.deepEqual(routed, ["dest-1"], "omni destination still receives channel 11")
+  assert.deepEqual(routed, ["dest-1"], "the omni program still receives channel 11")
 })
 
-test("slot counts are clamped to a range the setup can actually build", () => {
-  assert.equal(buildMergeConfig("Device", 99).routes.length, MAX_SLOTS)
-  assert.equal(buildMergeConfig("Device", 0).routes.length, MIN_SLOTS)
+test("a device that exists in one direction only builds a one-way setup", () => {
+  const writeOnly = buildRouterSetup({
+    writeTo: "Device",
+    channelsPerProgram: sharedAssignments(3),
+  })
+  assert.deepEqual(validateRouterConfig(writeOnly), [])
+  assert.equal(writeOnly.routes.length, 3)
+  assert.equal(writeOnly.ports.filter((port) => port.role === "output").length, 1)
+
+  const listenOnly = buildRouterSetup({
+    listenTo: "  ",
+    channelsPerProgram: sharedAssignments(3),
+  })
+  assert.deepEqual(listenOnly.ports, [], "a blank device name is no device at all")
+  assert.deepEqual(listenOnly.routes, [])
+})
+
+test("program counts are clamped to a range the setup can actually build", () => {
+  const many = buildRouterSetup({
+    writeTo: "Device",
+    channelsPerProgram: sharedAssignments(99),
+  })
+  const few = buildRouterSetup({
+    writeTo: "Device",
+    channelsPerProgram: sharedAssignments(0),
+  })
+
+  assert.equal(many.routes.length, MAX_SLOTS)
+  assert.equal(few.routes.length, MIN_SLOTS)
   assert.deepEqual(defaultChannelAssignments(3), [[1], [2], [3]])
+  assert.deepEqual(sharedAssignments(3), [[], [], []])
+})
+
+test("no virtual port name is contained in another one", () => {
+  // Ports resolve by substring, so a port named after another would also satisfy that
+  // other definition and the two could swap devices under the router's feet.
+  const config = buildRouterSetup({
+    writeTo: "Device",
+    listenTo: "Device",
+    channelsPerProgram: defaultChannelAssignments(MAX_SLOTS),
+  })
+  const names = config.ports
+    .filter((port) => port.kind === "virtual")
+    .map((port) => port.deviceName.toLowerCase())
+
+  for (const name of names) {
+    const clash = names.filter((other) => other.includes(name))
+    assert.deepEqual(clash, [name], `"${name}" is ambiguous against ${clash.join(", ")}`)
+  }
+})
+
+test("device pairing handles exact names and Windows numbered endpoints without guessing", () => {
+  assert.equal(
+    matchingDeviceOutput("APC mini mk2", ["APC mini mk2 2", "APC mini mk2"]),
+    "APC mini mk2",
+  )
+  assert.equal(
+    matchingDeviceOutput("MIDIIN2 (Controller)", [
+      "MIDIOUT3 (Controller)",
+      "MIDIOUT2 (Controller)",
+    ]),
+    "MIDIOUT2 (Controller)",
+  )
+  assert.equal(
+    matchingDeviceOutput("MIDIIN2 (Controller)", ["MIDIOUT3 (Controller)"]),
+    "",
+  )
+  assert.equal(matchingDeviceOutput("Controller", ["Other Controller"]), "")
+  assert.equal(
+    matchingDeviceOutput("MIDIIN (Controller)", [
+      "MIDIOUT (Controller)",
+      "midiout (controller)",
+    ]),
+    "",
+  )
+  assert.equal(matchingDeviceOutput("Unplugged", []), "")
+  assert.ok(isProgramPort("Router Entrada 1"))
+  assert.ok(isProgramPort("Router Salida 8 2"))
+  assert.ok(!isProgramPort("APC mini mk2"))
+})
+
+test("sharing preserves MIDI messages in both directions for two through eight programs", () => {
+  const messages = [
+    [0x90, 60, 100],
+    [0x80, 60, 0],
+    [0xbf, 7, 64],
+    [0xcf, 10],
+    [0xef, 0, 64],
+    [0xf8],
+    [0xfa],
+    [0xf0, 0x7d, 1, 0xf7],
+  ]
+  for (const count of [2, 3, MAX_SLOTS]) {
+    const setup = buildRouterSetup({
+      listenTo: "MIDIIN2 (Device)",
+      writeTo: "MIDIOUT2 (Device)",
+      channelsPerProgram: sharedAssignments(count),
+    })
+    assert.deepEqual(validateRouterConfig(setup), [])
+    assert.ok(
+      setup.ports
+        .filter((port) => port.kind === "hardware")
+        .every((port) => port.match === "exact"),
+    )
+    const engine = new RoutingEngine(setup)
+    for (const bytes of messages) {
+      const copies = engine.route("device-in", bytes)
+      assert.equal(copies.length, count)
+      assert.equal(new Set(copies.map((copy) => copy.destination)).size, count)
+      assert.ok(
+        copies.every((copy) => JSON.stringify(copy.bytes) === JSON.stringify(bytes)),
+      )
+      for (let slot = 1; slot <= count; slot++) {
+        const replies = engine.route("app-" + slot, bytes)
+        assert.equal(replies.length, 1)
+        assert.equal(replies[0].destination, "device-out")
+        assert.deepEqual(replies[0].bytes, bytes)
+      }
+    }
+  }
+})
+
+test("duplicate channel selections never accidentally turn a filter into omni", () => {
+  const setup = buildRouterSetup({
+    listenTo: "Device",
+    channelsPerProgram: [Array(16).fill(1), []],
+  })
+  const engine = new RoutingEngine(setup)
+  assert.deepEqual(
+    engine.route("device-in", [0x91, 60, 100]).map((m) => m.destination),
+    ["dest-2"],
+  )
 })

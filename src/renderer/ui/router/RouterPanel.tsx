@@ -1,11 +1,15 @@
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useState } from "react"
 import {
-  buildMergeConfig,
-  buildSplitConfig,
+  buildRouterSetup,
+  isProgramPort,
+  matchingDeviceOutput,
+  PROGRAM_RECEIVE_PREFIX,
+  PROGRAM_SEND_PREFIX,
   defaultChannelAssignments,
   MAX_SLOTS,
   MIN_SLOTS,
+  sharedAssignments,
 } from "../../../shared/router-setup"
 import {
   ALL_MESSAGE_CLASSES,
@@ -24,8 +28,6 @@ import { useRouterPanel } from "./useRouterPanel"
 
 const VIRTUAL_OPTION = "__virtual__"
 
-type Scenario = "merge" | "split"
-
 function formatTime(at: number): string {
   const date = new Date(at)
   return `${date.toTimeString().slice(0, 8)}.${String(date.getMilliseconds()).padStart(3, "0")}`
@@ -35,6 +37,27 @@ function describeChannels(channels: ChannelSelection): string {
   if (channels === "omni") return "todos los canales"
   if (channels.length === 1) return `solo el canal ${channels[0]}`
   return `canales ${channels.join(", ")}`
+}
+
+/**
+ * The virtual ports as the other programs have to read them: a port the router listens
+ * on is the one a program sends to, so in that program's settings it is an output.
+ */
+function programPortGroups(
+  ports: readonly PortDefinition[],
+): Array<{ label: string; names: string[] }> {
+  const groups = [
+    {
+      label: "Salida MIDI del programa (lo que envía)",
+      names: ports.filter((port) => port.role === "input").map((p) => p.deviceName),
+    },
+    {
+      label: "Entrada MIDI del programa (lo que recibe)",
+      names: ports.filter((port) => port.role === "output").map((p) => p.deviceName),
+    },
+  ]
+
+  return groups.filter((group) => group.names.length > 0)
 }
 
 function portLabel(ports: readonly PortDefinition[], id: string): string {
@@ -117,80 +140,32 @@ function ClassPicker({
   )
 }
 
-/** The two things a router is actually for, offered before any model detail. */
-function StartChooser({ onPick }: { onPick: (scenario: Scenario | "manual") => void }) {
-  return (
-    <div {...stylex.props(styles.chooser)}>
-      <button
-        type="button"
-        {...stylex.props(styles.scenarioCard)}
-        onClick={() => onPick("merge")}
-      >
-        <span {...stylex.props(styles.scenarioTitle)}>
-          Varios programas → un dispositivo
-        </span>
-        <span {...stylex.props(styles.scenarioBody)}>
-          Sunlite, Ableton y lo que quieras escriben a la vez en la misma mesa o
-          controlador. Windows normalmente solo deja que un programa abra el dispositivo;
-          el router lo abre él y reparte.
-        </span>
-        <span {...stylex.props(styles.scenarioDiagram)}>
-          Programa A ┐{"\n"}Programa B ┼→ dispositivo{"\n"}Programa C ┘
-        </span>
-      </button>
-
-      <button
-        type="button"
-        {...stylex.props(styles.scenarioCard)}
-        onClick={() => onPick("split")}
-      >
-        <span {...stylex.props(styles.scenarioTitle)}>
-          Un dispositivo → varios programas
-        </span>
-        <span {...stylex.props(styles.scenarioBody)}>
-          Reparte tu controlador por canal MIDI: el canal 1 va a un programa, el 2 a otro.
-          Cada programa recibe solo lo suyo.
-        </span>
-        <span {...stylex.props(styles.scenarioDiagram)}>
-          {"          ┌ CH 1 → Programa A\n"}
-          {"controlador ┼ CH 2 → Programa B\n"}
-          {"          └ CH 3 → Programa C"}
-        </span>
-      </button>
-
-      <button
-        type="button"
-        {...stylex.props(styles.manualLink)}
-        onClick={() => onPick("manual")}
-      >
-        O configurar puertos y rutas a mano
-      </button>
-    </div>
-  )
-}
-
+/** Select one device; its return endpoint and channel filters stay in advanced settings. */
 function Wizard({
-  scenario,
   devices,
+  busy,
+  onRefresh,
   onCancel,
   onApply,
 }: {
-  scenario: Scenario
-  devices: string[]
-  onCancel: () => void
+  devices: RouterState["devices"]
+  busy: boolean
+  onRefresh: () => void
+  onCancel?: () => void
   onApply: (config: RouterConfig) => void
 }) {
-  const [device, setDevice] = useState("")
-  const [slots, setSlots] = useState(3)
-  const [channels, setChannels] = useState<number[][]>(defaultChannelAssignments(3))
-
-  useEffect(() => {
-    setChannels((current) =>
-      Array.from({ length: slots }, (_, index) => current[index] ?? [index + 1]),
-    )
-  }, [slots])
-
-  const isMerge = scenario === "merge"
+  const inputs = devices.inputs.filter((name) => !isProgramPort(name))
+  const outputs = devices.outputs.filter((name) => !isProgramPort(name))
+  const [listenTo, setListenTo] = useState("")
+  const [writeTo, setWriteTo] = useState("")
+  const [slots, setSlots] = useState(MIN_SLOTS)
+  const [advanced, setAdvanced] = useState(false)
+  const [perChannel, setPerChannel] = useState(false)
+  const [channels, setChannels] = useState<number[][]>(
+    defaultChannelAssignments(MAX_SLOTS),
+  )
+  const ready = inputs.includes(listenTo) && outputs.includes(writeTo)
+  const assignments = perChannel ? channels.slice(0, slots) : sharedAssignments(slots)
 
   return (
     <Surface
@@ -199,102 +174,212 @@ function Wizard({
       padding="custom"
       {...stylex.props(styles.wizard)}
     >
-      <div {...stylex.props(styles.cardHeading)}>
-        <strong>
-          {isMerge
-            ? "Varios programas hacia un dispositivo"
-            : "Un dispositivo repartido entre programas"}
+      <p {...stylex.props(styles.intro)}>
+        Comparte tu controlador con Sunlite, rekordbox, Ableton u otros programas. Todos
+        reciben lo que envía y pueden responder al mismo dispositivo.
+      </p>
+      <fieldset disabled={busy} {...stylex.props(styles.wizardFields)}>
+        <label {...stylex.props(styles.field)}>
+          <span {...stylex.props(styles.fieldLabel)}>
+            1. Dispositivo MIDI que quieres compartir
+          </span>
+          <select
+            {...stylex.props(styles.select)}
+            value={listenTo}
+            onChange={(event) => {
+              const next = event.target.value
+              const output = matchingDeviceOutput(next, outputs)
+              setListenTo(next)
+              setWriteTo(output)
+              if (next && !output) setAdvanced(true)
+            }}
+          >
+            <option value="">Selecciona un dispositivo</option>
+            {listenTo && !inputs.includes(listenTo) ? (
+              <option value={listenTo}>{listenTo} (desconectado)</option>
+            ) : null}
+            {inputs.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <span {...stylex.props(styles.fieldHelp)}>
+            {ready
+              ? "Entrada y salida seleccionadas: comunicación en ambos sentidos."
+              : "Conecta un dispositivo con entrada y salida MIDI para compartirlo en ambos sentidos."}
+          </span>
+        </label>
+        <div {...stylex.props(styles.cardActions)}>
+          <ActionButton
+            variant="ghost"
+            size="small"
+            onPress={onRefresh}
+            isDisabled={busy}
+          >
+            Actualizar dispositivos
+          </ActionButton>
+          {inputs.length === 0 ? (
+            <span role="status" {...stylex.props(styles.fieldHelp)}>
+              No se detectan dispositivos MIDI de entrada.
+            </span>
+          ) : null}
+        </div>
+        <label {...stylex.props(styles.field)}>
+          <span {...stylex.props(styles.fieldLabel)}>
+            2. ¿Cuántos programas vas a conectar?
+          </span>
+          <select
+            {...stylex.props(styles.select, styles.narrow)}
+            value={slots}
+            onChange={(event) => setSlots(Number(event.target.value))}
+          >
+            {Array.from(
+              { length: MAX_SLOTS - MIN_SLOTS + 1 },
+              (_, index) => index + MIN_SLOTS,
+            ).map((count) => (
+              <option key={count} value={count}>
+                {count} programas
+              </option>
+            ))}
+          </select>
+        </label>
+        <details
+          open={advanced}
+          onToggle={(event) => setAdvanced(event.currentTarget.open)}
+        >
+          <summary {...stylex.props(styles.advancedSummary)}>Opciones avanzadas</summary>
+          <div {...stylex.props(styles.wizardFields)}>
+            <label {...stylex.props(styles.field)}>
+              <span {...stylex.props(styles.fieldLabel)}>
+                Salida hacia el dispositivo (respuesta de los programas)
+              </span>
+              <select
+                {...stylex.props(styles.select)}
+                value={writeTo}
+                onChange={(event) => setWriteTo(event.target.value)}
+              >
+                <option value="">Selecciona la salida del mismo dispositivo</option>
+                {writeTo && !outputs.includes(writeTo) ? (
+                  <option value={writeTo}>{writeTo} (desconectado)</option>
+                ) : null}
+                {outputs.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <span {...stylex.props(styles.fieldHelp)}>
+                Úsalo si Windows muestra nombres distintos para la entrada y la salida.
+              </span>
+            </label>
+            <label {...stylex.props(styles.fieldLabel)}>
+              <input
+                type="checkbox"
+                checked={perChannel}
+                onChange={(event) => setPerChannel(event.target.checked)}
+              />
+              Repartir los canales MIDI entre los programas
+            </label>
+            {perChannel
+              ? channels.slice(0, slots).map((assignment, index) => (
+                  <div key={index} {...stylex.props(styles.assignmentRow)}>
+                    <span {...stylex.props(styles.assignmentName)}>
+                      Programa {index + 1}
+                    </span>
+                    <ChannelPicker
+                      value={assignment.length === 0 ? "omni" : assignment}
+                      onChange={(next) =>
+                        setChannels((current) =>
+                          current.map((entry, position) =>
+                            position === index ? (next === "omni" ? [] : next) : entry,
+                          ),
+                        )
+                      }
+                    />
+                  </div>
+                ))
+              : null}
+            <span {...stylex.props(styles.fieldHelp)}>
+              {perChannel
+                ? "El filtro solo afecta lo que recibe cada programa. Sus respuestas llegan al dispositivo sin filtrar."
+                : "Por defecto, todos reciben todos los canales y mensajes MIDI."}
+            </span>
+          </div>
+        </details>
+      </fieldset>
+      {listenTo && !ready ? (
+        <Notice tone="warning" layout="stack">
+          Falta una conexión del dispositivo. Actualiza la lista o selecciona su salida en
+          opciones avanzadas.
+        </Notice>
+      ) : null}
+      <div {...stylex.props(styles.field)}>
+        <strong {...stylex.props(styles.fieldLabel)}>
+          Así lo configurarás en cada programa
         </strong>
-        <span {...stylex.props(styles.cardDetail)}>
-          Dos preguntas y te dejo las rutas montadas. Podrás retocarlas después.
+        <ProgramConnections slots={slots} />
+        <span {...stylex.props(styles.fieldHelp)}>
+          Se prepararán {slots * 2} puertos virtuales, dos por programa. Cada programa usa
+          un par distinto. Desactiva MIDI Thru si reenvía automáticamente lo recibido.
         </span>
       </div>
-
-      <label {...stylex.props(styles.field)}>
-        <span {...stylex.props(styles.fieldLabel)}>
-          {isMerge
-            ? "1. ¿En qué dispositivo quieres que escriban?"
-            : "1. ¿Qué dispositivo quieres repartir?"}
-        </span>
-        <select
-          {...stylex.props(styles.select)}
-          value={device}
-          onChange={(event) => setDevice(event.target.value)}
-        >
-          <option value="">Selecciona un dispositivo…</option>
-          {devices.map((entry) => (
-            <option key={entry} value={entry}>
-              {entry}
-            </option>
-          ))}
-        </select>
-        {devices.length === 0 ? (
-          <span {...stylex.props(styles.fieldHelp)}>
-            No se detecta ningún dispositivo. Conéctalo y vuelve a abrir esta pestaña.
-          </span>
-        ) : null}
-      </label>
-
-      <label {...stylex.props(styles.field)}>
-        <span {...stylex.props(styles.fieldLabel)}>
-          {isMerge ? "2. ¿Cuántos programas?" : "2. ¿Cuántos destinos?"}
-        </span>
-        <input
-          type="number"
-          min={MIN_SLOTS}
-          max={MAX_SLOTS}
-          {...stylex.props(styles.input, styles.narrow)}
-          value={slots}
-          onChange={(event) => setSlots(Number(event.target.value))}
-        />
-        <span {...stylex.props(styles.fieldHelp)}>
-          Se crearán {slots} puertos virtuales. Cada programa elige el suyo en su propia
-          configuración MIDI.
-        </span>
-      </label>
-
-      {!isMerge ? (
-        <div {...stylex.props(styles.field)}>
-          <span {...stylex.props(styles.fieldLabel)}>
-            3. ¿Qué canal va a cada destino?
-          </span>
-          {channels.map((assignment, index) => (
-            <div key={index} {...stylex.props(styles.assignmentRow)}>
-              <span {...stylex.props(styles.assignmentName)}>Salida {index + 1}</span>
-              <ChannelPicker
-                value={assignment.length === 0 ? "omni" : assignment}
-                onChange={(next) =>
-                  setChannels((current) =>
-                    current.map((entry, position) =>
-                      position === index ? (next === "omni" ? [] : next) : entry,
-                    ),
-                  )
-                }
-              />
-            </div>
-          ))}
-        </div>
-      ) : null}
-
       <div {...stylex.props(styles.wizardActions)}>
-        <ActionButton variant="ghost" size="small" onPress={onCancel}>
-          Cancelar
-        </ActionButton>
+        {onCancel ? (
+          <ActionButton variant="ghost" size="small" onPress={onCancel} isDisabled={busy}>
+            Cancelar
+          </ActionButton>
+        ) : null}
         <ActionButton
           tone="cyan"
-          isDisabled={!device}
+          isDisabled={!ready || busy}
           onPress={() =>
             onApply(
-              isMerge
-                ? buildMergeConfig(device, slots)
-                : buildSplitConfig(device, channels),
+              buildRouterSetup({ writeTo, listenTo, channelsPerProgram: assignments }),
             )
           }
         >
-          Crear las rutas
+          {busy ? "Preparando conexiones…" : "Compartir dispositivo"}
         </ActionButton>
       </div>
     </Surface>
+  )
+}
+
+function ProgramConnections({ slots }: { slots: number }) {
+  return (
+    <div {...stylex.props(styles.tableScroll)}>
+      <table {...stylex.props(styles.connectionTable)}>
+        <thead>
+          <tr>
+            <th scope="col" {...stylex.props(styles.tableCell)}>
+              Programa
+            </th>
+            <th scope="col" {...stylex.props(styles.tableCell)}>
+              Entrada MIDI (recibe)
+            </th>
+            <th scope="col" {...stylex.props(styles.tableCell)}>
+              Salida MIDI (envía)
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: slots }, (_, index) => index + 1).map((slot) => (
+            <tr key={slot}>
+              <th scope="row" {...stylex.props(styles.tableCell)}>
+                Programa {slot}
+              </th>
+              <td {...stylex.props(styles.tableCell)}>
+                {PROGRAM_RECEIVE_PREFIX} {slot}
+              </td>
+              <td {...stylex.props(styles.tableCell)}>
+                {PROGRAM_SEND_PREFIX} {slot}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -605,7 +690,7 @@ export function RouterPanel() {
   const router = useRouterPanel()
   const [draft, setDraft] = useState<RouterConfig | null>(null)
   const [dirty, setDirty] = useState(false)
-  const [wizard, setWizard] = useState<Scenario | null>(null)
+  const [wizard, setWizard] = useState(false)
   const [manual, setManual] = useState(false)
   const [showPorts, setShowPorts] = useState(false)
 
@@ -624,302 +709,366 @@ export function RouterPanel() {
   if (!config || !state) {
     return (
       <section {...stylex.props(styles.panel)}>
-        <span {...stylex.props(styles.emptyText)}>Cargando el router…</span>
+        <span {...stylex.props(styles.emptyText)}>
+          {router.message ?? "Cargando el router…"}
+        </span>
+        {router.message ? (
+          <ActionButton variant="secondary" onPress={() => void router.refresh()}>
+            Reintentar
+          </ActionButton>
+        ) : null}
       </section>
     )
   }
 
   const isEmpty = config.ports.length === 0 && config.routes.length === 0
   const virtualPorts = config.ports.filter((port) => port.kind === "virtual")
+  const programCount = virtualPorts.filter((port) => port.role === "input").length
+  const hasProgramPairs =
+    programCount >= MIN_SLOTS &&
+    virtualPorts.length === programCount * 2 &&
+    Array.from({ length: programCount }, (_, index) => index + 1).every(
+      (slot) =>
+        virtualPorts.some(
+          (port) =>
+            port.role === "input" && port.deviceName === PROGRAM_SEND_PREFIX + " " + slot,
+        ) &&
+        virtualPorts.some(
+          (port) =>
+            port.role === "output" &&
+            port.deviceName === PROGRAM_RECEIVE_PREFIX + " " + slot,
+        ),
+    )
 
   return (
-    <section {...stylex.props(styles.panel)}>
-      <div {...stylex.props(styles.headingRow)}>
-        <div>
-          <span {...stylex.props(styles.eyebrow)}>MIDI ROUTER</span>
-          <h2 {...stylex.props(styles.title)}>División y unión de canales MIDI</h2>
+    <section {...stylex.props(styles.panel)} aria-busy={router.busy !== null}>
+      <fieldset disabled={router.busy !== null} {...stylex.props(styles.wizardFields)}>
+        <div {...stylex.props(styles.headingRow)}>
+          <div>
+            <span {...stylex.props(styles.eyebrow)}>MIDI ROUTER</span>
+            <h2 {...stylex.props(styles.title)}>Comparte un dispositivo MIDI</h2>
+          </div>
+          <div {...stylex.props(styles.headingActions)}>
+            <StatusBadge tone={state.running ? "success" : "neutral"}>
+              {state.running ? "En marcha" : "Detenido"}
+            </StatusBadge>
+            {!isEmpty ? (
+              <ActionButton
+                tone="cyan"
+                isDisabled={
+                  router.busy !== null ||
+                  (!state.running && (dirty || state.errors.length > 0))
+                }
+                onPress={() => void (state.running ? router.stop() : router.start())}
+              >
+                {state.running ? "Detener" : "Arrancar router"}
+              </ActionButton>
+            ) : null}
+          </div>
         </div>
-        <div {...stylex.props(styles.headingActions)}>
-          <StatusBadge tone={state.running ? "success" : "neutral"}>
-            {state.running ? "En marcha" : "Detenido"}
-          </StatusBadge>
-          {!isEmpty ? (
-            <ActionButton
-              tone="cyan"
-              isDisabled={
-                router.busy !== null || (!state.running && state.errors.length > 0)
-              }
-              onPress={() => void (state.running ? router.stop() : router.start())}
-            >
-              {state.running ? "Detener" : "Arrancar router"}
-            </ActionButton>
-          ) : null}
-        </div>
-      </div>
 
-      {state.errors.length > 0 ? (
-        <Notice tone="warning" layout="stack">
-          <strong>Revisa esto antes de arrancar</strong>
-          <ul {...stylex.props(styles.noticeList)}>
-            {state.errors.map((error) => (
-              <li key={error}>{error}</li>
-            ))}
-          </ul>
-        </Notice>
-      ) : null}
+        {state.errors.length > 0 ? (
+          <Notice tone="warning" layout="stack">
+            <strong>Revisa esto antes de arrancar</strong>
+            <ul {...stylex.props(styles.noticeList)}>
+              {state.errors.map((error) => (
+                <li key={error}>{error}</li>
+              ))}
+            </ul>
+          </Notice>
+        ) : null}
 
-      {state.warnings.map((warning) => (
-        <Notice key={warning} tone="warning" layout="stack">
-          <strong>Conflicto con el controlador</strong>
-          {warning}
-        </Notice>
-      ))}
+        {state.warnings.map((warning) => (
+          <Notice key={warning} tone="warning" layout="stack">
+            <strong>Conflicto con el controlador</strong>
+            {warning}
+          </Notice>
+        ))}
 
-      {state.provisioning && !state.provisioning.ok ? (
-        <Notice tone="danger" layout="stack">
-          <strong>Puertos virtuales</strong>
-          {state.provisioning.message}
-        </Notice>
-      ) : null}
+        {state.provisioning && !state.provisioning.ok ? (
+          <Notice tone="danger" layout="stack">
+            <strong>Puertos virtuales</strong>
+            {state.provisioning.message}
+          </Notice>
+        ) : null}
 
-      {isEmpty && !wizard && !manual ? (
-        <StartChooser
-          onPick={(choice) => {
-            if (choice === "manual") setManual(true)
-            else setWizard(choice)
-          }}
-        />
-      ) : null}
+        {state.running && state.ports.some((port) => !port.connected) ? (
+          <Notice tone="warning" layout="stack">
+            <strong>Hay conexiones pendientes</strong>
+            {state.ports
+              .filter((port) => !port.connected)
+              .map((port) => (
+                <span key={port.id}>
+                  {port.deviceName}:{" "}
+                  {port.error ??
+                    "No conectado. Comprueba el dispositivo y sus puertos MIDI."}
+                </span>
+              ))}
+          </Notice>
+        ) : null}
 
-      {wizard ? (
-        <Wizard
-          scenario={wizard}
-          devices={wizard === "merge" ? state.devices.outputs : state.devices.inputs}
-          onCancel={() => setWizard(null)}
-          onApply={(next) => {
-            update(next)
-            setWizard(null)
-          }}
-        />
-      ) : null}
+        {/* Nothing configured means there is only one thing to do, so it is offered
+          straight away rather than behind a card that had to be clicked first. */}
+        {wizard || (isEmpty && !manual) ? (
+          <Wizard
+            devices={state.devices}
+            busy={router.busy !== null}
+            onRefresh={() => void router.refresh()}
+            onCancel={!isEmpty || manual ? () => setWizard(false) : undefined}
+            onApply={(next) => {
+              setWizard(true)
+              void router.saveConfig(next, true).then((saved) => {
+                if (!saved) return
+                setDraft(next)
+                setDirty(false)
+                setWizard(false)
+                setManual(false)
+              })
+            }}
+          />
+        ) : null}
 
-      {!isEmpty || manual ? (
-        <>
-          {virtualPorts.length > 0 ? (
-            <Notice tone="info" layout="stack">
-              <strong>Qué elegir en los otros programas</strong>
-              <span>
-                Estos puertos aparecen en la lista MIDI de cualquier aplicación:{" "}
-                {virtualPorts.map((port) => port.deviceName).join(" · ")}
-              </span>
-            </Notice>
-          ) : null}
-
-          <Surface
-            as="article"
-            variant="subtle"
-            padding="custom"
-            {...stylex.props(styles.card)}
+        {isEmpty && !manual ? (
+          <button
+            type="button"
+            {...stylex.props(styles.manualLink)}
+            onClick={() => setManual(true)}
           >
-            <div {...stylex.props(styles.cardHeading)}>
-              <strong>Rutas</strong>
-              <span {...stylex.props(styles.cardDetail)}>
-                Varias rutas desde la misma entrada la reparten; varias hacia la misma
-                salida la unen.
-              </span>
-            </div>
+            O configurar puertos y rutas a mano
+          </button>
+        ) : null}
 
-            {config.routes.length === 0 ? (
-              <span {...stylex.props(styles.emptyText)}>Todavía no hay rutas.</span>
-            ) : (
-              config.routes.map((route) => (
-                <RouteCard
-                  key={route.id}
-                  route={route}
-                  ports={config.ports}
-                  onChange={(next) =>
-                    update({
-                      ...config,
-                      routes: config.routes.map((entry) =>
-                        entry.id === route.id ? next : entry,
-                      ),
-                    })
-                  }
-                  onRemove={() =>
-                    update({
-                      ...config,
-                      routes: config.routes.filter((entry) => entry.id !== route.id),
-                    })
-                  }
-                />
-              ))
-            )}
+        {!isEmpty || manual ? (
+          <>
+            {virtualPorts.length > 0 ? (
+              <Notice tone="info" layout="stack">
+                <strong>Qué elegir en los otros programas</strong>
+                <span>
+                  Al arrancar el router se preparan estos puertos. El rol está visto desde
+                  el programa, no desde el router.
+                </span>
+                {hasProgramPairs ? (
+                  <ProgramConnections slots={programCount} />
+                ) : (
+                  <ul {...stylex.props(styles.noticeList)}>
+                    {/* A router input is where the program writes, so in the program it is
+                    an output, and the other way round. */}
+                    {programPortGroups(virtualPorts).map((group) => (
+                      <li key={group.label}>
+                        {group.label}: {group.names.join(" · ")}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Notice>
+            ) : null}
 
-            <div {...stylex.props(styles.cardActions)}>
-              <ActionButton
-                variant="secondary"
-                size="small"
-                onPress={() => setWizard("merge")}
-              >
-                Añadir: varios programas → un dispositivo
-              </ActionButton>
-              <ActionButton
-                variant="secondary"
-                size="small"
-                onPress={() => setWizard("split")}
-              >
-                Añadir: un dispositivo → varios programas
-              </ActionButton>
-              <ActionButton
-                variant="ghost"
-                size="small"
-                onPress={() => {
-                  update({ version: 1, ports: [], routes: [] })
-                  setManual(false)
-                }}
-              >
-                Empezar de cero
-              </ActionButton>
-            </div>
-          </Surface>
-
-          <Surface
-            as="article"
-            variant="subtle"
-            padding="custom"
-            {...stylex.props(styles.card)}
-          >
-            <button
-              type="button"
-              {...stylex.props(styles.disclosure)}
-              onClick={() => setShowPorts((current) => !current)}
+            <Surface
+              as="article"
+              variant="subtle"
+              padding="custom"
+              {...stylex.props(styles.card)}
             >
-              <strong>Puertos y dispositivos</strong>
-              <span {...stylex.props(styles.cardDetail)}>
-                {showPorts ? "Ocultar" : "Mostrar"} · {config.ports.length} configurados
-              </span>
-            </button>
+              <div {...stylex.props(styles.cardHeading)}>
+                <strong>Rutas</strong>
+                <span {...stylex.props(styles.cardDetail)}>
+                  Varias rutas desde la misma entrada la reparten; varias hacia la misma
+                  salida la unen.
+                </span>
+              </div>
 
-            {showPorts ? (
-              <>
-                {config.ports.map((port) => (
-                  <PortRow
-                    key={port.id}
-                    port={port}
-                    devices={
-                      port.role === "input" ? state.devices.inputs : state.devices.outputs
-                    }
-                    status={state.ports.find((entry) => entry.id === port.id)}
+              {config.routes.length === 0 ? (
+                <span {...stylex.props(styles.emptyText)}>Todavía no hay rutas.</span>
+              ) : (
+                config.routes.map((route) => (
+                  <RouteCard
+                    key={route.id}
+                    route={route}
+                    ports={config.ports}
                     onChange={(next) =>
                       update({
                         ...config,
-                        ports: config.ports.map((entry) =>
-                          entry.id === port.id ? next : entry,
+                        routes: config.routes.map((entry) =>
+                          entry.id === route.id ? next : entry,
                         ),
                       })
                     }
                     onRemove={() =>
                       update({
                         ...config,
-                        ports: config.ports.filter((entry) => entry.id !== port.id),
-                        routes: config.routes.filter(
-                          (route) =>
-                            route.source !== port.id && route.destination !== port.id,
-                        ),
+                        routes: config.routes.filter((entry) => entry.id !== route.id),
                       })
                     }
                   />
-                ))}
-                <div {...stylex.props(styles.cardActions)}>
-                  <ActionButton
-                    variant="secondary"
-                    size="small"
-                    onPress={() =>
-                      update({
-                        ...config,
-                        ports: [
-                          ...config.ports,
-                          {
-                            id: `in-${config.ports.length + 1}`,
-                            role: "input",
-                            kind: "hardware",
-                            deviceName: "",
-                            match: "contains",
-                          },
-                        ],
-                      })
-                    }
-                  >
-                    Añadir entrada
-                  </ActionButton>
-                  <ActionButton
-                    variant="secondary"
-                    size="small"
-                    onPress={() =>
-                      update({
-                        ...config,
-                        ports: [
-                          ...config.ports,
-                          {
-                            id: `out-${config.ports.length + 1}`,
-                            role: "output",
-                            kind: "hardware",
-                            deviceName: "",
-                            match: "contains",
-                          },
-                        ],
-                      })
-                    }
-                  >
-                    Añadir salida
-                  </ActionButton>
-                </div>
-              </>
-            ) : null}
-          </Surface>
+                ))
+              )}
 
-          <div {...stylex.props(styles.footer)}>
-            <span {...stylex.props(styles.dirtyHint)}>
-              {dirty
-                ? "Tienes cambios sin guardar; se aplican al pulsar Guardar."
-                : "Sin cambios pendientes."}
-            </span>
-            <ActionButton
-              tone="cyan"
-              isDisabled={!dirty || router.busy === "save"}
-              onPress={() => {
-                void router.saveConfig(config).then(() => setDirty(false))
-              }}
-            >
-              Guardar configuración
-            </ActionButton>
-          </div>
-
-          <Surface
-            as="article"
-            variant="subtle"
-            padding="custom"
-            {...stylex.props(styles.card)}
-          >
-            <div {...stylex.props(styles.cardHeading)}>
-              <strong>Monitor MIDI</strong>
-              <span {...stylex.props(styles.cardDetail)}>
-                recibidos {state.stats.received} · enviados {state.stats.sent} · filtrados{" "}
-                {state.stats.dropped} · sin entregar {state.stats.undelivered}
-              </span>
-            </div>
-            <MonitorList events={router.monitor} />
-            {router.monitor.length > 0 ? (
               <div {...stylex.props(styles.cardActions)}>
-                <ActionButton variant="ghost" size="small" onPress={router.clearMonitor}>
-                  Limpiar
+                <ActionButton
+                  variant="secondary"
+                  size="small"
+                  onPress={() => setWizard(true)}
+                >
+                  Rehacer con el asistente
+                </ActionButton>
+                <ActionButton
+                  variant="ghost"
+                  size="small"
+                  onPress={() => {
+                    update({ version: 1, ports: [], routes: [] })
+                    setManual(false)
+                  }}
+                >
+                  Empezar de cero
                 </ActionButton>
               </div>
-            ) : null}
-          </Surface>
-        </>
-      ) : null}
+            </Surface>
 
+            <Surface
+              as="article"
+              variant="subtle"
+              padding="custom"
+              {...stylex.props(styles.card)}
+            >
+              <button
+                type="button"
+                {...stylex.props(styles.disclosure)}
+                onClick={() => setShowPorts((current) => !current)}
+              >
+                <strong>Puertos y dispositivos</strong>
+                <span {...stylex.props(styles.cardDetail)}>
+                  {showPorts ? "Ocultar" : "Mostrar"} · {config.ports.length} configurados
+                </span>
+              </button>
+
+              {showPorts ? (
+                <>
+                  {config.ports.map((port) => (
+                    <PortRow
+                      key={port.id}
+                      port={port}
+                      devices={
+                        port.role === "input"
+                          ? state.devices.inputs
+                          : state.devices.outputs
+                      }
+                      status={state.ports.find((entry) => entry.id === port.id)}
+                      onChange={(next) =>
+                        update({
+                          ...config,
+                          ports: config.ports.map((entry) =>
+                            entry.id === port.id ? next : entry,
+                          ),
+                        })
+                      }
+                      onRemove={() =>
+                        update({
+                          ...config,
+                          ports: config.ports.filter((entry) => entry.id !== port.id),
+                          routes: config.routes.filter(
+                            (route) =>
+                              route.source !== port.id && route.destination !== port.id,
+                          ),
+                        })
+                      }
+                    />
+                  ))}
+                  <div {...stylex.props(styles.cardActions)}>
+                    <ActionButton
+                      variant="secondary"
+                      size="small"
+                      onPress={() =>
+                        update({
+                          ...config,
+                          ports: [
+                            ...config.ports,
+                            {
+                              id: `in-${config.ports.length + 1}`,
+                              role: "input",
+                              kind: "hardware",
+                              deviceName: "",
+                              match: "contains",
+                            },
+                          ],
+                        })
+                      }
+                    >
+                      Añadir entrada
+                    </ActionButton>
+                    <ActionButton
+                      variant="secondary"
+                      size="small"
+                      onPress={() =>
+                        update({
+                          ...config,
+                          ports: [
+                            ...config.ports,
+                            {
+                              id: `out-${config.ports.length + 1}`,
+                              role: "output",
+                              kind: "hardware",
+                              deviceName: "",
+                              match: "contains",
+                            },
+                          ],
+                        })
+                      }
+                    >
+                      Añadir salida
+                    </ActionButton>
+                  </div>
+                </>
+              ) : null}
+            </Surface>
+
+            <div {...stylex.props(styles.footer)}>
+              <span {...stylex.props(styles.dirtyHint)}>
+                {dirty
+                  ? "Tienes cambios sin guardar; se aplican al pulsar Guardar."
+                  : "Sin cambios pendientes."}
+              </span>
+              <ActionButton
+                tone="cyan"
+                isDisabled={!dirty || router.busy !== null}
+                onPress={() => {
+                  void router.saveConfig(config).then((saved) => {
+                    if (saved) setDirty(false)
+                  })
+                }}
+              >
+                Guardar configuración
+              </ActionButton>
+            </div>
+
+            <Surface
+              as="article"
+              variant="subtle"
+              padding="custom"
+              {...stylex.props(styles.card)}
+            >
+              <div {...stylex.props(styles.cardHeading)}>
+                <strong>Monitor MIDI</strong>
+                <span {...stylex.props(styles.cardDetail)}>
+                  recibidos {state.stats.received} · enviados {state.stats.sent} ·
+                  filtrados {state.stats.dropped} · sin entregar {state.stats.undelivered}
+                </span>
+              </div>
+              <MonitorList events={router.monitor} />
+              {router.monitor.length > 0 ? (
+                <div {...stylex.props(styles.cardActions)}>
+                  <ActionButton
+                    variant="ghost"
+                    size="small"
+                    onPress={router.clearMonitor}
+                  >
+                    Limpiar
+                  </ActionButton>
+                </div>
+              ) : null}
+            </Surface>
+          </>
+        ) : null}
+      </fieldset>
       {router.message ? (
         <Toast message={router.message} onDismiss={router.clearMessage} />
       ) : null}
@@ -928,6 +1077,33 @@ export function RouterPanel() {
 }
 
 const styles = stylex.create({
+  intro: { margin: 0, color: "#cbd5e1", fontSize: "0.82rem", lineHeight: 1.5 },
+  wizardFields: {
+    borderWidth: 0,
+    padding: 0,
+    margin: 0,
+    minWidth: 0,
+    display: "grid",
+    gap: "12px",
+  },
+  advancedSummary: {
+    cursor: "pointer",
+    color: "#94a3b8",
+    fontSize: "0.76rem",
+    paddingBlock: "10px",
+  },
+  tableScroll: { overflowX: "auto", minWidth: 0 },
+  connectionTable: {
+    width: "100%",
+    borderCollapse: "collapse",
+    fontSize: "0.74rem",
+    color: "#cbd5e1",
+  },
+  tableCell: {
+    textAlign: "left",
+    padding: "9px",
+    borderBottom: "1px solid rgba(255,255,255,0.08)",
+  },
   panel: {
     marginTop: "16px",
     borderWidth: "1px",
@@ -955,32 +1131,6 @@ const styles = stylex.create({
     letterSpacing: "0.12em",
   },
   title: { margin: "4px 0 0", color: "#f8fafc", fontSize: "1.15rem" },
-  chooser: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-    gap: "11px",
-  },
-  scenarioCard: {
-    display: "grid",
-    gap: "7px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: {
-      default: "rgba(34, 211, 238, 0.28)",
-      ":hover": "rgba(34, 211, 238, 0.6)",
-    },
-    borderRadius: "16px",
-    backgroundColor: {
-      default: "rgba(15, 23, 42, 0.7)",
-      ":hover": "rgba(34, 211, 238, 0.08)",
-    },
-    cursor: "pointer",
-    padding: "14px",
-    textAlign: "left",
-    transition: "border-color 150ms ease, background-color 150ms ease",
-  },
-  scenarioTitle: { color: "#f8fafc", fontSize: "0.86rem", fontWeight: 700 },
-  scenarioBody: { color: "#94a3b8", fontSize: "0.74rem", lineHeight: 1.45 },
   scenarioDiagram: {
     marginTop: "3px",
     color: "#64748b",
@@ -995,7 +1145,6 @@ const styles = stylex.create({
     color: "#64748b",
     cursor: "pointer",
     fontSize: "0.72rem",
-    gridColumn: "1 / -1",
     padding: "4px",
     textAlign: "center",
     textDecoration: "underline",

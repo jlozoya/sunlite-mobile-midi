@@ -36,6 +36,7 @@ export function useRouterPanel() {
   const [monitor, setMonitor] = useState<RouterMonitorEvent[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState<"start" | "stop" | "save" | null>(null)
+  const operationRef = useRef(false)
   const socketRef = useRef<WebSocket | null>(null)
 
   const refresh = useCallback(async () => {
@@ -75,26 +76,60 @@ export function useRouterPanel() {
     return () => socket.close()
   }, [refresh])
 
-  const saveConfig = useCallback(async (config: RouterConfig) => {
-    setBusy("save")
-    try {
-      const payload = await requestJson<RouterPayload>("/api/router/config", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
-      })
-      const { monitor: events, ...rest } = payload
-      setState(rest)
-      setMonitor(events ?? [])
-      setMessage("Configuración guardada.")
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo guardar.")
-    } finally {
-      setBusy(null)
-    }
-  }, [])
+  const saveConfig = useCallback(
+    async (config: RouterConfig, startAfterSave = false) => {
+      if (operationRef.current) return false
+      operationRef.current = true
+      setBusy("save")
+      const accept = (payload: RouterPayload) => {
+        const { monitor: events, ...rest } = payload
+        setState(rest)
+        setMonitor(events ?? [])
+        return rest
+      }
+      try {
+        // Re-provision when rebuilding a running setup, including newly added programs.
+        if (startAfterSave && state?.running) {
+          accept(await requestJson<RouterPayload>("/api/router/stop", { method: "POST" }))
+        }
+        accept(
+          await requestJson<RouterPayload>("/api/router/config", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(config),
+          }),
+        )
+        if (startAfterSave) {
+          const next = accept(
+            await requestJson<RouterPayload>("/api/router/start", { method: "POST" }),
+          )
+          setMessage(
+            next.provisioning?.ok === false
+              ? next.provisioning.message
+              : "Configuración guardada. Router iniciado.",
+          )
+        } else {
+          setMessage("Configuración guardada.")
+        }
+        return true
+      } catch (error) {
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "No se pudo preparar la configuración.",
+        )
+        return false
+      } finally {
+        operationRef.current = false
+        setBusy(null)
+      }
+    },
+    [state?.running],
+  )
 
   const run = useCallback(async (action: "start" | "stop") => {
+    if (operationRef.current) return
+    operationRef.current = true
     setBusy(action)
     try {
       const payload = await requestJson<RouterPayload>(`/api/router/${action}`, {
@@ -111,6 +146,7 @@ export function useRouterPanel() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo cambiar el estado.")
     } finally {
+      operationRef.current = false
       setBusy(null)
     }
   }, [])
