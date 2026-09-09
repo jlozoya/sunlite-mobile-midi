@@ -179,7 +179,7 @@ export function App() {
         </StatusBadge>
       </header>
 
-      <AppUpdates />
+      {!isMobileView ? <AppUpdates /> : null}
 
       {!isMobileView ? (
         <nav {...stylex.props(styles.tabs)} aria-label="Secciones de la aplicación">
