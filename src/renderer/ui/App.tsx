@@ -41,7 +41,7 @@ const DESKTOP_TABS: Array<{
 ]
 
 export function App() {
-  const { status, error: statusError, isLoading, refreshStatus } = useServerStatus()
+  const { status, error: statusError, refreshStatus } = useServerStatus()
   const {
     connectionState,
     lastCommand,
@@ -105,11 +105,7 @@ export function App() {
         throw new Error(payload.message ?? `Setup action failed: ${response.status}`)
       }
 
-      const refreshedStatus = await refreshStatus()
-
-      if (refreshedStatus?.loopMidiInstalled && refreshedStatus.midiReady) {
-        setActiveDesktopTab("controller")
-      }
+      await refreshStatus()
 
       if (action === "install") {
         setSetupMessage(
@@ -391,10 +387,10 @@ export function App() {
                       </ActionButton>
                       <ActionButton
                         variant="secondary"
-                        isDisabled={setupBusy !== null || isLoading}
+                        isDisabled={setupBusy !== null}
                         onPress={() => void runSetupAction("refresh")}
                       >
-                        {setupBusy === "refresh" || isLoading
+                        {setupBusy === "refresh"
                           ? "Actualizando..."
                           : "Comprobar puertos"}
                       </ActionButton>
@@ -421,12 +417,10 @@ export function App() {
                     <div {...stylex.props(styles.setupActions)}>
                       <ActionButton
                         variant="secondary"
-                        isDisabled={setupBusy !== null || isLoading}
+                        isDisabled={setupBusy !== null}
                         onPress={() => void runSetupAction("refresh")}
                       >
-                        {setupBusy === "refresh" || isLoading
-                          ? "Actualizando..."
-                          : "Comprobar"}
+                        {setupBusy === "refresh" ? "Actualizando..." : "Comprobar"}
                       </ActionButton>
                     </div>
                   </Notice>
