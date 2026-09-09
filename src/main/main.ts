@@ -14,6 +14,7 @@ import type {
   AutomationMidiCommand,
   AutomationSocketCommand,
 } from "../shared/automation-types.js"
+import { DEV_BACKEND_PORT_PARAM } from "../shared/websocket-url.js"
 import {
   DEFAULT_CONTROLLER_CUSTOMIZATION,
   mergeControllerCustomization,
@@ -1601,12 +1602,15 @@ async function createWindow(status: ServerStatus) {
     return { action: "deny" }
   })
 
-  const rendererUrl = process.env.SUNLITE_DEV_RENDERER_URL || status.localUrl
+  const rendererUrl = new URL(process.env.SUNLITE_DEV_RENDERER_URL || status.localUrl)
+  if (process.env.SUNLITE_DEV_RENDERER_URL) {
+    rendererUrl.searchParams.set(DEV_BACKEND_PORT_PARAM, String(status.port))
+  }
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (new URL(url).origin !== new URL(rendererUrl).origin) event.preventDefault()
+    if (new URL(url).origin !== rendererUrl.origin) event.preventDefault()
   })
   configureAutoUpdates()
-  await mainWindow.loadURL(rendererUrl)
+  await mainWindow.loadURL(rendererUrl.toString())
   mainWindow.maximize()
   mainWindow.show()
 }

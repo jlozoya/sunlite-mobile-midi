@@ -29,7 +29,8 @@
     "release:win": "bun run dist:win",
     "test:updates": "bun run build:main && node --test tests/updates.test.mjs",
     "dist:portable": "bun run build && electron-builder --win portable --x64 --publish never",
-    "test:router": "bun run build:main && node --test tests/midi-router.test.mjs"
+    "test:router": "bun run build:main && node --test tests/midi-router.test.mjs",
+    "test:websocket": "bun run build:main && node --test tests/websocket-url.test.mjs"
   },
   "dependencies": {
     "@julusian/midi": "^3.6.1",

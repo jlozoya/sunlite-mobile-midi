@@ -10,6 +10,7 @@ import type {
   SocketMessage,
 } from "./types"
 import type { AutomationSocketCommand } from "../../shared/automation-types"
+import { websocketUrlForPage } from "../../shared/websocket-url"
 
 type ConnectionState = "connecting" | "online" | "offline" | "error"
 
@@ -66,6 +67,7 @@ function normalizeMidiBehaviorChannel(value: unknown): number {
 export function useControllerSocket() {
   const socketRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
+  const connectionRunRef = useRef(0)
   const [connectionState, setConnectionState] = useState<ConnectionState>("connecting")
   const [lastCommand, setLastCommand] = useState("None")
   const [serverMidiLabel, setServerMidiLabel] = useState<string | null>(null)
@@ -152,113 +154,123 @@ export function useControllerSocket() {
     [clearNoteFeedback, setPersistentNoteFeedback],
   )
 
-  const connect = useCallback(() => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws"
-    const url = `${protocol}://${window.location.host}/ws`
-    const socket = new WebSocket(url)
+  const connect = useCallback(
+    (runId: number) => {
+      const socket = new WebSocket(websocketUrlForPage(window.location.href))
 
-    socketRef.current = socket
-    setConnectionState("connecting")
+      socketRef.current = socket
+      setConnectionState("connecting")
 
-    socket.addEventListener("open", () => {
-      setConnectionState("online")
-      requestFeedbackState()
-      window.setTimeout(requestFeedbackState, 350)
-      window.setTimeout(requestFeedbackState, 1200)
-    })
+      socket.addEventListener("open", () => {
+        setConnectionState("online")
+        requestFeedbackState()
+        window.setTimeout(requestFeedbackState, 350)
+        window.setTimeout(requestFeedbackState, 1200)
+      })
 
-    socket.addEventListener("close", () => {
-      setConnectionState("offline")
+      socket.addEventListener("close", () => {
+        if (runId !== connectionRunRef.current) return
 
-      if (reconnectTimerRef.current) {
-        window.clearTimeout(reconnectTimerRef.current)
-      }
+        setConnectionState("offline")
 
-      reconnectTimerRef.current = window.setTimeout(connect, 1000)
-    })
-
-    socket.addEventListener("error", () => {
-      setConnectionState("error")
-    })
-
-    socket.addEventListener("message", (event) => {
-      try {
-        const payload = JSON.parse(event.data) as SocketMessage
-
-        if ("type" in payload && payload.type === "server-ready") {
-          setConnectionState("online")
-          const feedbackLabel = payload.feedbackDisabledReason
-            ? `Feedback disabled: ${payload.feedbackDisabledReason}`
-            : `MIDI IN: ${payload.midiInputName ?? "No feedback input"}`
-          setServerMidiLabel(
-            `MIDI OUT: ${payload.midiOutputName} · ${feedbackLabel} · Ch ${payload.midiChannel}`,
-          )
-          setLastCommand(
-            payload.feedbackDisabledReason
-              ? `Warning: ${payload.feedbackDisabledReason}`
-              : `Ready: ${payload.midiOutputName}`,
-          )
-          requestFeedbackState()
-          window.setTimeout(requestFeedbackState, 350)
-          window.setTimeout(requestFeedbackState, 1200)
-          return
+        if (reconnectTimerRef.current) {
+          window.clearTimeout(reconnectTimerRef.current)
         }
 
-        if ("type" in payload && payload.type === "setup-required") {
-          setConnectionState("online")
-          setServerMidiLabel(`Setup required: ${payload.expectedMidiOutputName}`)
-          setLastCommand(`Missing MIDI output: ${payload.expectedMidiOutputName}`)
-          return
-        }
+        reconnectTimerRef.current = window.setTimeout(() => connect(runId), 1000)
+      })
 
-        if ("event" in payload && payload.event === "midi-feedback-state") {
-          applyFeedbackState(payload.state)
-          return
-        }
+      socket.addEventListener("error", () => {
+        setConnectionState("error")
+      })
 
-        if ("event" in payload && payload.event === "midi-input") {
-          handleMidiInput(payload.message)
-          return
-        }
+      socket.addEventListener("message", (event) => {
+        try {
+          const payload = JSON.parse(event.data) as SocketMessage
 
-        if ("event" in payload && payload.event === "feedback-disabled") {
-          setLastCommand(`Feedback disabled: ${payload.message}`)
-          return
-        }
+          if ("type" in payload && payload.type === "server-ready") {
+            setConnectionState("online")
+            const feedbackLabel = payload.feedbackDisabledReason
+              ? `Feedback disabled: ${payload.feedbackDisabledReason}`
+              : `MIDI IN: ${payload.midiInputName ?? "No feedback input"}`
+            setServerMidiLabel(
+              `MIDI OUT: ${payload.midiOutputName} · ${feedbackLabel} · Ch ${payload.midiChannel}`,
+            )
+            setLastCommand(
+              payload.feedbackDisabledReason
+                ? `Warning: ${payload.feedbackDisabledReason}`
+                : `Ready: ${payload.midiOutputName}`,
+            )
+            requestFeedbackState()
+            window.setTimeout(requestFeedbackState, 350)
+            window.setTimeout(requestFeedbackState, 1200)
+            return
+          }
 
-        if ("event" in payload && payload.event === "controller-config") {
-          setControllerCustomization(payload.config)
-          return
-        }
+          if ("type" in payload && payload.type === "setup-required") {
+            setConnectionState("online")
+            setServerMidiLabel(`Setup required: ${payload.expectedMidiOutputName}`)
+            setLastCommand(`Missing MIDI output: ${payload.expectedMidiOutputName}`)
+            return
+          }
 
-        if ("event" in payload && payload.event === "command-result") {
-          setLastCommand(JSON.stringify(payload.command))
-          return
-        }
+          if ("event" in payload && payload.event === "midi-feedback-state") {
+            applyFeedbackState(payload.state)
+            return
+          }
 
-        if ("event" in payload && payload.event === "last-command") {
-          setLastCommand(JSON.stringify(payload.command))
-          return
-        }
+          if ("event" in payload && payload.event === "midi-input") {
+            handleMidiInput(payload.message)
+            return
+          }
 
-        if ("type" in payload && payload.type === "error") {
-          setLastCommand(`Error: ${payload.message}`)
+          if ("event" in payload && payload.event === "feedback-disabled") {
+            setLastCommand(`Feedback disabled: ${payload.message}`)
+            return
+          }
+
+          if ("event" in payload && payload.event === "controller-config") {
+            setControllerCustomization(payload.config)
+            return
+          }
+
+          if ("event" in payload && payload.event === "command-result") {
+            setLastCommand(JSON.stringify(payload.command))
+            return
+          }
+
+          if ("event" in payload && payload.event === "last-command") {
+            setLastCommand(JSON.stringify(payload.command))
+            return
+          }
+
+          if ("type" in payload && payload.type === "error") {
+            setLastCommand(`Error: ${payload.message}`)
+          }
+        } catch {
+          setLastCommand(String(event.data))
         }
-      } catch {
-        setLastCommand(String(event.data))
-      }
-    })
-  }, [applyFeedbackState, handleMidiInput, requestFeedbackState])
+      })
+    },
+    [applyFeedbackState, handleMidiInput, requestFeedbackState],
+  )
 
   useEffect(() => {
-    connect()
+    const runId = connectionRunRef.current + 1
+    connectionRunRef.current = runId
+    connect(runId)
 
     return () => {
+      connectionRunRef.current += 1
+
       if (reconnectTimerRef.current) {
         window.clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
       }
 
-      socketRef.current?.close()
+      const socket = socketRef.current
+      socketRef.current = null
+      socket?.close()
     }
   }, [connect])
 

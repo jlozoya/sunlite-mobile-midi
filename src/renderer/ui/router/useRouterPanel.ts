@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { websocketUrlForPage } from "../../../shared/websocket-url"
 import type {
   RouterConfig,
   RouterMonitorEvent,
@@ -55,8 +56,7 @@ export function useRouterPanel() {
   }, [refresh])
 
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws"
-    const socket = new WebSocket(`${protocol}://${window.location.host}/ws`)
+    const socket = new WebSocket(websocketUrlForPage(window.location.href))
     socketRef.current = socket
 
     socket.onmessage = (event) => {
