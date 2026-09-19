@@ -21,6 +21,7 @@ export type MidiControllerProps = {
   customization: ControllerCustomization
   onSaveCustomization: (customization: ControllerCustomization) => Promise<void>
   isMobileView: boolean
+  isConnected?: boolean
   feedbackReady: boolean
   feedbackWarning: string | null
   midiChannel: number
@@ -35,6 +36,7 @@ export function MidiController({
   customization,
   onSaveCustomization,
   isMobileView,
+  isConnected = true,
   feedbackReady,
   feedbackWarning,
   midiChannel,
@@ -42,16 +44,14 @@ export function MidiController({
 }: MidiControllerProps) {
   const [editingControl, setEditingControl] = useState<EditableControl | null>(null)
   const cornerButton = model.cornerButton
-  const padMinWidth = isMobileView ? 36 : 44
-  const faderMinWidth = isMobileView ? 36 : 44
   const padGridStyle = {
-    gridTemplateColumns: `repeat(${model.padColumns}, minmax(${padMinWidth}px, 1fr))`,
+    gridTemplateColumns: `repeat(${model.padColumns}, minmax(0, 1fr))`,
   }
   const bottomButtonRowStyle = {
-    gridTemplateColumns: `repeat(${model.bottomButtonColumns}, minmax(${padMinWidth}px, 1fr))`,
+    gridTemplateColumns: `repeat(${isMobileView ? Math.min(4, model.bottomButtonColumns) : model.bottomButtonColumns}, minmax(0, 1fr))`,
   }
   const faderBankStyle = {
-    gridTemplateColumns: `repeat(${model.faderColumns}, minmax(${faderMinWidth}px, 1fr))`,
+    gridTemplateColumns: `repeat(${isMobileView ? Math.min(5, model.faderColumns) : model.faderColumns}, minmax(0, 1fr))`,
   }
 
   return (
@@ -79,6 +79,7 @@ export function MidiController({
                   feedbackColor={feedbackColor}
                   feedbackBehavior={feedbackBehavior}
                   isMobileView={isMobileView}
+                  isDisabled={!isConnected}
                   sendCommand={sendCommand}
                   onEdit={() =>
                     setEditingControl({ kind: "pad", id: pad.id, note: pad.note })
@@ -97,6 +98,7 @@ export function MidiController({
                   padStates={padStates}
                   customization={customization}
                   isMobileView={isMobileView}
+                  isDisabled={!isConnected}
                   sendCommand={sendCommand}
                   onEdit={() =>
                     setEditingControl({
@@ -119,6 +121,7 @@ export function MidiController({
                   padStates={padStates}
                   customization={customization}
                   isMobileView={isMobileView}
+                  isDisabled={!isConnected}
                   sendCommand={sendCommand}
                   onEdit={() =>
                     setEditingControl({
@@ -139,6 +142,7 @@ export function MidiController({
                 padStates={padStates}
                 customization={customization}
                 isMobileView={isMobileView}
+                isDisabled={!isConnected}
                 sendCommand={sendCommand}
                 onEdit={() =>
                   setEditingControl({
@@ -162,6 +166,7 @@ export function MidiController({
                 feedbackValue={ccValues[fader.controller]}
                 sendCommand={sendCommand}
                 isMobileView={isMobileView}
+                isDisabled={!isConnected}
                 onEdit={() =>
                   setEditingControl({
                     kind: "fader",
@@ -177,15 +182,13 @@ export function MidiController({
 
       {!isMobileView && editingControl ? (
         <ControllerConfigModal
+          key={`${model.id}:${editingControl.kind}:${editingControl.id}`}
           control={editingControl}
           model={model}
           customization={customization}
           midiChannel={midiChannel}
           onClose={() => setEditingControl(null)}
-          onSave={(nextCustomization) => {
-            void onSaveCustomization(nextCustomization)
-            setEditingControl(null)
-          }}
+          onSave={onSaveCustomization}
         />
       ) : null}
     </Surface>
@@ -197,6 +200,7 @@ type MappedSceneButtonProps = {
   padStates: MidiControllerProps["padStates"]
   customization: ControllerCustomization
   isMobileView: boolean
+  isDisabled: boolean
   sendCommand: (command: MidiCommand) => void
   onEdit: () => void
 }
@@ -206,6 +210,7 @@ function MappedSceneButton({
   padStates,
   customization,
   isMobileView,
+  isDisabled,
   sendCommand,
   onEdit,
 }: MappedSceneButtonProps) {
@@ -221,6 +226,7 @@ function MappedSceneButton({
       feedbackColor={feedbackColor}
       feedbackBehavior={feedbackBehavior}
       isMobileView={isMobileView}
+      isDisabled={isDisabled}
       sendCommand={sendCommand}
       onEdit={onEdit}
     />

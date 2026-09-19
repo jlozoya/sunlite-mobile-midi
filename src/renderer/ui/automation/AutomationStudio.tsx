@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex"
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useId, useRef, useState, type ReactNode } from "react"
 import type {
   AutomationMidiCommand,
   AutomationMode,
@@ -18,17 +18,13 @@ type Props = {
   sendAutomationCommand: (command: AutomationSocketCommand) => boolean
 }
 
-function parseMidiList(value: string): number[] {
-  return [
-    ...new Set(
-      value
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .map(Number)
-        .filter((item) => Number.isFinite(item)),
-    ),
-  ].map((item) => Math.max(0, Math.min(127, Math.round(item))))
+function parseMidiList(value: string): number[] | null {
+  const entries = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+  if (entries.some((item) => !/^\d+$/.test(item) || Number(item) > 127)) return null
+  return [...new Set(entries.map(Number))]
 }
 
 /** Renders a duration the way a person reads it, next to the raw millisecond input. */
@@ -88,6 +84,15 @@ function NumberField({
   isDisabled?: boolean
   onChange: (value: number) => void
 }) {
+  const [draft, setDraft] = useState(String(value))
+  const focusedRef = useRef(false)
+  const helpId = useId()
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(String(value))
+  }, [value])
+  const number = Number(draft)
+  const invalid =
+    !draft.trim() || !Number.isInteger(number) || number < min || number > max
   const range = isDuration
     ? `${formatMilliseconds(value)} · entre ${formatMilliseconds(min)} y ${formatMilliseconds(max)}`
     : `Entre ${min} y ${max} ${unit}`
@@ -104,10 +109,30 @@ function NumberField({
         max={max}
         disabled={isDisabled}
         {...stylex.props(styles.input)}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
+        required
+        step={1}
+        value={draft}
+        aria-invalid={!isDisabled && invalid}
+        aria-describedby={helpId}
+        onFocus={() => {
+          focusedRef.current = true
+        }}
+        onBlur={() => {
+          focusedRef.current = false
+        }}
+        onChange={(event) => {
+          setDraft(event.target.value)
+          if (event.target.validity.valid) onChange(Number(event.target.value))
+        }}
       />
-      <span {...stylex.props(styles.fieldHelp)}>{help}</span>
+      <span
+        id={helpId}
+        {...stylex.props(styles.fieldHelp, !isDisabled && invalid && styles.fieldError)}
+      >
+        {!isDisabled && invalid
+          ? `Introduce un número entero entre ${min} y ${max}.`
+          : help}
+      </span>
       <span {...stylex.props(styles.fieldRange)}>{range}</span>
     </label>
   )
@@ -128,7 +153,12 @@ function MidiListField({
 }) {
   const serialized = values.join(",")
   const [draft, setDraft] = useState(serialized)
-  useEffect(() => setDraft(serialized), [serialized])
+  const focusedRef = useRef(false)
+  const helpId = useId()
+  const invalid = parseMidiList(draft) === null
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(serialized)
+  }, [serialized])
   return (
     <label {...stylex.props(styles.field)}>
       <span {...stylex.props(styles.fieldLabel)}>{label}</span>
@@ -136,17 +166,29 @@ function MidiListField({
         {...stylex.props(styles.input)}
         value={draft}
         placeholder="Ej. 36,37"
+        aria-invalid={invalid}
+        aria-describedby={helpId}
+        onFocus={() => {
+          focusedRef.current = true
+        }}
         onChange={(event) => {
-          setDraft(event.target.value)
-          onChange(parseMidiList(event.target.value))
+          const next = event.target.value
+          const parsed = parseMidiList(next)
+          event.target.setCustomValidity(
+            parsed === null ? "Usa números enteros de 0 a 127 separados por comas." : "",
+          )
+          setDraft(next)
+          if (parsed !== null) onChange(parsed)
         }}
         onBlur={() => {
+          focusedRef.current = false
           const parsed = parseMidiList(draft)
-          setDraft(parsed.join(","))
-          onChange(parsed)
+          if (parsed !== null) setDraft(parsed.join(","))
         }}
       />
-      <span {...stylex.props(styles.fieldHelp)}>{help}</span>
+      <span id={helpId} {...stylex.props(styles.fieldHelp, invalid && styles.fieldError)}>
+        {invalid ? "Usa números enteros de 0 a 127 separados por comas." : help}
+      </span>
       <span {...stylex.props(styles.fieldRange)}>
         {values.length === 0 ? "Ninguno" : `${values.length} en la lista`} · {kind} 0–127
       </span>
@@ -186,6 +228,10 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
   }, [automation.status, settingsDirty])
 
   const status = automation.status
+  const controlsDisabled = !status || Boolean(automation.busy)
+  const selectedSession = status?.sessions.find(
+    (session) => session.id === automation.selectedSessionId,
+  )
   const settings = settingsDraft ?? status?.settings ?? null
   const latestBeat = status
     ? Object.values(status.latestBeats).sort((a, b) => b.receivedAt - a.receivedAt)[0]
@@ -207,7 +253,8 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
   const showSpectrogram = Boolean(
     status?.audioConnected ||
     automation.liveFrames.length > 0 ||
-    automation.timeline.length > 0,
+    automation.timeline.length > 0 ||
+    automation.selectedSessionId,
   )
   const sliderGestures = detectSliderGestures(automation.timeline)
   const groupedSliderExamples = new Set(
@@ -234,12 +281,11 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
 
   async function saveSettings() {
     if (!settingsDraft) return
-    await automation.updateSettings(settingsDraft)
-    setSettingsDirty(false)
+    if (await automation.updateSettings(settingsDraft)) setSettingsDirty(false)
   }
 
   async function saveSessionName(id: string) {
-    if (!sessionNameDraft.trim()) return
+    if (!sessionNameDraft.trim() || automation.busy) return
     if (await automation.renameSession(id, sessionNameDraft)) {
       setEditingSessionId(null)
       setSessionNameDraft("")
@@ -283,7 +329,11 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
             MIDI y sincroniza los cambios con cada compás.
           </p>
         </div>
-        <div {...stylex.props(styles.modeGroup)}>
+        <div
+          {...stylex.props(styles.modeGroup)}
+          role="group"
+          aria-label="Modo de automatización"
+        >
           {(["manual", "assist", "auto"] as AutomationMode[]).map((mode) => (
             <button
               key={mode}
@@ -293,7 +343,8 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                 status?.mode === mode && styles.modeButtonActive,
                 mode === "auto" && status?.mode === mode && styles.modeButtonAuto,
               )}
-              disabled={automation.busy === "mode"}
+              disabled={controlsDisabled}
+              aria-pressed={status?.mode === mode}
               onClick={() => void automation.updateMode(mode)}
             >
               {mode === "manual" ? "Manual" : mode === "assist" ? "Asistido" : "Auto"}
@@ -301,6 +352,28 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
           ))}
         </div>
       </div>
+
+      {automation.statusLoading || automation.statusError ? (
+        <div
+          {...stylex.props(styles.statusNotice)}
+          role={automation.statusError ? "alert" : "status"}
+        >
+          <span>
+            {automation.statusError
+              ? `No se pudo actualizar Automation Studio. ${automation.statusError}`
+              : "Cargando Automation Studio…"}
+          </span>
+          {automation.statusError ? (
+            <ActionButton
+              variant="secondary"
+              size="small"
+              onPress={() => void automation.refreshStatus()}
+            >
+              Reintentar
+            </ActionButton>
+          ) : null}
+        </div>
+      ) : null}
 
       <div {...stylex.props(styles.statusGrid)}>
         <Surface
@@ -316,29 +389,43 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
           <select
             {...stylex.props(styles.select)}
             value={automation.selectedDeviceId}
+            aria-label="Entrada de audio del mixer"
             onChange={(event) => automation.setSelectedDeviceId(event.target.value)}
-            disabled={automation.audioRunning}
+            disabled={
+              automation.audioRunning || automation.audioBusy || Boolean(automation.busy)
+            }
           >
-            {automation.audioDevices.length ? (
-              automation.audioDevices.map((device, index) => (
-                <option key={device.deviceId || index} value={device.deviceId}>
+            <option value="">Entrada predeterminada</option>
+            {automation.selectedDeviceId &&
+            !automation.audioDevices.some(
+              (device) => device.deviceId === automation.selectedDeviceId,
+            ) ? (
+              <option value={automation.selectedDeviceId}>
+                Entrada guardada no disponible
+              </option>
+            ) : null}
+            {automation.audioDevices
+              .filter((device) => device.deviceId)
+              .map((device, index) => (
+                <option key={device.deviceId} value={device.deviceId}>
                   {device.label || `Entrada de audio ${index + 1}`}
                 </option>
-              ))
-            ) : (
-              <option value="">Entrada predeterminada</option>
-            )}
+              ))}
           </select>
           <ActionButton
             tone="cyan"
-            isDisabled={automation.busy === "audio"}
+            isDisabled={controlsDisabled || automation.audioBusy}
             onPress={() =>
               automation.audioRunning
                 ? automation.stopAudio()
                 : void automation.startAudio()
             }
           >
-            {automation.audioRunning ? "Detener audio" : "Activar audio"}
+            {automation.audioBusy
+              ? "Activando audio…"
+              : automation.audioRunning
+                ? "Detener audio"
+                : "Activar audio"}
           </ActionButton>
           <span {...stylex.props(styles.cardDetail)}>
             {status?.audioConnected
@@ -368,10 +455,10 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
           <ActionButton
             variant="secondary"
             tone="cyan"
-            isDisabled={automation.busy === "bridge"}
+            isDisabled={controlsDisabled}
             onPress={() => void automation.restartBridge()}
           >
-            Reiniciar listener
+            {automation.busy === "bridge" ? "Reiniciando…" : "Reiniciar listener"}
           </ActionButton>
           <span {...stylex.props(styles.cardDetail)}>
             {status?.bridge.message ?? "Buscando los CDJ en la red Ethernet"}
@@ -395,10 +482,10 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
           <ActionButton
             variant="secondary"
             tone="cyan"
-            isDisabled={automation.busy === "train"}
+            isDisabled={controlsDisabled || status?.recording || !status?.sessions.length}
             onPress={() => void automation.train()}
           >
-            Reentrenar ahora
+            {automation.busy === "train" ? "Entrenando…" : "Reentrenar ahora"}
           </ActionButton>
           <span {...stylex.props(styles.cardDetail)}>
             Se actualiza automáticamente al terminar cada sesión
@@ -436,10 +523,10 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
         {status?.recording ? (
           <ActionButton
             variant="danger"
-            isDisabled={automation.busy === "session"}
+            isDisabled={controlsDisabled}
             onPress={() => void automation.stopSession()}
           >
-            Finalizar y aprender
+            {automation.busy === "session" ? "Guardando sesión…" : "Finalizar y aprender"}
           </ActionButton>
         ) : (
           <div {...stylex.props(styles.trainingControls)}>
@@ -451,18 +538,20 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
               value={sessionName}
               onChange={(event) => setSessionName(event.target.value)}
               placeholder="Nombre (opcional)"
-              disabled={!sourceReady}
+              aria-label="Nombre de la nueva sesión (opcional)"
+              maxLength={80}
+              disabled={!sourceReady || controlsDisabled}
             />
             <ActionButton
               tone="cyan"
-              isDisabled={automation.busy === "session" || !sourceReady}
+              isDisabled={controlsDisabled || !sourceReady}
               onPress={() =>
                 void automation.startSession(
-                  sessionName || `Sesión ${new Date().toLocaleDateString()}`,
+                  sessionName.trim() || `Sesión ${new Date().toLocaleDateString()}`,
                 )
               }
             >
-              Empezar entrenamiento
+              {automation.busy === "session" ? "Iniciando…" : "Empezar entrenamiento"}
             </ActionButton>
           </div>
         )}
@@ -470,6 +559,26 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
 
       {showSpectrogram ? (
         <div {...stylex.props(styles.timelinePanel)}>
+          <div {...stylex.props(styles.timelineHeading)}>
+            <strong>
+              {automation.selectedSessionId
+                ? `Sesión: ${selectedSession?.name ?? "guardada"}`
+                : "Audio en vivo"}
+            </strong>
+            {automation.selectedSessionId ? (
+              <ActionButton
+                variant="secondary"
+                size="small"
+                isDisabled={Boolean(automation.busy)}
+                onPress={() => {
+                  setEditingSliderGestureId(null)
+                  automation.showLiveTimeline()
+                }}
+              >
+                Volver al directo
+              </ActionButton>
+            ) : null}
+          </div>
           <div {...stylex.props(styles.legend)}>
             <span>Espectrograma del mixer</span>
             <span {...stylex.props(styles.manualLegend)}>Notas editables</span>
@@ -478,10 +587,11 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
             <span>líneas blancas: beats/compases</span>
           </div>
           <SpectrogramTimeline
-            liveFrames={automation.liveFrames}
+            key={automation.selectedSessionId ?? "live"}
+            liveFrames={automation.selectedSessionId ? [] : automation.liveFrames}
             timeline={automation.timeline}
             editable={Boolean(automation.selectedSessionId)}
-            busy={automation.busy === "edit-examples"}
+            busy={controlsDisabled}
             onMoveExample={(id, t) =>
               automation.updateTrainingExamples(
                 [{ id, t }],
@@ -524,7 +634,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                       variant="danger"
                       size="small"
                       {...stylex.props(styles.curveButton)}
-                      isDisabled={automation.busy === "edit-examples"}
+                      isDisabled={controlsDisabled}
                       onPress={() =>
                         void removeSliderGesture(
                           gesture.controller,
@@ -554,7 +664,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                     variant="danger"
                     size="small"
                     {...stylex.props(styles.excludeButton)}
-                    isDisabled={automation.busy === `exclude-${event.example?.id}`}
+                    isDisabled={controlsDisabled}
                     onPress={() =>
                       event.example && void automation.excludeExample(event.example.id)
                     }
@@ -570,7 +680,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
       {editingSliderGesture ? (
         <SliderCurveEditor
           gesture={editingSliderGesture}
-          busy={automation.busy === "edit-examples"}
+          busy={controlsDisabled}
           onClose={() => setEditingSliderGestureId(null)}
           onSave={({ points, deletedIds }) =>
             automation.updateTrainingExamples(
@@ -616,8 +726,10 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
         >
           <div {...stylex.props(styles.cardHeading)}>
             <strong>Sesiones guardadas</strong>
-            <span {...stylex.props(styles.cardDetail)}>
-              {status?.sessions.length ?? 0} sesiones
+            <span {...stylex.props(styles.cardDetail)} role="status">
+              {automation.busy === "timeline"
+                ? "Cargando sesión…"
+                : `${status?.sessions.length ?? 0} sesiones`}
             </span>
           </div>
           <div {...stylex.props(styles.sessionList)}>
@@ -639,6 +751,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                         autoFocus
                         {...stylex.props(styles.input, styles.sessionNameInput)}
                         value={sessionNameDraft}
+                        disabled={controlsDisabled}
                         maxLength={80}
                         onChange={(event) => setSessionNameDraft(event.target.value)}
                         onKeyDown={(event) => {
@@ -651,10 +764,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                         variant="secondary"
                         size="small"
                         {...stylex.props(styles.sessionActionButton)}
-                        isDisabled={
-                          !sessionNameDraft.trim() ||
-                          automation.busy === `rename-${session.id}`
-                        }
+                        isDisabled={!sessionNameDraft.trim() || controlsDisabled}
                         onPress={() => void saveSessionName(session.id)}
                       >
                         Guardar
@@ -673,6 +783,8 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                       <button
                         type="button"
                         {...stylex.props(styles.sessionButton)}
+                        disabled={controlsDisabled}
+                        aria-pressed={isSelected}
                         onClick={() => void automation.loadSession(session.id)}
                       >
                         <span>{session.name}</span>
@@ -686,6 +798,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                           variant="ghost"
                           size="small"
                           {...stylex.props(styles.sessionActionButton)}
+                          isDisabled={controlsDisabled}
                           onPress={() => {
                             setEditingSessionId(session.id)
                             setSessionNameDraft(session.name)
@@ -697,7 +810,7 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
                           variant="danger"
                           size="small"
                           {...stylex.props(styles.sessionActionButton)}
-                          isDisabled={automation.busy === `delete-${session.id}`}
+                          isDisabled={controlsDisabled}
                           onPress={() => void removeSession(session.id, session.name)}
                         >
                           Eliminar
@@ -731,145 +844,155 @@ export function AutomationStudio({ sendAutomationCommand }: Props) {
             </span>
           </div>
           {settings ? (
-            <>
-              <SettingsGroup
-                title="Cuándo puede actuar"
-                description="Evita que la automatización dispare de más o con poca certeza."
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (!controlsDisabled) void saveSettings()
+              }}
+            >
+              <fieldset
+                disabled={controlsDisabled}
+                {...stylex.props(styles.settingsFieldset)}
               >
-                <NumberField
-                  label="Confianza mínima"
-                  unit="%"
-                  min={25}
-                  max={98}
-                  value={Math.round(settings.confidenceThreshold * 100)}
-                  help="Descarta la sugerencia si el modelo está menos seguro que esto."
-                  onChange={(value) => setSetting("confidenceThreshold", value / 100)}
-                />
-                <NumberField
-                  label="Intervalo mínimo"
-                  unit="ms"
-                  min={250}
-                  max={30000}
-                  value={settings.minActionIntervalMs}
-                  isDuration
-                  help="Tiempo que debe pasar entre dos acciones automáticas cualesquiera."
-                  onChange={(value) => setSetting("minActionIntervalMs", value)}
-                />
-                <NumberField
-                  label="Espera para repetir"
-                  unit="ms"
-                  min={500}
-                  max={120000}
-                  value={settings.repeatActionCooldownMs}
-                  isDuration
-                  help="Igual que el anterior, pero solo para repetir la misma nota o CC."
-                  onChange={(value) => setSetting("repeatActionCooldownMs", value)}
-                />
-              </SettingsGroup>
-
-              <SettingsGroup
-                title="Qué no debe tocar nunca"
-                description="Números MIDI de tu mapeo de luces, separados por comas."
-              >
-                <MidiListField
-                  label="Notas protegidas"
-                  kind="notas"
-                  values={settings.blockedNotes}
-                  help="La automatización nunca envía estas notas. Reserva aquí lo que quieras controlar solo a mano."
-                  onChange={(values) => setSetting("blockedNotes", values)}
-                />
-                <MidiListField
-                  label="CC protegidos"
-                  kind="CC"
-                  values={settings.blockedControllers}
-                  help="Controles continuos que la automatización nunca mueve, como el máster de intensidad."
-                  onChange={(values) => setSetting("blockedControllers", values)}
-                />
-              </SettingsGroup>
-
-              <SettingsGroup
-                title="Strobe"
-                description="Los strobes llevan su propio límite, aparte del resto de acciones."
-              >
-                <MidiListField
-                  label="Notas strobe"
-                  kind="notas"
-                  values={settings.strobeNotes}
-                  help="Notas que se tratan como strobe y quedan sujetas a la espera de abajo."
-                  onChange={(values) => setSetting("strobeNotes", values)}
-                />
-                <NumberField
-                  label="Espera entre strobes"
-                  unit="ms"
-                  min={1000}
-                  max={120000}
-                  value={settings.strobeCooldownMs}
-                  isDuration
-                  isDisabled={settings.strobeNotes.length === 0}
-                  help={
-                    settings.strobeNotes.length === 0
-                      ? "Sin efecto mientras no haya ninguna nota strobe declarada."
-                      : "Tiempo mínimo entre dos disparos de cualquier nota strobe."
-                  }
-                  onChange={(value) => setSetting("strobeCooldownMs", value)}
-                />
-              </SettingsGroup>
-
-              <SettingsGroup
-                title="Control manual y deck"
-                description="Quién manda cuando intervienes tú, y de qué deck se lee el audio."
-              >
-                <NumberField
-                  label="Pausa tras control manual"
-                  unit="ms"
-                  min={1000}
-                  max={60000}
-                  value={settings.manualOverrideMs}
-                  isDuration
-                  help="Al tocar un control a mano, la automatización se detiene este tiempo."
-                  onChange={(value) => setSetting("manualOverrideMs", value)}
-                />
-                <label {...stylex.props(styles.field)}>
-                  <span {...stylex.props(styles.fieldLabel)}>Deck preferido</span>
-                  <select
-                    {...stylex.props(styles.select)}
-                    value={settings.preferredDeck ?? ""}
-                    onChange={(event) =>
-                      setSetting(
-                        "preferredDeck",
-                        event.target.value ? Number(event.target.value) : null,
-                      )
-                    }
-                  >
-                    <option value="">Automático</option>
-                    {[1, 2, 3, 4, 5, 6].map((deck) => (
-                      <option key={deck} value={deck}>
-                        Deck {deck}
-                      </option>
-                    ))}
-                  </select>
-                  <span {...stylex.props(styles.fieldHelp)}>
-                    Automático sigue al deck que esté sonando. Fíjalo si siempre pinchas
-                    desde el mismo.
-                  </span>
-                </label>
-              </SettingsGroup>
-
-              <div {...stylex.props(styles.rulesFooter)}>
-                <span {...stylex.props(styles.dirtyHint)}>
-                  {settingsDirty
-                    ? "Tienes cambios sin guardar; se aplican al pulsar Guardar."
-                    : "Sin cambios pendientes."}
-                </span>
-                <ActionButton
-                  tone="cyan"
-                  isDisabled={!settingsDirty || automation.busy === "settings"}
-                  onPress={() => void saveSettings()}
+                <SettingsGroup
+                  title="Cuándo puede actuar"
+                  description="Evita que la automatización dispare de más o con poca certeza."
                 >
-                  Guardar reglas
-                </ActionButton>
-              </div>
-            </>
+                  <NumberField
+                    label="Confianza mínima"
+                    unit="%"
+                    min={25}
+                    max={98}
+                    value={Math.round(settings.confidenceThreshold * 100)}
+                    help="Descarta la sugerencia si el modelo está menos seguro que esto."
+                    onChange={(value) => setSetting("confidenceThreshold", value / 100)}
+                  />
+                  <NumberField
+                    label="Intervalo mínimo"
+                    unit="ms"
+                    min={250}
+                    max={30000}
+                    value={settings.minActionIntervalMs}
+                    isDuration
+                    help="Tiempo que debe pasar entre dos acciones automáticas cualesquiera."
+                    onChange={(value) => setSetting("minActionIntervalMs", value)}
+                  />
+                  <NumberField
+                    label="Espera para repetir"
+                    unit="ms"
+                    min={500}
+                    max={120000}
+                    value={settings.repeatActionCooldownMs}
+                    isDuration
+                    help="Igual que el anterior, pero solo para repetir la misma nota o CC."
+                    onChange={(value) => setSetting("repeatActionCooldownMs", value)}
+                  />
+                </SettingsGroup>
+
+                <SettingsGroup
+                  title="Qué no debe tocar nunca"
+                  description="Números MIDI de tu mapeo de luces, separados por comas."
+                >
+                  <MidiListField
+                    label="Notas protegidas"
+                    kind="notas"
+                    values={settings.blockedNotes}
+                    help="La automatización nunca envía estas notas. Reserva aquí lo que quieras controlar solo a mano."
+                    onChange={(values) => setSetting("blockedNotes", values)}
+                  />
+                  <MidiListField
+                    label="CC protegidos"
+                    kind="CC"
+                    values={settings.blockedControllers}
+                    help="Controles continuos que la automatización nunca mueve, como el máster de intensidad."
+                    onChange={(values) => setSetting("blockedControllers", values)}
+                  />
+                </SettingsGroup>
+
+                <SettingsGroup
+                  title="Strobe"
+                  description="Los strobes llevan su propio límite, aparte del resto de acciones."
+                >
+                  <MidiListField
+                    label="Notas strobe"
+                    kind="notas"
+                    values={settings.strobeNotes}
+                    help="Notas que se tratan como strobe y quedan sujetas a la espera de abajo."
+                    onChange={(values) => setSetting("strobeNotes", values)}
+                  />
+                  <NumberField
+                    label="Espera entre strobes"
+                    unit="ms"
+                    min={1000}
+                    max={120000}
+                    value={settings.strobeCooldownMs}
+                    isDuration
+                    isDisabled={settings.strobeNotes.length === 0}
+                    help={
+                      settings.strobeNotes.length === 0
+                        ? "Sin efecto mientras no haya ninguna nota strobe declarada."
+                        : "Tiempo mínimo entre dos disparos de cualquier nota strobe."
+                    }
+                    onChange={(value) => setSetting("strobeCooldownMs", value)}
+                  />
+                </SettingsGroup>
+
+                <SettingsGroup
+                  title="Control manual y deck"
+                  description="Quién manda cuando intervienes tú, y de qué deck se lee el audio."
+                >
+                  <NumberField
+                    label="Pausa tras control manual"
+                    unit="ms"
+                    min={1000}
+                    max={60000}
+                    value={settings.manualOverrideMs}
+                    isDuration
+                    help="Al tocar un control a mano, la automatización se detiene este tiempo."
+                    onChange={(value) => setSetting("manualOverrideMs", value)}
+                  />
+                  <label {...stylex.props(styles.field)}>
+                    <span {...stylex.props(styles.fieldLabel)}>Deck preferido</span>
+                    <select
+                      {...stylex.props(styles.select)}
+                      value={settings.preferredDeck ?? ""}
+                      onChange={(event) =>
+                        setSetting(
+                          "preferredDeck",
+                          event.target.value ? Number(event.target.value) : null,
+                        )
+                      }
+                    >
+                      <option value="">Automático</option>
+                      {[1, 2, 3, 4, 5, 6].map((deck) => (
+                        <option key={deck} value={deck}>
+                          Deck {deck}
+                        </option>
+                      ))}
+                    </select>
+                    <span {...stylex.props(styles.fieldHelp)}>
+                      Automático sigue al deck que esté sonando. Fíjalo si siempre pinchas
+                      desde el mismo.
+                    </span>
+                  </label>
+                </SettingsGroup>
+
+                <div {...stylex.props(styles.rulesFooter)}>
+                  <span {...stylex.props(styles.dirtyHint)}>
+                    {settingsDirty
+                      ? "Tienes cambios sin guardar; se aplican al pulsar Guardar."
+                      : "Sin cambios pendientes."}
+                  </span>
+                  <ActionButton
+                    tone="cyan"
+                    isDisabled={!settingsDirty || controlsDisabled}
+                    type="submit"
+                  >
+                    {automation.busy === "settings" ? "Guardando…" : "Guardar reglas"}
+                  </ActionButton>
+                </div>
+              </fieldset>
+            </form>
           ) : null}
         </Surface>
       </div>
@@ -892,6 +1015,30 @@ const styles = stylex.create({
     boxShadow: "0 22px 70px rgba(0, 0, 0, 0.34)",
     padding: "18px",
   },
+  statusNotice: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: "10px",
+    marginTop: "16px",
+    borderRadius: "12px",
+    backgroundColor: "rgba(245,158,11,0.1)",
+    color: "#fde68a",
+    padding: "12px",
+    fontSize: "0.82rem",
+  },
+  timelineHeading: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: "8px",
+    padding: "2px 4px 12px",
+    fontSize: "0.82rem",
+  },
+  settingsFieldset: { borderWidth: 0, padding: 0, margin: 0, minWidth: 0 },
+  fieldError: { color: "#fca5a5" },
   headingRow: {
     display: "flex",
     alignItems: "flex-start",
@@ -1140,7 +1287,10 @@ const styles = stylex.create({
   },
   sessionRow: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr) auto",
+      "@media (max-width: 600px)": "minmax(0, 1fr)",
+    },
     alignItems: "center",
     gap: "6px",
     borderRadius: "10px",
@@ -1162,6 +1312,8 @@ const styles = stylex.create({
     cursor: "pointer",
     padding: "7px 8px",
     textAlign: "left",
+    overflowWrap: "anywhere",
+    flexWrap: "wrap",
   },
   sessionActions: {
     display: "flex",

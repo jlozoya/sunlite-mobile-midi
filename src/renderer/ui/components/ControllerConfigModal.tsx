@@ -1,5 +1,6 @@
 import * as stylex from "@stylexjs/stylex"
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react"
+import { useMemo, useRef, useState, type FormEvent } from "react"
+import { Dialog, Modal, ModalOverlay } from "react-aria-components"
 import {
   getModelButtons,
   type ButtonCustomization,
@@ -16,7 +17,7 @@ export type ControllerConfigModalProps = {
   customization: ControllerCustomization
   midiChannel: number
   onClose: () => void
-  onSave: (customization: ControllerCustomization) => void
+  onSave: (customization: ControllerCustomization) => void | Promise<void>
 }
 
 export function ControllerConfigModal({
@@ -37,16 +38,18 @@ export function ControllerConfigModal({
   const [faderDraft, setFaderDraft] = useState<FaderCustomization | null>(
     target.kind === "fader" ? target.config : null,
   )
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const saveInProgress = useRef(false)
 
-  useEffect(() => {
-    setButtonDraft(target.kind === "button" ? target.config : null)
-    setFaderDraft(target.kind === "fader" ? target.config : null)
-  }, [target])
+  async function save() {
+    if (saveInProgress.current) return
 
-  function save() {
+    let nextCustomization: ControllerCustomization
+
     if (control.kind === "pad" && buttonDraft) {
       const current = customization.pads[String(control.note)] ?? buttonDraft
-      onSave({
+      nextCustomization = {
         ...customization,
         pads: {
           ...customization.pads,
@@ -56,13 +59,10 @@ export function ControllerConfigModal({
             control.note,
           ),
         },
-      })
-      return
-    }
-
-    if (control.kind === "scene" && buttonDraft) {
+      }
+    } else if (control.kind === "scene" && buttonDraft) {
       const current = customization.sceneButtons[String(control.note)] ?? buttonDraft
-      onSave({
+      nextCustomization = {
         ...customization,
         sceneButtons: {
           ...customization.sceneButtons,
@@ -72,13 +72,10 @@ export function ControllerConfigModal({
             control.note,
           ),
         },
-      })
-      return
-    }
-
-    if (control.kind === "fader" && faderDraft) {
+      }
+    } else if (control.kind === "fader" && faderDraft) {
       const current = customization.faders[String(control.controller)] ?? faderDraft
-      onSave({
+      nextCustomization = {
         ...customization,
         faders: {
           ...customization.faders,
@@ -90,90 +87,141 @@ export function ControllerConfigModal({
             maxValue: 127,
           },
         },
-      })
+      }
+    } else {
+      return
+    }
+
+    saveInProgress.current = true
+    setIsSaving(true)
+    setSaveError(null)
+
+    try {
+      await onSave(nextCustomization)
+      onClose()
+    } catch (error) {
+      setSaveError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Comprueba la conexión e inténtalo de nuevo.",
+      )
+    } finally {
+      saveInProgress.current = false
+      setIsSaving(false)
     }
   }
 
-  function handleSaveOnEnter(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key !== "Enter") return
-
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    event.stopPropagation()
-    save()
+    void save()
   }
 
   return (
-    <div {...stylex.props(styles.modalBackdrop)} onMouseDown={onClose}>
-      <Surface
-        variant="solid"
-        {...stylex.props(styles.modalPanel)}
-        onMouseDown={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label="MIDI control configuration"
-      >
-        <div {...stylex.props(styles.modalHeader)}>
-          <SectionHeader
-            title="MIDI control configuration"
-            description={`Right-click editing · Global MIDI channel ${midiChannel}`}
-          />
-          <ActionButton
-            variant="ghost"
-            size="small"
-            aria-label="Close configuration"
-            onPress={onClose}
-          >
-            ×
-          </ActionButton>
-        </div>
+    <ModalOverlay
+      isOpen
+      isDismissable={!isSaving}
+      isKeyboardDismissDisabled={isSaving}
+      onOpenChange={(isOpen) => {
+        if (!isOpen && !saveInProgress.current) onClose()
+      }}
+      {...stylex.props(styles.modalBackdrop)}
+    >
+      <Modal {...stylex.props(styles.modalPanel)}>
+        <Dialog
+          aria-label="Configuración del control MIDI"
+          {...stylex.props(styles.dialog)}
+        >
+          <Surface variant="solid">
+            <form onSubmit={handleSubmit} aria-busy={isSaving}>
+              <div {...stylex.props(styles.modalHeader)}>
+                <SectionHeader
+                  title="Configuración del control MIDI"
+                  description={`${model.name} · Canal MIDI ${midiChannel} · ${
+                    control.kind === "fader"
+                      ? `CC ${control.controller}`
+                      : `Nota ${control.note}`
+                  }`}
+                />
+                <ActionButton
+                  variant="ghost"
+                  size="small"
+                  aria-label="Cerrar configuración"
+                  isDisabled={isSaving}
+                  onPress={onClose}
+                >
+                  ×
+                </ActionButton>
+              </div>
 
-        {target.kind === "button" && buttonDraft ? (
-          <div {...stylex.props(styles.modalGrid)}>
-            <TextInputField
-              label="Button text"
-              value={buttonDraft.label}
-              onChange={(label) => setButtonDraft({ ...buttonDraft, label })}
-              inputProps={{ onKeyDown: handleSaveOnEnter }}
-            />
+              {target.kind === "button" && buttonDraft ? (
+                <div {...stylex.props(styles.modalGrid)}>
+                  <TextInputField
+                    label="Texto del botón"
+                    value={buttonDraft.label}
+                    onChange={(label) => setButtonDraft({ ...buttonDraft, label })}
+                    isReadOnly={isSaving}
+                    inputProps={{ autoFocus: true }}
+                  />
 
-            <Notice tone="info" layout="stack" {...stylex.props(styles.helpBox)}>
-              <strong>Standard {model.name} mapping</strong>
-              <span>
-                This app uses the fixed {model.name} note for this button. Color and
-                lit/off state are controlled only by MIDI OUT feedback from your lighting
-                software. Configure Sunlite or FreeStyler to send feedback to{" "}
-                <strong>Sunlite Mobile Out</strong>.
-              </span>
-            </Notice>
-          </div>
-        ) : null}
+                  <Notice tone="info" layout="stack" {...stylex.props(styles.helpBox)}>
+                    <strong>Asignación estándar de {model.name}</strong>
+                    <span>
+                      Este botón conserva su nota MIDI. Su color y estado encendido o
+                      apagado dependen de la respuesta MIDI de tu software de iluminación.
+                      Configura Sunlite o FreeStyler para enviar esa respuesta a{" "}
+                      <strong>Sunlite Mobile Out</strong>.
+                    </span>
+                  </Notice>
+                </div>
+              ) : null}
 
-        {target.kind === "fader" && faderDraft ? (
-          <div {...stylex.props(styles.modalGrid)}>
-            <TextInputField
-              label="Fader text"
-              value={faderDraft.label}
-              onChange={(label) => setFaderDraft({ ...faderDraft, label })}
-              inputProps={{ onKeyDown: handleSaveOnEnter }}
-            />
-            <Notice tone="info" layout="stack" {...stylex.props(styles.helpBox)}>
-              <strong>Standard {model.name} mapping</strong>
-              <span>
-                This fader keeps its fixed {model.name} CC number. Only the displayed text
-                is editable here.
-              </span>
-            </Notice>
-          </div>
-        ) : null}
+              {target.kind === "fader" && faderDraft ? (
+                <div {...stylex.props(styles.modalGrid)}>
+                  <TextInputField
+                    label="Texto del fader"
+                    value={faderDraft.label}
+                    onChange={(label) => setFaderDraft({ ...faderDraft, label })}
+                    isReadOnly={isSaving}
+                    inputProps={{ autoFocus: true }}
+                  />
+                  <Notice tone="info" layout="stack" {...stylex.props(styles.helpBox)}>
+                    <strong>Asignación estándar de {model.name}</strong>
+                    <span>
+                      Este fader conserva su número CC. Aquí puedes cambiar el texto que
+                      aparece en la consola.
+                    </span>
+                  </Notice>
+                </div>
+              ) : null}
 
-        <div {...stylex.props(styles.modalActions)}>
-          <ActionButton variant="secondary" onPress={onClose}>
-            Cancel
-          </ActionButton>
-          <ActionButton onPress={save}>Save configuration</ActionButton>
-        </div>
-      </Surface>
-    </div>
+              {saveError ? (
+                <Notice
+                  tone="danger"
+                  layout="stack"
+                  role="alert"
+                  {...stylex.props(styles.saveError)}
+                >
+                  <strong>No se pudo guardar la configuración.</strong>
+                  <span>{saveError}</span>
+                  <span>
+                    Tus cambios siguen en el formulario para volver a intentarlo.
+                  </span>
+                </Notice>
+              ) : null}
+
+              <div {...stylex.props(styles.modalActions)}>
+                <ActionButton variant="secondary" isDisabled={isSaving} onPress={onClose}>
+                  Cancelar
+                </ActionButton>
+                <ActionButton type="submit" isPending={isSaving}>
+                  {isSaving ? "Guardando…" : "Guardar configuración"}
+                </ActionButton>
+              </div>
+            </form>
+          </Surface>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
   )
 }
 
@@ -206,7 +254,7 @@ function getEditableControlTarget(
     return {
       kind: "button" as const,
       config: customization.sceneButtons[String(control.note)] ?? {
-        label: scene?.label ?? `Scene ${control.note}`,
+        label: scene?.label ?? `Escena ${control.note}`,
         offColor: "blue" as const,
         onColor: "white" as const,
         messageType: "note" as const,
@@ -260,11 +308,16 @@ const styles = stylex.create({
     placeItems: "center",
     backgroundColor: "rgba(2, 6, 23, 0.74)",
     padding: "20px",
+    boxSizing: "border-box",
+    overflowY: "auto",
   },
   modalPanel: {
-    width: "min(100%, 720px)",
+    width: "min(100%, 560px)",
     maxHeight: "min(92vh, 760px)",
     overflow: "auto",
+  },
+  dialog: {
+    outline: "none",
   },
   modalHeader: {
     display: "flex",
@@ -275,17 +328,18 @@ const styles = stylex.create({
   },
   modalGrid: {
     display: "grid",
-    gridTemplateColumns: {
-      default: "1fr",
-      "@media (min-width: 720px)": "repeat(2, minmax(0, 1fr))",
-    },
+    gridTemplateColumns: "minmax(0, 1fr)",
     gap: "12px",
   },
   modalActions: {
     display: "flex",
     justifyContent: "flex-end",
+    flexWrap: "wrap",
     gap: "10px",
     marginTop: "18px",
+  },
+  saveError: {
+    marginTop: "12px",
   },
   helpBox: {
     gridColumn: "1 / -1",

@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent } from "react"
 import {
   DEFAULT_CONTROLLER_MODEL,
   getControllerModel,
@@ -41,7 +41,12 @@ const DESKTOP_TABS: Array<{
 ]
 
 export function App() {
-  const { status, error: statusError, refreshStatus } = useServerStatus()
+  const {
+    status,
+    error: statusError,
+    isLoading: statusLoading,
+    refreshStatus,
+  } = useServerStatus()
   const {
     connectionState,
     lastCommand,
@@ -58,6 +63,50 @@ export function App() {
   const [activeDesktopTab, setActiveDesktopTab] = useState<DesktopTab>("controller")
   const initialTabSelected = useRef(false)
   const [softwareBusy, setSoftwareBusy] = useState(false)
+  const [copyBusy, setCopyBusy] = useState(false)
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const urlRef = useRef<HTMLInputElement | null>(null)
+
+  function selectTab(tab: DesktopTab) {
+    initialTabSelected.current = true
+    setActiveDesktopTab(tab)
+  }
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const nextIndex =
+      event.key === "ArrowRight"
+        ? (index + 1) % DESKTOP_TABS.length
+        : event.key === "ArrowLeft"
+          ? (index + DESKTOP_TABS.length - 1) % DESKTOP_TABS.length
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? DESKTOP_TABS.length - 1
+              : null
+    if (nextIndex === null) return
+    event.preventDefault()
+    selectTab(DESKTOP_TABS[nextIndex].id)
+    tabRefs.current[nextIndex]?.focus()
+  }
+
+  async function copyControllerUrl() {
+    if (!status?.preferredLanUrl || copyBusy) return
+    setCopyBusy(true)
+    try {
+      await navigator.clipboard.writeText(status.preferredLanUrl)
+      setSetupMessage(
+        "Enlace copiado. Ábrelo en un dispositivo conectado a la misma red Wi-Fi.",
+      )
+    } catch {
+      urlRef.current?.focus()
+      urlRef.current?.select()
+      setSetupMessage(
+        "No se pudo copiar automáticamente. El enlace está seleccionado para copiarlo manualmente.",
+      )
+    } finally {
+      setCopyBusy(false)
+    }
+  }
   const software = status?.lightingSoftware ?? "sunlite"
   const softwareLabel = LIGHTING_SOFTWARE_LABELS[software]
 
@@ -124,8 +173,6 @@ export function App() {
   }
 
   async function saveControllerCustomization(nextCustomization: ControllerCustomization) {
-    setControllerCustomization(nextCustomization)
-
     const response = await fetch("/api/controller-config", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -137,7 +184,7 @@ export function App() {
         message?: string
       } | null
       throw new Error(
-        payload?.message ?? `Failed to save controller config: ${response.status}`,
+        payload?.message ?? `No se pudo guardar la configuración: ${response.status}`,
       )
     }
 
@@ -147,10 +194,10 @@ export function App() {
 
   const isOnline = connectionState === "online"
   const statusLabel = isOnline
-    ? "Online"
+    ? "Conectado"
     : connectionState === "connecting"
-      ? "Connecting"
-      : "Offline"
+      ? "Conectando…"
+      : "Sin conexión"
   const isControllerReady = Boolean(status?.loopMidiInstalled && status?.midiReady)
   const isMobileView = useIsMobileView()
   const controllerModel = getControllerModel(
@@ -168,31 +215,75 @@ export function App() {
       <header {...stylex.props(styles.header)}>
         <div {...stylex.props(styles.headerCopy)}>
           <p {...stylex.props(styles.eyebrow)}>{softwareLabel}</p>
-          <h1 {...stylex.props(styles.title)}>Mobile MIDI Controller</h1>
+          <h1 {...stylex.props(styles.title)}>Controlador MIDI</h1>
           <p {...stylex.props(styles.subtitle)}>
-            {serverMidiLabel ?? "Waiting for MIDI server"}
+            {serverMidiLabel ?? "Esperando conexión con el servidor MIDI"}
           </p>
         </div>
 
-        <StatusBadge tone={isOnline ? "success" : "danger"} dot>
+        <StatusBadge
+          tone={
+            isOnline ? "success" : connectionState === "connecting" ? "warning" : "danger"
+          }
+          dot
+          role="status"
+        >
           {statusLabel}
         </StatusBadge>
       </header>
+
+      {!isOnline || statusError ? (
+        <Notice
+          tone={statusError ? "danger" : "warning"}
+          {...stylex.props(styles.connectionNotice)}
+          role="status"
+        >
+          <div {...stylex.props(styles.setupStepCopy)}>
+            <strong>
+              {!isOnline
+                ? "Reconectando con el servidor"
+                : "No se pudo actualizar el estado"}
+            </strong>
+            <span>
+              {!isOnline
+                ? "Los controles MIDI estarán disponibles cuando se restablezca la conexión. Comprueba que la aplicación siga abierta en la computadora."
+                : statusError}
+            </span>
+          </div>
+          <ActionButton
+            variant="secondary"
+            isDisabled={statusLoading}
+            onPress={() => void refreshStatus()}
+          >
+            {statusLoading ? "Comprobando…" : "Comprobar conexión"}
+          </ActionButton>
+        </Notice>
+      ) : null}
 
       {!isMobileView ? <AppUpdates /> : null}
 
       {!isMobileView ? (
         <nav {...stylex.props(styles.tabs)} aria-label="Secciones de la aplicación">
-          <div {...stylex.props(styles.tabList)} role="tablist">
-            {DESKTOP_TABS.map((tab) => {
+          <div
+            {...stylex.props(styles.tabList)}
+            role="tablist"
+            aria-label="Secciones de la aplicación"
+          >
+            {DESKTOP_TABS.map((tab, index) => {
               const isActive = activeDesktopTab === tab.id
-              const needsAttention = tab.id === "connection" && !isControllerReady
+              const needsAttention =
+                tab.id === "connection" && Boolean(status) && !isControllerReady
 
               return (
                 <button
                   key={tab.id}
                   id={`desktop-tab-${tab.id}`}
                   type="button"
+                  ref={(element) => {
+                    tabRefs.current[index] = element
+                  }}
+                  tabIndex={isActive ? 0 : -1}
+                  onKeyDown={(event) => handleTabKeyDown(event, index)}
                   role="tab"
                   aria-selected={isActive}
                   aria-controls={`desktop-panel-${tab.id}`}
@@ -201,7 +292,7 @@ export function App() {
                     isActive && styles.tabActive,
                     needsAttention && styles.tabAttention,
                   )}
-                  onClick={() => setActiveDesktopTab(tab.id)}
+                  onClick={() => selectTab(tab.id)}
                 >
                   <span {...stylex.props(styles.tabLabel)}>{tab.label}</span>
                   <span {...stylex.props(styles.tabDescription)}>{tab.description}</span>
@@ -218,7 +309,13 @@ export function App() {
                   : styles.tabConnectionDotWarning,
               )}
             />
-            {isControllerReady ? "MIDI listo" : "Configuración pendiente"}
+            {statusError
+              ? "Estado sin actualizar"
+              : !status
+                ? "Comprobando MIDI…"
+                : isControllerReady
+                  ? "MIDI listo"
+                  : "Configuración pendiente"}
           </div>
         </nav>
       ) : null}
@@ -234,8 +331,8 @@ export function App() {
           <section {...stylex.props(styles.heroGrid)}>
             <Surface {...stylex.props(styles.qrPanel)}>
               <SectionHeader
-                title="Open on phone"
-                description="Scan this QR from a device connected to the same Wi‑Fi network."
+                title="Conecta tu teléfono"
+                description="Escanea el código QR desde un dispositivo conectado a la misma red Wi-Fi."
               />
 
               {status?.qrDataUrl ? (
@@ -243,30 +340,47 @@ export function App() {
                   <img
                     {...stylex.props(styles.qrImage)}
                     src={status.qrDataUrl}
-                    alt="Mobile controller QR code"
+                    alt="Código QR para abrir el controlador en tu teléfono"
                   />
                 </div>
               ) : (
-                <div {...stylex.props(styles.qrPlaceholder)}>Loading QR</div>
+                <div {...stylex.props(styles.qrPlaceholder)}>
+                  {statusError ? "Código QR no disponible" : "Preparando código QR…"}
+                </div>
               )}
 
-              <div {...stylex.props(styles.urlBox)}>
-                {status?.preferredLanUrl ?? "Detecting LAN URL"}
+              <div {...stylex.props(styles.shareLink)}>
+                <label htmlFor="controller-url" {...stylex.props(styles.shareLabel)}>
+                  Enlace del controlador
+                </label>
+                <input
+                  id="controller-url"
+                  ref={urlRef}
+                  {...stylex.props(styles.urlBox)}
+                  readOnly
+                  value={status?.preferredLanUrl ?? ""}
+                  placeholder="Detectando dirección de red…"
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+                <ActionButton
+                  variant="secondary"
+                  stretch
+                  isDisabled={!status?.preferredLanUrl || copyBusy}
+                  onPress={() => void copyControllerUrl()}
+                >
+                  {copyBusy ? "Copiando…" : "Copiar enlace"}
+                </ActionButton>
               </div>
 
               {status?.networkUrlCandidates && status.networkUrlCandidates.length > 1 ? (
                 <div {...stylex.props(styles.networkList)}>
-                  <strong>Other detected URLs</strong>
+                  <strong>Otras direcciones de red</strong>
                   {status.networkUrlCandidates.slice(1).map((candidate) => (
                     <span key={`${candidate.interfaceName}-${candidate.address}`}>
                       {candidate.url} · {candidate.interfaceName} · {candidate.note}
                     </span>
                   ))}
                 </div>
-              ) : null}
-
-              {statusError ? (
-                <p {...stylex.props(styles.errorText)}>{statusError}</p>
               ) : null}
             </Surface>
 
@@ -429,17 +543,17 @@ export function App() {
 
               {status && (!status.midiReady || !status.feedbackReady) ? (
                 <div {...stylex.props(styles.portList)}>
-                  <strong>Available MIDI outputs</strong>
+                  <strong>Salidas MIDI disponibles</strong>
                   <span>
                     {status.availableMidiOutputs.length
                       ? status.availableMidiOutputs.join(", ")
-                      : "No MIDI outputs detected yet."}
+                      : "Todavía no se detectan salidas MIDI."}
                   </span>
-                  <strong>Available MIDI inputs</strong>
+                  <strong>Entradas MIDI disponibles</strong>
                   <span>
                     {status.availableMidiInputs.length
                       ? status.availableMidiInputs.join(", ")
-                      : "No MIDI inputs detected yet."}
+                      : "Todavía no se detectan entradas MIDI."}
                   </span>
                 </div>
               ) : null}
@@ -474,6 +588,7 @@ export function App() {
       {isMobileView ? (
         isControllerReady ? (
           <MidiController
+            isConnected={isOnline}
             model={controllerModel}
             padStates={padStates}
             ccValues={ccValues}
@@ -489,26 +604,22 @@ export function App() {
         ) : (
           <Surface {...stylex.props(styles.controlsLockedPanel)}>
             <SectionHeader
-              title="Controlador no disponible"
+              title={
+                !status && !statusError
+                  ? "Preparando el controlador"
+                  : "Controlador no disponible"
+              }
               description={
-                isMobileView ? (
+                !status ? (
+                  "Comprobando la conexión MIDI con la computadora…"
+                ) : (
                   <>
                     Termina la conexión con {softwareLabel} desde la computadora. El
                     controlador aparecerá aquí en cuanto el puerto MIDI esté listo.
                   </>
-                ) : (
-                  <>
-                    La conexión MIDI todavía no está lista. La aplicación puede preparar
-                    los puertos automáticamente desde la pestaña Conexión.
-                  </>
                 )
               }
             />
-            {!isMobileView ? (
-              <ActionButton onPress={() => setActiveDesktopTab("connection")}>
-                Ir a Conexión
-              </ActionButton>
-            ) : null}
           </Surface>
         )
       ) : (
@@ -521,6 +632,7 @@ export function App() {
         >
           {isControllerReady ? (
             <MidiController
+              isConnected={isOnline}
               model={controllerModel}
               padStates={padStates}
               ccValues={ccValues}
@@ -536,10 +648,23 @@ export function App() {
           ) : (
             <Surface {...stylex.props(styles.controlsLockedPanel)}>
               <SectionHeader
-                title="Controlador no disponible"
-                description="La conexión MIDI todavía no está lista. La aplicación puede preparar los puertos automáticamente desde la pestaña Conexión."
+                title={
+                  !status && !statusError
+                    ? "Preparando el controlador"
+                    : "Controlador no disponible"
+                }
+                description={
+                  !status
+                    ? (statusError ?? "Comprobando el puente MIDI y los puertos locales…")
+                    : "La conexión MIDI todavía no está lista. La aplicación puede preparar los puertos automáticamente desde la pestaña Conexión."
+                }
               />
-              <ActionButton onPress={() => setActiveDesktopTab("connection")}>
+              <ActionButton
+                onPress={() => {
+                  selectTab("connection")
+                  tabRefs.current[2]?.focus()
+                }}
+              >
                 Ir a Conexión
               </ActionButton>
             </Surface>
@@ -579,10 +704,7 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: "16px",
-    flexWrap: {
-      default: "nowrap",
-      "@media (max-width: 760px)": "wrap",
-    },
+    flexWrap: "nowrap",
     borderBottomWidth: "1px",
     borderBottomStyle: "solid",
     borderBottomColor: "rgba(255, 255, 255, 0.08)",
@@ -604,10 +726,14 @@ const styles = stylex.create({
   },
   title: {
     margin: 0,
-    fontSize: "clamp(1.9rem, 4vw, 3rem)",
+    fontSize: {
+      default: "clamp(1.9rem, 4vw, 3rem)",
+      "@media (max-width: 760px)": "1.3rem",
+    },
     lineHeight: 1.02,
   },
   subtitle: {
+    overflowWrap: "anywhere",
     margin: "8px 0 0",
     color: "#93c5fd",
     fontSize: "0.9rem",
@@ -628,7 +754,7 @@ const styles = stylex.create({
   },
   tabList: {
     display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(150px, 1fr))",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
     gap: "6px",
     flex: 1,
   },
@@ -646,6 +772,8 @@ const styles = stylex.create({
     cursor: "pointer",
     padding: "11px 14px",
     textAlign: "left",
+    outline: { default: "none", ":focus-visible": "2px solid #a78bfa" },
+    outlineOffset: "2px",
     transition: "background-color 150ms ease, border-color 150ms ease, color 150ms ease",
   },
   tabActive: {
@@ -666,7 +794,7 @@ const styles = stylex.create({
     lineHeight: 1.3,
   },
   tabConnectionSummary: {
-    display: "flex",
+    display: { default: "flex", "@media (max-width: 1050px)": "none" },
     alignItems: "center",
     gap: "8px",
     flexShrink: 0,
@@ -697,7 +825,7 @@ const styles = stylex.create({
     display: "grid",
     gridTemplateColumns: {
       default: "1fr",
-      "@media (min-width: 900px)": "360px 1fr",
+      "@media (min-width: 1100px)": "340px minmax(0, 1fr)",
     },
     gap: "16px",
   },
@@ -706,9 +834,11 @@ const styles = stylex.create({
     marginTop: "16px",
     display: "grid",
     justifyItems: "center",
+    alignSelf: "start",
   },
   qrWrap: {
-    width: "min(100%, 320px)",
+    width: "min(100%, 260px)",
+    boxSizing: "border-box",
     borderRadius: "22px",
     backgroundColor: "#ffffff",
     padding: "12px",
@@ -728,9 +858,26 @@ const styles = stylex.create({
     color: "#94a3b8",
     fontWeight: 800,
   },
+  connectionNotice: {
+    marginTop: "12px",
+    flexWrap: "wrap",
+  },
+  shareLink: {
+    display: "grid",
+    gap: "10px",
+    width: "100%",
+    marginTop: "16px",
+  },
+  shareLabel: {
+    fontSize: "0.78rem",
+    fontWeight: 800,
+    color: "#cbd5e1",
+  },
   urlBox: {
     width: "100%",
-    marginTop: "14px",
+    boxSizing: "border-box",
+    border: "1px solid rgba(139, 92, 246, 0.3)",
+    outline: { default: "none", ":focus-visible": "2px solid #a78bfa" },
     borderRadius: "14px",
     backgroundColor: "rgba(8, 10, 18, 0.74)",
     padding: "12px",
@@ -747,6 +894,7 @@ const styles = stylex.create({
     overflowWrap: "anywhere",
   },
   networkList: {
+    boxSizing: "border-box",
     display: "grid",
     gap: "6px",
     width: "100%",

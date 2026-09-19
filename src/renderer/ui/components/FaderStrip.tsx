@@ -12,6 +12,7 @@ export type FaderStripProps = {
   feedbackValue: number | undefined
   sendCommand: (command: MidiCommand) => void
   isMobileView: boolean
+  isDisabled?: boolean
   onEdit: () => void
 }
 
@@ -21,6 +22,7 @@ export function FaderStrip({
   feedbackValue,
   sendCommand,
   isMobileView,
+  isDisabled = false,
   onEdit,
 }: FaderStripProps) {
   const resolvedConfig = config ?? {
@@ -32,6 +34,9 @@ export function FaderStrip({
   }
   const standardController = fader.controller
   const [value, setValue] = useState(resolvedConfig.defaultValue)
+  const valueRef = useRef(value)
+  const lastSentValueRef = useRef<number | null>(null)
+  const activePointerRef = useRef<number | null>(null)
   const trackRef = useRef<HTMLDivElement | null>(null)
 
   const minValue = resolvedConfig.minValue
@@ -40,8 +45,12 @@ export function FaderStrip({
   const percent = Math.max(0, Math.min(1, (value - minValue) / valueRange))
 
   const updateValue = (nextValue: number) => {
+    if (isDisabled || !Number.isFinite(nextValue)) return
     const midiValue = Math.max(minValue, Math.min(maxValue, Math.round(nextValue)))
+    valueRef.current = midiValue
     setValue(midiValue)
+    if (lastSentValueRef.current === midiValue) return
+    lastSentValueRef.current = midiValue
     sendCommand({ type: "cc", controller: standardController, value: midiValue })
   }
 
@@ -50,23 +59,46 @@ export function FaderStrip({
     if (!track) return
 
     const rect = track.getBoundingClientRect()
+    if (rect.height <= 0) return
     const nextPercent = Math.max(0, Math.min(1, 1 - (clientY - rect.top) / rect.height))
     updateValue(minValue + nextPercent * valueRange)
   }
 
   useEffect(() => {
-    setValue(resolvedConfig.defaultValue)
-  }, [resolvedConfig.defaultValue, standardController])
+    const nextValue = Math.max(minValue, Math.min(maxValue, resolvedConfig.defaultValue))
+    valueRef.current = nextValue
+    lastSentValueRef.current = null
+    setValue(nextValue)
+  }, [resolvedConfig.defaultValue, standardController, minValue, maxValue])
 
   useEffect(() => {
-    if (typeof feedbackValue === "number") {
-      setValue(Math.max(minValue, Math.min(maxValue, feedbackValue)))
+    if (
+      typeof feedbackValue === "number" &&
+      Number.isFinite(feedbackValue) &&
+      activePointerRef.current === null
+    ) {
+      const nextValue = Math.max(minValue, Math.min(maxValue, Math.round(feedbackValue)))
+      valueRef.current = nextValue
+      lastSentValueRef.current = null
+      setValue(nextValue)
     }
   }, [feedbackValue, maxValue, minValue])
 
+  function releasePointer() {
+    const pointerId = activePointerRef.current
+    activePointerRef.current = null
+    if (pointerId !== null && trackRef.current?.hasPointerCapture(pointerId)) {
+      trackRef.current.releasePointerCapture(pointerId)
+    }
+  }
+
+  useEffect(() => {
+    if (isDisabled) releasePointer()
+  }, [isDisabled])
+
   return (
     <div
-      {...stylex.props(styles.faderStrip)}
+      {...stylex.props(styles.faderStrip, isDisabled && styles.faderStripDisabled)}
       onContextMenu={(event) => {
         if (isMobileView) return
         event.preventDefault()
@@ -78,49 +110,56 @@ export function FaderStrip({
           {...stylex.props(styles.verticalSliderTrack)}
           ref={trackRef}
           role="slider"
-          tabIndex={0}
+          tabIndex={isDisabled ? -1 : 0}
+          aria-disabled={isDisabled || undefined}
           aria-label={resolvedConfig.label}
           aria-orientation="vertical"
           aria-valuemin={minValue}
           aria-valuemax={maxValue}
           aria-valuenow={value}
+          aria-valuetext={`${value} de ${maxValue} · ${Math.round(percent * 100)}%`}
+          onBlur={releasePointer}
+          onLostPointerCapture={releasePointer}
           onPointerDown={(event) => {
+            if (isDisabled || event.button !== 0 || activePointerRef.current !== null)
+              return
             event.preventDefault()
+            event.currentTarget.focus({ preventScroll: true })
+            activePointerRef.current = event.pointerId
             event.currentTarget.setPointerCapture(event.pointerId)
             updateValueFromPointer(event.clientY)
           }}
           onPointerMove={(event) => {
-            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+            if (isDisabled || activePointerRef.current !== event.pointerId) return
             event.preventDefault()
             updateValueFromPointer(event.clientY)
           }}
           onPointerUp={(event) => {
-            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-              event.currentTarget.releasePointerCapture(event.pointerId)
-            }
+            if (activePointerRef.current !== event.pointerId) return
+            updateValueFromPointer(event.clientY)
+            releasePointer()
           }}
           onPointerCancel={(event) => {
-            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-              event.currentTarget.releasePointerCapture(event.pointerId)
-            }
+            if (activePointerRef.current === event.pointerId) releasePointer()
           }}
           onKeyDown={(event) => {
+            if (isDisabled) return
             const step = event.shiftKey ? 10 : 1
             if (event.key === "ArrowUp" || event.key === "ArrowRight") {
               event.preventDefault()
-              updateValue(value + step)
+              updateValue(valueRef.current + step)
             }
             if (event.key === "ArrowDown" || event.key === "ArrowLeft") {
               event.preventDefault()
-              updateValue(value - step)
+              updateValue(valueRef.current - step)
             }
             if (event.key === "PageUp") {
               event.preventDefault()
-              updateValue(value + 10)
+              updateValue(valueRef.current + 10)
             }
             if (event.key === "PageDown") {
               event.preventDefault()
-              updateValue(value - 10)
+              updateValue(valueRef.current - 10)
             }
             if (event.key === "Home") {
               event.preventDefault()
@@ -146,7 +185,9 @@ export function FaderStrip({
         </div>
       </div>
       <span {...stylex.props(styles.faderValue)}>{value}</span>
-      <strong {...stylex.props(styles.faderName)}>{resolvedConfig.label}</strong>
+      <strong {...stylex.props(styles.faderName)} title={resolvedConfig.label}>
+        {resolvedConfig.label}
+      </strong>
       <small {...stylex.props(styles.faderCc)}>CC {standardController}</small>
     </div>
   )
@@ -180,7 +221,10 @@ const styles = stylex.create({
       "@media (max-width: 760px)": "9px 1px 8px",
     },
     cursor: "context-menu",
-    touchAction: "none",
+    touchAction: "pan-y",
+  },
+  faderStripDisabled: {
+    opacity: 0.5,
   },
   faderSliderArea: {
     position: "relative",
@@ -198,7 +242,7 @@ const styles = stylex.create({
       default: "10px",
       "@media (max-width: 760px)": "8px",
     },
-    touchAction: "none",
+    touchAction: "pan-y",
   },
   verticalSliderTrack: {
     position: "relative",
@@ -214,7 +258,8 @@ const styles = stylex.create({
     backgroundColor: "transparent",
     touchAction: "none",
     overflow: "visible",
-    outline: "none",
+    outline: { default: "none", ":focus-visible": "2px solid #c4b5fd" },
+    outlineOffset: "2px",
   },
   verticalSliderRail: {
     position: "absolute",
@@ -262,7 +307,7 @@ const styles = stylex.create({
     color: "#ddd6fe",
     fontSize: {
       default: "0.72rem",
-      "@media (max-width: 760px)": "0.58rem",
+      "@media (max-width: 760px)": "0.68rem",
     },
     fontWeight: 900,
     lineHeight: 1,
@@ -271,7 +316,7 @@ const styles = stylex.create({
     color: "#e5e7eb",
     fontSize: {
       default: "0.72rem",
-      "@media (max-width: 760px)": "0.5rem",
+      "@media (max-width: 760px)": "0.65rem",
     },
     textAlign: "center",
     lineHeight: 1.05,
@@ -284,7 +329,7 @@ const styles = stylex.create({
     color: "#94a3b8",
     fontSize: {
       default: "0.62rem",
-      "@media (max-width: 760px)": "0.48rem",
+      "@media (max-width: 760px)": "0.58rem",
     },
     lineHeight: 1,
   },

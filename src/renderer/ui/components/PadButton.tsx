@@ -24,6 +24,7 @@ export type PadButtonProps = {
   feedbackColor: MidiLedColor | null
   feedbackBehavior: MidiLedFeedbackBehavior
   isMobileView: boolean
+  isDisabled?: boolean
   sendCommand: (command: MidiCommand) => void
   onEdit: () => void
 }
@@ -34,6 +35,7 @@ export function PadButton({
   feedbackColor,
   feedbackBehavior,
   isMobileView,
+  isDisabled = false,
   sendCommand,
   onEdit,
 }: PadButtonProps) {
@@ -41,6 +43,7 @@ export function PadButton({
   const isLit = !isOffColor(feedbackColor)
   const pressHandlers = useMidiButtonPress({
     isMobileView,
+    isDisabled,
     onPressStart: () => sendStandardButtonNoteOn(pad.note, sendCommand),
     onPressEnd: () => sendStandardButtonNoteOff(pad.note, sendCommand),
   })
@@ -51,6 +54,9 @@ export function PadButton({
       style={getButtonFrameStyle(feedbackColor)}
       data-led-behavior={feedbackBehavior.behavior}
       {...pressHandlers}
+      isDisabled={isDisabled}
+      aria-label={`${label}, nota ${pad.note}, ${isLit ? "iluminado" : "apagado"}`}
+      aria-description={isMobileView ? undefined : "Clic derecho para editar"}
       onContextMenu={(event) => {
         if (isMobileView) return
         event.preventDefault()
@@ -70,10 +76,17 @@ export function PadButton({
 
 const styles = stylex.create({
   padButton: {
+    outline: { default: "none", ":focus-visible": "2px solid #c4b5fd" },
+    outlineOffset: "2px",
+    opacity: { default: 1, ":disabled": 0.5 },
     position: "relative",
     overflow: "hidden",
-    aspectRatio: "1 / 1",
-    minWidth: "36px",
+    width: "100%",
+    boxSizing: "border-box",
+    aspectRatio: { default: "auto", "@media (max-width: 760px)": "1 / 1" },
+    height: { default: "clamp(44px, 5.5vh, 64px)", "@media (max-width: 760px)": "auto" },
+    minWidth: 0,
+    minHeight: "44px",
     borderWidth: "1px",
     borderStyle: "solid",
     borderColor: "rgba(255, 255, 255, 0.12)",
@@ -88,7 +101,7 @@ const styles = stylex.create({
     alignContent: "center",
     justifyItems: "center",
     gap: "3px",
-    padding: "4px",
+    padding: { default: "4px", "@media (max-width: 760px)": "2px" },
     textAlign: "center",
     touchAction: "manipulation",
     userSelect: "none",
@@ -109,13 +122,15 @@ const styles = stylex.create({
     color: "#f8fafc",
     textShadow: "0 1px 3px rgba(0, 0, 0, 0.85)",
     fontSize: {
-      default: "0.7rem",
+      default: "0.78rem",
       "@media (max-width: 760px)": "0.56rem",
     },
     fontWeight: 900,
     lineHeight: 1.05,
     overflow: "hidden",
     display: "-webkit-box",
+    maxWidth: "100%",
+    overflowWrap: "anywhere",
     WebkitLineClamp: 2,
     WebkitBoxOrient: "vertical",
   },

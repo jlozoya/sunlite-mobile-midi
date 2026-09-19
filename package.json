@@ -11,6 +11,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "test:controller": "bun test tests/controller-input.test.ts",
     "test:automation": "bun run build:main && node tests/automation-smoke.mjs && node tests/lighting-automation-regression.mjs",
     "check": "bun run format:check && bun run typecheck",
     "build:main": "tsc -p tsconfig.node.json",

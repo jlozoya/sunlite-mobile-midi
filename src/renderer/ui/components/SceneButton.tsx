@@ -24,6 +24,7 @@ export type SceneButtonProps = {
   feedbackColor: MidiLedColor | null
   feedbackBehavior: MidiLedFeedbackBehavior
   isMobileView: boolean
+  isDisabled?: boolean
   sendCommand: (command: MidiCommand) => void
   onEdit: () => void
 }
@@ -34,12 +35,15 @@ export function SceneButton({
   feedbackColor,
   feedbackBehavior,
   isMobileView,
+  isDisabled = false,
   sendCommand,
   onEdit,
 }: SceneButtonProps) {
+  const label = config?.label ?? button.label
   const isLit = !isOffColor(feedbackColor)
   const pressHandlers = useMidiButtonPress({
     isMobileView,
+    isDisabled,
     onPressStart: () => sendStandardButtonNoteOn(button.note, sendCommand),
     onPressEnd: () => sendStandardButtonNoteOff(button.note, sendCommand),
   })
@@ -50,6 +54,9 @@ export function SceneButton({
       style={getButtonFrameStyle(feedbackColor)}
       data-led-behavior={feedbackBehavior.behavior}
       {...pressHandlers}
+      isDisabled={isDisabled}
+      aria-label={`${label}, nota ${button.note}, ${isLit ? "iluminado" : "apagado"}`}
+      aria-description={isMobileView ? undefined : "Clic derecho para editar"}
       onContextMenu={(event) => {
         if (isMobileView) return
         event.preventDefault()
@@ -61,7 +68,7 @@ export function SceneButton({
         style={getLedLayerStyle(feedbackColor, feedbackBehavior)}
         aria-hidden="true"
       />
-      <span {...stylex.props(styles.sceneLabel)}>{config?.label ?? button.label}</span>
+      <span {...stylex.props(styles.sceneLabel)}>{label}</span>
       <small {...stylex.props(styles.sceneMeta)}>N {button.note}</small>
     </Button>
   )
@@ -69,9 +76,12 @@ export function SceneButton({
 
 const styles = stylex.create({
   sceneLaunchButton: {
+    outline: { default: "none", ":focus-visible": "2px solid #c4b5fd" },
+    outlineOffset: "2px",
+    opacity: { default: 1, ":disabled": 0.5 },
     position: "relative",
     overflow: "hidden",
-    minWidth: "54px",
+    minWidth: 0,
     minHeight: {
       default: "54px",
       "@media (min-width: 900px)": "44px",
@@ -87,7 +97,9 @@ const styles = stylex.create({
     placeItems: "center",
     gap: "2px",
     fontWeight: 900,
-    padding: "8px",
+    padding: { default: "8px", "@media (max-width: 760px)": "6px 3px" },
+    touchAction: "manipulation",
+    userSelect: "none",
   },
   padButtonLit: {
     boxShadow: "0 0 22px rgba(255, 255, 255, 0.18)",
@@ -100,12 +112,18 @@ const styles = stylex.create({
     zIndex: 0,
   },
   sceneLabel: {
+    maxWidth: "100%",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: { default: "0.8rem", "@media (max-width: 760px)": "0.68rem" },
     position: "relative",
     zIndex: 1,
     color: "#f8fafc",
     textShadow: "0 1px 3px rgba(0, 0, 0, 0.85)",
   },
   sceneMeta: {
+    fontSize: "0.62rem",
     position: "relative",
     zIndex: 1,
     color: "rgba(255, 255, 255, 0.92)",
