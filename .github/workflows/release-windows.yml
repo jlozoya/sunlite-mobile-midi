@@ -52,3 +52,27 @@ jobs:
             release/*-Setup-*.exe
             release/*.blockmap
             release/latest.yml
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sunlite-windows
+          path: release
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release/Sunlite-Mobile-MIDI-Setup-*.exe \
+            release/Sunlite-Mobile-MIDI-Setup-*.exe.blockmap \
+            release/latest.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --latest

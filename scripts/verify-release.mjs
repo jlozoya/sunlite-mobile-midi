@@ -7,6 +7,8 @@ import { createRequire } from "node:module"
 const require = createRequire(import.meta.url)
 const { load } = require("js-yaml")
 const asar = require("@electron/asar")
+const pe = require("pe-library")
+const resedit = require("resedit")
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"))
 const dir = path.resolve("release")
 const metadata = load(fs.readFileSync(path.join(dir, "latest.yml"), "utf8"))
@@ -56,6 +58,42 @@ assert.equal(
   JSON.parse(asar.extractFile(archive, "package.json").toString()).version,
   pkg.version,
 )
+const executable = pe.NtExecutable.from(
+  fs.readFileSync(path.join(dir, "win-unpacked", pkg.build.productName + ".exe")),
+)
+const executableResources = pe.NtExecutableResource.from(executable)
+const versionInfo = resedit.Resource.VersionInfo.fromEntries(executableResources.entries)
+assert.ok(
+  versionInfo.some((info) =>
+    info.getAllLanguagesForStringValues().some((language) => {
+      const values = info.getStringValues(language)
+      return (
+        values.FileDescription === pkg.build.productName &&
+        values.ProductName === pkg.build.productName
+      )
+    }),
+  ),
+  "Executable has incorrect app name or description",
+)
+const expectedIcons = resedit.Data.IconFile.from(
+  fs.readFileSync(pkg.build.win.icon),
+).icons.map((icon) => icon.data)
+const iconBytes = (icon) => Buffer.from(icon.isRaw() ? icon.bin : icon.generate())
+const iconGroups = resedit.Resource.IconGroupEntry.fromEntries(
+  executableResources.entries,
+)
+assert.ok(
+  iconGroups.some((group) => {
+    const actualIcons = group.getIconItemsFromEntries(executableResources.entries)
+    return (
+      actualIcons.length === expectedIcons.length &&
+      actualIcons.every((icon, index) =>
+        iconBytes(icon).equals(iconBytes(expectedIcons[index])),
+      )
+    )
+  }),
+  "Executable is missing the configured app icon",
+)
 console.log(
-  "Verified NSIS installer, SHA-512, blockmap, update feed, preload and native modules.",
+  "Verified NSIS installer, checksum, update feed, native modules, app name and icon.",
 )
