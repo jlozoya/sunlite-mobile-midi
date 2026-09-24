@@ -12,7 +12,7 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
     "check": "bun run format:check && bun run typecheck",
-    "test": "bun run build:main && bun test tests/controller-input.test.ts && node --test tests/updates.test.mjs tests/midi-router.test.mjs tests/websocket-url.test.mjs && node tests/automation-smoke.mjs && node tests/lighting-automation-regression.mjs",
+    "test": "bun run build:main && bun test tests/controller-input.test.ts tests/socket-connection.test.ts && node --test tests/updates.test.mjs tests/midi-router.test.mjs tests/websocket-url.test.mjs && node tests/automation-smoke.mjs && node tests/lighting-automation-regression.mjs",
     "test:automation": "bun run build:main && node tests/automation-smoke.mjs && node tests/lighting-automation-regression.mjs",
     "test:controller": "bun test tests/controller-input.test.ts",
     "test:router": "bun run build:main && node --test tests/midi-router.test.mjs",

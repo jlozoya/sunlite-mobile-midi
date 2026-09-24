@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { websocketUrlForPage } from "../../../shared/websocket-url"
+import { createReconnectingSocket } from "../socket-connection"
 import type {
   RouterConfig,
   RouterMonitorEvent,
@@ -38,42 +39,56 @@ export function useRouterPanel() {
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState<"start" | "stop" | "save" | null>(null)
   const operationRef = useRef(false)
-  const socketRef = useRef<WebSocket | null>(null)
+  const requestRef = useRef<AbortController | null>(null)
 
   const refresh = useCallback(async () => {
+    requestRef.current?.abort()
+    const request = new AbortController()
+    requestRef.current = request
     try {
-      const payload = await requestJson<RouterPayload>("/api/router/state")
+      const payload = await requestJson<RouterPayload>("/api/router/state", {
+        signal: request.signal,
+      })
+      if (request.signal.aborted) return
       const { monitor: events, ...rest } = payload
       setState(rest)
       setMonitor(events ?? [])
     } catch (error) {
+      if (request.signal.aborted) return
       setMessage(error instanceof Error ? error.message : "No se pudo leer el router.")
+    } finally {
+      if (requestRef.current === request) requestRef.current = null
     }
   }, [])
 
   useEffect(() => {
     void refresh()
-  }, [refresh])
-
-  useEffect(() => {
-    const socket = new WebSocket(websocketUrlForPage(window.location.href))
-    socketRef.current = socket
-
-    socket.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(String(event.data)) as Record<string, unknown>
-        if (payload.event === "router-state") void refresh()
-        if (payload.event === "router-overload") setMessage(String(payload.message))
-        if (payload.event === "router-monitor") {
-          const events = payload.events as RouterMonitorEvent[]
-          setMonitor((current) => [...current, ...events].slice(-MONITOR_LIMIT))
-        }
-      } catch {
-        // Not our message.
-      }
+    const disconnect = createReconnectingSocket(
+      websocketUrlForPage(window.location.href),
+      {
+        // Recover changes missed during a network interruption or server restart.
+        onOpen: () => void refresh(),
+        onClose: () => requestRef.current?.abort(),
+        onMessage(event) {
+          try {
+            const payload = JSON.parse(String(event.data)) as Record<string, unknown>
+            if (payload.event === "router-state") void refresh()
+            if (payload.event === "router-overload") setMessage(String(payload.message))
+            if (payload.event === "router-monitor") {
+              const events = payload.events as RouterMonitorEvent[]
+              setMonitor((current) => [...current, ...events].slice(-MONITOR_LIMIT))
+            }
+          } catch {
+            // Not our message.
+          }
+        },
+      },
+    )
+    return () => {
+      disconnect()
+      requestRef.current?.abort()
+      requestRef.current = null
     }
-
-    return () => socket.close()
   }, [refresh])
 
   const saveConfig = useCallback(

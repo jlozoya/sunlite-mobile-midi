@@ -692,3 +692,55 @@ test("available devices exclude the controller bridge but preserve other MIDI po
   assert.equal(isReservedMidiPort("Custom Bridge 2", ["Custom Bridge"]), true)
   assert.equal(isReservedMidiPort("APC mini mk2", ["", " "]), false)
 })
+
+test("changing the input releases held notes before detaching the old source", () => {
+  const route = createRoute({
+    id: "route",
+    source: "in-a",
+    destination: "out",
+    transforms: { ...defaultRouteTransforms(), transpose: 12, channelRemap: 3 },
+  })
+  const ports = [port("in-a", "input"), port("in-b", "input"), port("out", "output")]
+  const engine = new RoutingEngine(configWith([route], ports))
+  engine.route("in-a", [NOTE_ON_CH1, 60, 100])
+  assert.deepEqual(engine.setConfig(configWith([{ ...route, source: "in-b" }], ports)), [
+    { routeId: "route", destination: "out", bytes: [0x82, 72, 0] },
+  ])
+  assert.deepEqual(engine.route("in-a", [NOTE_OFF_CH1, 60, 0]), [])
+  assert.deepEqual(engine.releaseRoute("route", "out"), [])
+  assert.deepEqual(engine.route("in-b", [NOTE_ON_CH1, 60, 100]), [
+    { routeId: "route", destination: "out", bytes: [0x92, 72, 100] },
+  ])
+})
+
+test("removing notes from the allowed messages releases notes already playing", () => {
+  const route = createRoute({ id: "route", source: "in", destination: "out" })
+  const ports = [port("in", "input"), port("out", "output")]
+  const engine = new RoutingEngine(configWith([route], ports))
+  engine.route("in", [NOTE_ON_CH1, 60, 100])
+  const next = {
+    ...route,
+    filters: { ...route.filters, allow: ["cc"] },
+  }
+  assert.deepEqual(engine.setConfig(configWith([next], ports)), [
+    { routeId: "route", destination: "out", bytes: [NOTE_OFF_CH1, 60, 0] },
+  ])
+  assert.deepEqual(engine.route("in", [NOTE_OFF_CH1, 60, 0]), [])
+  assert.deepEqual(engine.releaseRoute("route", "out"), [])
+  assert.equal(engine.route("in", [CC_CH1, 7, 80]).length, 1)
+})
+
+test("changing unrelated filters preserves held notes and their release form", () => {
+  const route = createRoute({ id: "route", source: "in", destination: "out" })
+  const ports = [port("in", "input"), port("out", "output")]
+  const engine = new RoutingEngine(configWith([route], ports))
+  engine.route("in", [NOTE_ON_CH1, 60, 100])
+  const next = {
+    ...route,
+    filters: { ...route.filters, allow: ["note"], noteRange: { min: 70, max: 80 } },
+  }
+  assert.deepEqual(engine.setConfig(configWith([next], ports)), [])
+  assert.deepEqual(engine.route("in", [NOTE_ON_CH1, 60, 0]), [
+    { routeId: "route", destination: "out", bytes: [NOTE_ON_CH1, 60, 0] },
+  ])
+})

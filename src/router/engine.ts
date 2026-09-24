@@ -25,8 +25,10 @@ type HeldNote = { channel: number; note: number }
 /** The parts of a route that change how an already held note must be released. */
 function noteIdentity(route: Route): string {
   return JSON.stringify([
+    route.source,
     route.destination,
     route.channels,
+    route.filters.allow.includes("note"),
     route.transforms.channelRemap,
     route.transforms.transpose,
   ])
