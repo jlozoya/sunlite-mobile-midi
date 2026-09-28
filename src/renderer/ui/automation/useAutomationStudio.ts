@@ -8,6 +8,8 @@ import type {
   AutomationTimelineEvent,
 } from "../../../shared/automation-types"
 
+export const SYSTEM_AUDIO_DEVICE_ID = "system-loopback"
+
 type SendAutomationCommand = (command: AutomationSocketCommand) => boolean
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -102,15 +104,25 @@ function makeFrame(
   }
 }
 
-export function useAutomationStudio(sendAutomationCommand: SendAutomationCommand) {
+export function useAutomationStudio(
+  sendAutomationCommand: SendAutomationCommand,
+  showLiveFrames: boolean,
+) {
   const [status, setStatus] = useState<AutomationStatus | null>(null)
   const [audioRunning, setAudioRunning] = useState(false)
   const [audioBusy, setAudioBusy] = useState(false)
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([])
   const [selectedDeviceId, setSelectedDeviceId] = useState(
-    () => window.localStorage.getItem("sunlite-automation-audio-device") ?? "",
+    () =>
+      window.localStorage.getItem("sunlite-automation-audio-device") ??
+      (window.rekordboxCapture ? SYSTEM_AUDIO_DEVICE_ID : ""),
   )
   const [liveFrames, setLiveFrames] = useState<AutomationAudioFrame[]>([])
+  const showLiveFramesRef = useRef(showLiveFrames)
+  showLiveFramesRef.current = showLiveFrames
+  useEffect(() => {
+    if (!showLiveFrames) setLiveFrames([])
+  }, [showLiveFrames])
   const [timeline, setTimeline] = useState<AutomationTimelineEvent[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -217,74 +229,105 @@ export function useAutomationStudio(sendAutomationCommand: SendAutomationCommand
     sendAutomationCommand({ type: "automation-audio-disconnected" })
   }, [sendAutomationCommand])
 
-  const startAudio = useCallback(async () => {
-    setAudioBusy(true)
-    setMessage(null)
-    try {
-      stopAudio()
-      const request = audioRequestRef.current
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error(
-          "La captura de audio necesita abrir la app en este equipo o usar HTTPS.",
-        )
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          channelCount: 2,
-        },
-      })
-      if (request !== audioRequestRef.current) {
-        stream.getTracks().forEach((track) => track.stop())
-        return
-      }
-      streamRef.current = stream
-      const context = new AudioContext({ latencyHint: "interactive" })
-      contextRef.current = context
-      await context.resume()
-      if (request !== audioRequestRef.current) return
-      const analyser = context.createAnalyser()
-      analyser.fftSize = 2048
-      analyser.smoothingTimeConstant = 0.35
-      context.createMediaStreamSource(stream).connect(analyser)
-
-      stream.getAudioTracks().forEach((track) => {
-        track.addEventListener(
-          "ended",
-          () => {
-            if (streamRef.current !== stream) return
-            stopAudio()
-            setMessage(
-              "La entrada de audio se desconectó. Revisa el dispositivo y vuelve a activarla.",
+  const startAudio = useCallback(
+    async (deviceIdOverride?: string) => {
+      const deviceId = deviceIdOverride ?? selectedDeviceId
+      if (deviceIdOverride) setSelectedDeviceId(deviceIdOverride)
+      setAudioBusy(true)
+      setMessage(null)
+      try {
+        stopAudio()
+        const request = audioRequestRef.current
+        if (!navigator.mediaDevices) {
+          throw new Error(
+            "La captura de audio necesita abrir la app en este equipo o usar HTTPS.",
+          )
+        }
+        const systemAudio = deviceId === SYSTEM_AUDIO_DEVICE_ID
+        if (systemAudio && !window.rekordboxCapture) {
+          throw new Error(
+            "El audio del PC solo se puede capturar desde la aplicación de escritorio.",
+          )
+        }
+        const stream = systemAudio
+          ? await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+          : await navigator.mediaDevices.getUserMedia({
+              audio: {
+                deviceId: deviceId ? { exact: deviceId } : undefined,
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+                channelCount: 2,
+              },
+            })
+        if (systemAudio) {
+          stream.getVideoTracks().forEach((track) => track.stop())
+          if (!stream.getAudioTracks().length) {
+            stream.getTracks().forEach((track) => track.stop())
+            throw new Error(
+              "Windows no entregó audio del sistema. Selecciona una entrada USB/REC OUT del mixer.",
             )
-          },
-          { once: true },
-        )
-      })
-      setAudioRunning(true)
-      await refreshAudioDevices()
-      if (request !== audioRequestRef.current) return
+          }
+        }
+        if (request !== audioRequestRef.current) {
+          stream.getTracks().forEach((track) => track.stop())
+          return false
+        }
+        streamRef.current = stream
+        const context = new AudioContext({ latencyHint: "interactive" })
+        contextRef.current = context
+        await context.resume()
+        if (request !== audioRequestRef.current) return false
+        const analyser = context.createAnalyser()
+        analyser.fftSize = 2048
+        analyser.smoothingTimeConstant = 0.35
+        context.createMediaStreamSource(stream).connect(analyser)
 
-      timerRef.current = window.setInterval(() => {
-        const frame = makeFrame(analyser, previousSpectrumRef.current)
-        previousSpectrumRef.current = frame.spectrum
-        sendAutomationCommand({ type: "automation-audio-frame", frame })
-        setLiveFrames((current) => [...current.slice(-179), frame])
-      }, 120)
-    } catch (error) {
-      stopAudio()
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "No se pudo abrir la entrada de audio del mixer",
-      )
-    } finally {
-      setAudioBusy(false)
-    }
-  }, [refreshAudioDevices, selectedDeviceId, sendAutomationCommand, stopAudio])
+        stream.getAudioTracks().forEach((track) => {
+          track.addEventListener(
+            "ended",
+            () => {
+              if (streamRef.current !== stream) return
+              stopAudio()
+              setMessage(
+                "La entrada de audio se desconectó. Revisa el dispositivo y vuelve a activarla.",
+              )
+            },
+            { once: true },
+          )
+        })
+        setAudioRunning(true)
+        await refreshAudioDevices()
+        if (request !== audioRequestRef.current) return false
+
+        const sendFrame = () => {
+          const frame = makeFrame(analyser, previousSpectrumRef.current)
+          previousSpectrumRef.current = frame.spectrum
+          if (!sendAutomationCommand({ type: "automation-audio-frame", frame })) {
+            stopAudio()
+            setMessage("Se perdió la conexión con la app. Vuelve a iniciar el audio.")
+            return false
+          }
+          if (showLiveFramesRef.current) {
+            setLiveFrames((current) => [...current.slice(-179), frame])
+          }
+          return true
+        }
+        if (!sendFrame()) return false
+        timerRef.current = window.setInterval(() => void sendFrame(), 120)
+        return true
+      } catch (error) {
+        stopAudio()
+        setMessage(
+          error instanceof Error ? error.message : "No se pudo abrir la fuente de audio",
+        )
+        return false
+      } finally {
+        setAudioBusy(false)
+      }
+    },
+    [refreshAudioDevices, selectedDeviceId, sendAutomationCommand, stopAudio],
+  )
 
   useEffect(() => stopAudio, [stopAudio])
 
@@ -352,6 +395,7 @@ export function useAutomationStudio(sendAutomationCommand: SendAutomationCommand
         setSelectedSessionId(null)
         setTimeline([])
         setMessage("Grabación de entrenamiento iniciada")
+        return true
       } catch (error) {
         setMessage(
           error instanceof Error ? error.message : "No se pudo iniciar la grabación",

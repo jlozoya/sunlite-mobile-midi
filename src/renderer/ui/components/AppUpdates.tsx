@@ -124,7 +124,9 @@ export function AppUpdates() {
       <SectionHeader
         title="Actualizaciones"
         description={
-          status ? `Versión instalada: ${status.currentVersion}` : "Consultando versión…"
+          status
+            ? `Versión de la aplicación: ${status.currentVersion}`
+            : "Consultando versión…"
         }
       />
       {/* The reason lives on the button that cannot be pressed; repeating it here said

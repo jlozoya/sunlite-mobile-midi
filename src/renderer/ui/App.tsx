@@ -8,7 +8,10 @@ import {
 import { MidiController } from "./components/MidiController"
 import { AppUpdates } from "./components/AppUpdates"
 import { Toast } from "./components/Toast"
+import { AnimatedDisclosure } from "./components/AnimatedDisclosure"
 import { AutomationStudio } from "./automation/AutomationStudio"
+import { RekordboxWaveforms } from "./automation/RekordboxWaveforms"
+import { useRekordboxVideoCapture } from "./automation/useRekordboxVideoCapture"
 import { RouterPanel } from "./router/RouterPanel"
 import { useIsMobileView } from "./hooks/useIsMobileView"
 import { useControllerSocket } from "./useControllerSocket"
@@ -41,6 +44,7 @@ const DESKTOP_TABS: Array<{
 ]
 
 export function App() {
+  useRekordboxVideoCapture()
   const {
     status,
     error: statusError,
@@ -581,8 +585,20 @@ export function App() {
           <AutomationStudio
             key={software}
             sendAutomationCommand={sendAutomationCommand}
+            captureVisible={activeDesktopTab === "automation"}
           />
         </section>
+      ) : null}
+
+      {isMobileView ? (
+        <AnimatedDisclosure
+          summary="Waveforms de Rekordbox"
+          containerProps={stylex.props(styles.mobileWaveforms)}
+          buttonProps={stylex.props(styles.mobileWaveformsTrigger)}
+          unmountOnExit
+        >
+          <RekordboxWaveforms />
+        </AnimatedDisclosure>
       ) : null}
 
       {isMobileView ? (
@@ -680,6 +696,26 @@ export function App() {
 }
 
 const styles = stylex.create({
+  mobileWaveforms: {
+    marginBottom: "10px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "rgba(34, 211, 238, 0.2)",
+    borderRadius: "12px",
+    padding: "9px",
+    color: "#cffafe",
+  },
+  mobileWaveformsTrigger: {
+    display: "flex",
+    alignItems: "center",
+    width: "100%",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    color: "inherit",
+    cursor: "pointer",
+    padding: 0,
+    fontSize: "inherit",
+  },
   app: {
     width: "100%",
     maxWidth: "none",

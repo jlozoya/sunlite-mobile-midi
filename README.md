@@ -287,6 +287,24 @@ Automation Studio runs locally and does not upload audio or training data. It co
 
 The installed application does **not** require Python or a JDK. PRO DJ LINK support runs inside the Electron application.
 
+### Rekordbox on the same Windows PC
+
+Automation Studio can mirror the full waveform and playback marker shown in the
+rekordbox window, without CDJ hardware or PRO DJ LINK ports. Keep rekordbox open and
+choose **Vista general estándar (2 decks)** for its standard two-player Export view.
+For another layout, click **Seleccionar deck 1–4** and drag around each deck's full
+waveform and playback marker in the preview. Drag the four corners to resize a selected area, or the center arrow icon to move it. Use **Mostrar/Ocultar waveform** to toggle a configured deck, and **Eliminar selección** to remove its saved area. The selected regions are saved locally
+and the cropped views can also be seen from the phone controller. If rekordbox is
+minimized or its window layout changes, restore it or adjust the selected regions.
+
+This is a visual capture of the rekordbox window. It does not provide track metadata,
+beat data, audio features, or precise transport events to the automation engine. If
+rekordbox plays through a Windows audio output on this PC, click **Capturar audio del PC**
+in the training bar (or select **Audio del PC (Rekordbox)** and **Activar audio**). This
+supplies real system audio to training and automation. If rekordbox plays through an
+external mixer/controller instead, select its USB/REC OUT audio input. Compatible CDJs
+can also provide player data as described below.
+
 ### CDJ and mixer connection
 
 1. Connect the compatible CDJ players, DJ mixer, and Windows computer to the same wired Ethernet switch.
@@ -324,6 +342,10 @@ Train each software profile separately. A mapping change within a profile can ch
 what an old example does; review or delete affected sessions before retraining.
 
 ### Training data review
+
+The live audio graph is hidden by default. Use **Ver detalles de audio** when needed; a
+saved session opens its review timeline automatically. Only the active waveform source
+is shown: Rekordbox on this PC or a connected CDJ.
 
 Select a saved session to display its spectrogram, beats and MIDI actions. Incorrect actions can be excluded from the model, and the model is immediately rebuilt without those examples.
 

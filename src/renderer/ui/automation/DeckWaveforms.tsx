@@ -87,23 +87,19 @@ function WaveformCanvas({ waveform }: { waveform: DjLinkWaveform }) {
 }
 
 export function DeckWaveforms({ waveforms }: Props) {
-  const ordered = [...waveforms].sort((left, right) => {
-    const score = (waveform: DjLinkWaveform) =>
-      Number(waveform.isOnAir) * 4 +
-      Number(waveform.isPlaying) * 2 +
-      Number(waveform.isMaster)
-    return score(right) - score(left) || left.deviceNumber - right.deviceNumber
-  })
+  const ordered = [...waveforms].sort(
+    (left, right) => left.deviceNumber - right.deviceNumber,
+  )
 
   return (
     <section {...stylex.props(styles.panel)}>
       <div {...stylex.props(styles.heading)}>
         <div>
-          <span {...stylex.props(styles.eyebrow)}>PRO DJ LINK</span>
+          <span {...stylex.props(styles.eyebrow)}>CDJ</span>
           <strong>Waveforms de los decks</strong>
         </div>
         <span {...stylex.props(styles.count)}>
-          {ordered.length} waveform{ordered.length === 1 ? "" : "s"}
+          {ordered.length} deck{ordered.length === 1 ? "" : "s"}
         </span>
       </div>
 
@@ -138,11 +134,8 @@ export function DeckWaveforms({ waveforms }: Props) {
         </div>
       ) : (
         <div {...stylex.props(styles.empty)}>
-          <strong>Para recibir waveforms</strong>
-          <span>
-            Conecta el PC y los CDJ al mismo switch Ethernet, carga un track analizado por
-            rekordbox y pulsa Play en el deck.
-          </span>
+          <strong>CDJ conectado</strong>
+          <span>Carga una pista en el CDJ para ver su waveform.</span>
         </div>
       )}
     </section>
@@ -180,7 +173,7 @@ const styles = stylex.create({
   },
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+    gridTemplateColumns: "minmax(0, 1fr)",
     gap: "10px",
   },
   deck: {

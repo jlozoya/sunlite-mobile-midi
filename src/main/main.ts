@@ -1,4 +1,11 @@
-import { app as electronApp, BrowserWindow, ipcMain, session, shell } from "electron"
+import {
+  app as electronApp,
+  BrowserWindow,
+  desktopCapturer,
+  ipcMain,
+  session,
+  shell,
+} from "electron"
 import electronUpdater from "electron-updater"
 import { UpdateManager, validateUpdateFeed } from "./update-manager.js"
 import { spawn } from "node:child_process"
@@ -22,6 +29,8 @@ import {
 } from "../shared/controller-config.js"
 import { AutomationEngine } from "./automation/automation-engine.js"
 import { ProDjLinkSidecar } from "./automation/prodj-link-sidecar.js"
+import { RekordboxWindowCapture } from "./automation/rekordbox-window.js"
+import type { RekordboxDeckNumber } from "../shared/rekordbox-capture.js"
 import { RouterService } from "./router-service.js"
 import { WebSocketServer, type WebSocket } from "ws"
 import {
@@ -92,6 +101,19 @@ function getWindowIconPath(): string {
   return getRuntimeResourcePath(process.platform === "win32" ? "icon.ico" : "icon.png")
 }
 
+function getApplicationVersion(): string {
+  if (electronApp.isPackaged) return electronApp.getVersion()
+
+  // In development getVersion() reports Electron's own version, not this app's.
+  const manifest = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, "../../package.json"), "utf8"),
+  ) as { version?: unknown }
+  if (typeof manifest.version !== "string" || !manifest.version.trim()) {
+    throw new Error("package.json no contiene una versión válida de la aplicación.")
+  }
+  return manifest.version
+}
+
 function configureAutoUpdates() {
   let disabledReason = !electronApp.isPackaged
     ? "Las actualizaciones están desactivadas en desarrollo."
@@ -116,7 +138,7 @@ function configureAutoUpdates() {
   }
   updateManager = new UpdateManager(
     autoUpdater,
-    electronApp.getVersion(),
+    getApplicationVersion(),
     disabledReason,
     () => {
       const state = automationEngine?.getStatus()
@@ -215,6 +237,7 @@ let feedbackDisabledReason: string | null = null
 let automationEngine: AutomationEngine | null = null
 let routerService: RouterService | null = null
 let prodjLinkSidecar: ProDjLinkSidecar | null = null
+let rekordboxCapture: RekordboxWindowCapture | null = null
 let midiAutoConfigured = false
 let midiProvisioningMessage: string | null = null
 
@@ -1189,6 +1212,13 @@ async function startControllerServer(): Promise<ServerStatus> {
 
   activeWebSocketServer = wss
   automationEngine = createAutomationEngine()
+  rekordboxCapture = new RekordboxWindowCapture(
+    electronApp.getPath("userData"),
+    (bytes) => {
+      if (mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send("rekordbox:frame", bytes)
+    },
+  )
   routerService = new RouterService(
     path.join(electronApp.getPath("userData"), "midi-router.config.json"),
     (payload) => broadcastToAll(payload),
@@ -1316,6 +1346,40 @@ async function startControllerServer(): Promise<ServerStatus> {
   appServer.get("/api/automation/status", (_request, response) => {
     response.json(automationEngine?.getStatus())
   })
+
+  appServer.get("/api/automation/rekordbox/status", async (_request, response) => {
+    try {
+      response.setHeader("Cache-Control", "no-store")
+      response.json({
+        available: Boolean(await rekordboxCapture?.capture()),
+        regions: rekordboxCapture?.getRegions() ?? {},
+      })
+    } catch {
+      response.status(503).json({ available: false, regions: {} })
+    }
+  })
+
+  appServer.get(
+    "/api/automation/rekordbox/decks/:deck/frame",
+    async (request, response) => {
+      const deck = Number(request.params.deck)
+      if (![1, 2, 3, 4].includes(deck)) {
+        response.status(400).end()
+        return
+      }
+      try {
+        const image = await rekordboxCapture?.captureDeck(deck as RekordboxDeckNumber)
+        if (!image) {
+          response.status(404).end()
+          return
+        }
+        response.setHeader("Cache-Control", "no-store")
+        response.type("jpeg").send(image.toJPEG(80))
+      } catch {
+        response.status(503).end()
+      }
+    },
+  )
 
   appServer.put("/api/automation/mode", (request, response) => {
     try {
@@ -1593,6 +1657,7 @@ async function createWindow(status: ServerStatus) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,
       preload: path.join(__dirname, "preload.cjs"),
     },
   })
@@ -1635,6 +1700,64 @@ else
         },
       )
       const status = await startControllerServer()
+      const trustedUrl = process.env.SUNLITE_DEV_RENDERER_URL || status.localUrl
+      session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+        let trustedOrigin = false
+        try {
+          trustedOrigin =
+            new URL(request.securityOrigin).origin === new URL(trustedUrl).origin
+        } catch {
+          trustedOrigin = false
+        }
+        const trustedFrame =
+          mainWindow &&
+          request.frame === mainWindow.webContents.mainFrame &&
+          trustedOrigin
+        if (
+          !trustedFrame ||
+          !request.userGesture ||
+          !request.audioRequested ||
+          !request.videoRequested
+        ) {
+          callback({})
+          return
+        }
+        try {
+          const sources = await desktopCapturer.getSources({
+            types: ["screen"],
+            thumbnailSize: { width: 1, height: 1 },
+          })
+          callback(sources[0] ? { video: sources[0], audio: "loopback" } : {})
+        } catch {
+          callback({})
+        }
+      })
+      const trustedRekordboxRequest = (event: Electron.IpcMainInvokeEvent) =>
+        mainWindow &&
+        event.sender === mainWindow.webContents &&
+        event.senderFrame === mainWindow.webContents.mainFrame &&
+        new URL(event.senderFrame.url).origin === new URL(trustedUrl).origin
+
+      ipcMain.handle("rekordbox:preview", async (event) => {
+        if (!trustedRekordboxRequest(event)) throw new Error("Solicitud no autorizada")
+        const image = await rekordboxCapture?.capture()
+        return image
+          ? `data:image/jpeg;base64,${image.toJPEG(80).toString("base64")}`
+          : null
+      })
+      ipcMain.handle("rekordbox:source-id", async (event) => {
+        if (!trustedRekordboxRequest(event)) throw new Error("Solicitud no autorizada")
+        return (await rekordboxCapture?.getSourceId()) ?? null
+      })
+      ipcMain.handle("rekordbox:push-frame", (event, bytes: Uint8Array) => {
+        if (!trustedRekordboxRequest(event)) throw new Error("Solicitud no autorizada")
+        if (!(bytes instanceof Uint8Array)) throw new Error("Imagen no válida")
+        rekordboxCapture?.pushFrame(bytes)
+      })
+      ipcMain.handle("rekordbox:save-regions", (event, regions: unknown) => {
+        if (!trustedRekordboxRequest(event)) throw new Error("Solicitud no autorizada")
+        return rekordboxCapture?.saveRegions(regions) ?? {}
+      })
       await createWindow(status)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown startup error"
@@ -1669,6 +1792,7 @@ electronApp.on("second-instance", () => {
 electronApp.on("before-quit", () => {
   updateManager?.stop()
   prodjLinkSidecar?.stop()
+  rekordboxCapture?.dispose()
   routerService?.dispose()
   if (automationEngine?.getStatus().recording) automationEngine.stopSession()
   closeMidiConnection()
@@ -1676,6 +1800,7 @@ electronApp.on("before-quit", () => {
 
 electronApp.on("window-all-closed", () => {
   prodjLinkSidecar?.stop()
+  rekordboxCapture?.dispose()
   routerService?.dispose()
   if (automationEngine?.getStatus().recording) automationEngine.stopSession()
   closeMidiConnection()
