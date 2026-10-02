@@ -495,6 +495,9 @@ export function App() {
                         La configuración automática no terminó correctamente. Puedes
                         volver a intentarlo sin crear puertos manualmente.
                       </span>
+                      {status.midiProvisioningMessage ? (
+                        <span>{status.midiProvisioningMessage}</span>
+                      ) : null}
                     </div>
                     <div {...stylex.props(styles.setupActions)}>
                       <ActionButton

@@ -120,7 +120,14 @@ async function isLoopMidiRunning(): Promise<boolean> {
  * and any application holding them has to reopen.
  */
 async function restartLoopMidi(executablePath: string): Promise<void> {
-  await runProcess("taskkill.exe", ["/IM", "loopMIDI.exe", "/F"])
+  const stopped = await runProcess("taskkill.exe", ["/IM", "loopMIDI.exe", "/F"])
+  if (stopped.code !== 0 && (await isLoopMidiRunning())) {
+    throw new Error(
+      stopped.stderr ||
+        stopped.stdout ||
+        "No se pudo reiniciar loopMIDI. Ciérralo desde la bandeja del sistema y vuelve a intentarlo.",
+    )
+  }
   await new Promise((resolve) => setTimeout(resolve, 600))
   startLoopMidi(executablePath)
 }
@@ -237,15 +244,22 @@ export async function ensureVirtualPorts(
   // RtMidi, which crashes the process on Windows. The caller gets a chance to release
   // its ports first and reopen them afterwards.
   const wasRunning = await isLoopMidiRunning()
+  let missing: string[]
   if (wasRunning) {
     await options?.onBeforeRestart?.()
-    await restartLoopMidi(executablePath)
-    await options?.onAfterRestart?.()
+    try {
+      await restartLoopMidi(executablePath)
+      missing = await waitForPorts(requests, options?.timeoutMs ?? 8000)
+    } finally {
+      // Restore devices only after the replacement process has exposed its ports. This
+      // also runs on failure so callers do not leave unrelated MIDI routes stopped.
+      await options?.onAfterRestart?.()
+    }
   } else {
     startLoopMidi(executablePath)
+    missing = await waitForPorts(requests, options?.timeoutMs ?? 8000)
   }
 
-  const missing = await waitForPorts(requests, options?.timeoutMs ?? 8000)
   const restarted = wasRunning
     ? " loopMIDI se reinició para exponerlos, así que los puertos existentes parpadearon un momento."
     : ""

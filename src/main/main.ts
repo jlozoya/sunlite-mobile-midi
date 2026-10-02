@@ -32,6 +32,7 @@ import { ProDjLinkSidecar } from "./automation/prodj-link-sidecar.js"
 import { RekordboxWindowCapture } from "./automation/rekordbox-window.js"
 import type { RekordboxDeckNumber } from "../shared/rekordbox-capture.js"
 import { RouterService } from "./router-service.js"
+import { ensureVirtualPorts, findLoopMidiExecutable } from "../router/loop-midi.js"
 import { WebSocketServer, type WebSocket } from "ws"
 import {
   isLightingSoftware,
@@ -84,9 +85,6 @@ const DEFAULT_MIDI_INPUT_NAME = "Sunlite Mobile Out"
 const MIDI_CHANNEL_ZERO_BASED = Number(process.env.MIDI_CHANNEL || 0)
 const MIDI_OUTPUT_NAME = process.env.MIDI_OUTPUT_NAME || DEFAULT_MIDI_OUTPUT_NAME
 const MIDI_INPUT_NAME = process.env.MIDI_INPUT_NAME || DEFAULT_MIDI_INPUT_NAME
-const LOOP_MIDI_REGISTRY_KEY = "HKCU\\Software\\Tobias Erichsen\\loopMIDI"
-const LOOP_MIDI_PORTS_REGISTRY_KEY = `${LOOP_MIDI_REGISTRY_KEY}\\Ports`
-
 const rendererDir = path.resolve(__dirname, "../renderer")
 
 function getRuntimeResourcePath(fileName: string): string {
@@ -885,26 +883,6 @@ function getLoopMidiInstallerPath(): string {
   return electronApp.isPackaged ? packagedPath : devPath
 }
 
-function findLoopMidiExecutable(): string | null {
-  const candidates = [
-    path.join(
-      process.env.ProgramFiles ?? "C:\\Program Files",
-      "Tobias Erichsen",
-      "loopMIDI",
-      "loopMIDI.exe",
-    ),
-    path.join(
-      process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)",
-      "Tobias Erichsen",
-      "loopMIDI",
-      "loopMIDI.exe",
-    ),
-    path.join(process.env.LOCALAPPDATA ?? "", "Programs", "loopMIDI", "loopMIDI.exe"),
-  ]
-
-  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) ?? null
-}
-
 function runProcess(command: string, args: string[], windowsHide = true) {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>(
     (resolve, reject) => {
@@ -934,97 +912,59 @@ function runProcess(command: string, args: string[], windowsHide = true) {
   )
 }
 
-async function configureLoopMidiPorts() {
-  if (process.platform !== "win32") return
-
-  const settings = [
-    [LOOP_MIDI_REGISTRY_KEY, "StartMinimized", "1"],
-    [LOOP_MIDI_PORTS_REGISTRY_KEY, MIDI_OUTPUT_NAME, "1"],
-    [LOOP_MIDI_PORTS_REGISTRY_KEY, MIDI_INPUT_NAME, "1"],
-  ] as const
-
-  for (const [key, name, value] of settings) {
-    const result = await runProcess("reg.exe", [
-      "ADD",
-      key,
-      "/v",
-      name,
-      "/t",
-      "REG_DWORD",
-      "/d",
-      value,
-      "/f",
-    ])
-
-    if (result.code !== 0) {
-      throw new Error(
-        `Could not configure the MIDI port "${name}": ${result.stderr || result.stdout}`,
-      )
-    }
-  }
-}
-
-function startLoopMidiInBackground(executablePath: string) {
-  spawn(executablePath, [], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-  }).unref()
-}
-
-async function waitForMidiPorts(timeoutMs = 8000): Promise<boolean> {
-  const startedAt = Date.now()
-
-  while (Date.now() - startedAt < timeoutMs) {
-    const availableOutputs = getAvailableMidiOutputs()
-    if (availableOutputs.includes(MIDI_OUTPUT_NAME)) return true
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-
-  return false
-}
-
 async function provisionMidiBridge(options: { installIfMissing: boolean }) {
   midiAutoConfigured = false
   midiProvisioningMessage = "Preparing the local MIDI bridge..."
 
-  let executablePath = findLoopMidiExecutable()
-
-  if (!executablePath && options.installIfMissing) {
-    const installerPath = getLoopMidiInstallerPath()
-    if (!fs.existsSync(installerPath)) {
-      throw new Error("The bundled MIDI bridge installer is missing.")
-    }
-
-    const installResult = await runProcess(installerPath, ["/quiet", "/norestart"], false)
-    if (installResult.code !== 0) {
-      throw new Error(
-        installResult.stderr ||
-          installResult.stdout ||
-          `MIDI bridge installation exited with code ${installResult.code}.`,
-      )
-    }
-
-    executablePath = findLoopMidiExecutable()
-  }
-
-  if (!executablePath) {
+  const executablePath = findLoopMidiExecutable()
+  if (!executablePath && !options.installIfMissing) {
     midiProvisioningMessage = "The local MIDI bridge is not installed."
     return false
   }
 
-  await configureLoopMidiPorts()
-  startLoopMidiInBackground(executablePath)
+  const installerPath = getLoopMidiInstallerPath()
+  if (!executablePath && !fs.existsSync(installerPath)) {
+    throw new Error("The bundled MIDI bridge installer is missing.")
+  }
 
-  if (!(await waitForMidiPorts())) {
-    midiProvisioningMessage =
-      "The MIDI bridge is installed but did not expose its ports. Restart Windows and reopen the application."
+  let routerWasStopped = false
+  const provisioning = await ensureVirtualPorts(
+    [
+      { name: MIDI_OUTPUT_NAME, role: "output" },
+      { name: MIDI_INPUT_NAME, role: "input" },
+    ],
+    {
+      installerPath: options.installIfMissing ? installerPath : undefined,
+      onBeforeRestart: () => {
+        closeMidiConnection()
+        if (routerService?.getState().running) {
+          routerService.stop()
+          routerWasStopped = true
+        }
+      },
+      onAfterRestart: async () => {
+        refreshMidiConnection()
+        if (routerWasStopped && routerService) {
+          await routerService.start({
+            installerPath,
+            onBeforeRestart: () => closeMidiConnection(),
+            onAfterRestart: () => {
+              refreshMidiConnection()
+            },
+          })
+          routerWasStopped = false
+        }
+      },
+    },
+  )
+
+  if (!provisioning.ok) {
+    midiProvisioningMessage = provisioning.message
     return false
   }
 
   midiAutoConfigured = true
-  midiProvisioningMessage =
-    "Local MIDI bridge ready. Sunlite / FreeStyler can use the Sunlite Mobile In port."
+  midiProvisioningMessage = provisioning.message
   refreshMidiConnection()
   return true
 }
@@ -1033,7 +973,12 @@ async function installLoopMidi() {
   const existingExecutablePath = findLoopMidiExecutable()
 
   if (existingExecutablePath) {
-    await provisionMidiBridge({ installIfMissing: false })
+    const ready = await provisionMidiBridge({ installIfMissing: false })
+    if (!ready) {
+      throw new Error(
+        midiProvisioningMessage ?? "No se pudieron preparar los puertos MIDI.",
+      )
+    }
     return {
       code: 0,
       stdout: existingExecutablePath,
@@ -1050,7 +995,12 @@ async function installLoopMidi() {
 
   const result = await runProcess(installerPath, ["/quiet", "/norestart"], false)
   if (result.code === 0) {
-    await provisionMidiBridge({ installIfMissing: false })
+    const ready = await provisionMidiBridge({ installIfMissing: false })
+    if (!ready) {
+      throw new Error(
+        midiProvisioningMessage ?? "No se pudieron preparar los puertos MIDI.",
+      )
+    }
   }
 
   return result
