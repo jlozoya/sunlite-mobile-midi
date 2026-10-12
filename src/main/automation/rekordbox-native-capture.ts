@@ -40,6 +40,7 @@ $quality.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter(
   [System.Drawing.Imaging.Encoder]::Quality, [long]65)
 $bitmap = $null
 $graphics = $null
+$memory = New-Object System.IO.MemoryStream
 try {
   while ([RekordboxWindowApi]::IsWindow($window)) {
     $started = [System.Diagnostics.Stopwatch]::StartNew()
@@ -61,23 +62,24 @@ try {
     try { $captured = [RekordboxWindowApi]::PrintWindow($window, $dc, 2) }
     finally { $graphics.ReleaseHdc($dc) }
     if ($captured) {
-      $memory = New-Object System.IO.MemoryStream
-      try {
-        $bitmap.Save($memory, $jpeg, $quality)
-        $bytes = $memory.ToArray()
-        $length = [BitConverter]::GetBytes([int]$bytes.Length)
-        $output.Write($length, 0, 4)
-        $output.Write($bytes, 0, $bytes.Length)
-        $output.Flush()
-      } finally { $memory.Dispose() }
+      # Reuse the encoder buffer instead of allocating/copying a full JPEG each frame.
+      $memory.SetLength(0)
+      $memory.Position = 0
+      $bitmap.Save($memory, $jpeg, $quality)
+      $length = [BitConverter]::GetBytes([int]$memory.Length)
+      $output.Write($length, 0, 4)
+      $output.Write($memory.GetBuffer(), 0, [int]$memory.Length)
+      $output.Flush()
     }
-    $remaining = 40 - $started.ElapsedMilliseconds
+    # Aim for 60 fps when capture/encoding fit the budget; never queue old captures.
+    $remaining = [int][Math]::Ceiling((1000.0 / 60) - $started.Elapsed.TotalMilliseconds)
     if ($remaining -gt 0) { Start-Sleep -Milliseconds $remaining }
   }
 } finally {
   if ($null -ne $graphics) { $graphics.Dispose() }
   if ($null -ne $bitmap) { $bitmap.Dispose() }
   $quality.Dispose()
+  $memory.Dispose()
 }
 `
 

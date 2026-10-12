@@ -362,6 +362,10 @@ restart Electron automatically. Use `bun run start` to run a regular production 
 
 ### Native modules
 
+`rebuild:electron` first checks and completes the Electron binary installation. This
+also repairs installs where the package is present but its download/install step did
+not finish. `dev`, `start` and Windows packaging run this step automatically.
+
 `rebuild:electron` uses `electron-rebuild -f -o better-sqlite3`. The `-o` matters: it
 restricts the rebuild to that one module. The similar-looking `-w` is _additive_, so
 with `-f` it drags every native module in the tree through node-gyp, which then needs a

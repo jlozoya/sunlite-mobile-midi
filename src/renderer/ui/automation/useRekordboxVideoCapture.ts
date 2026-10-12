@@ -1,6 +1,6 @@
 import { useEffect } from "react"
 
-const FRAME_INTERVAL_MS = 80
+const FRAME_INTERVAL_MS = 1000 / 30
 const RETRY_INTERVAL_MS = 2000
 
 let liveRekordboxVideo: HTMLVideoElement | null = null
@@ -39,27 +39,41 @@ export function useRekordboxVideoCapture(): void {
     if (bridge.nativeCursorFree) {
       let active = true
       let decoding = false
-      const unsubscribe = bridge.onFrame(async (bytes) => {
-        if (!active || decoding) return
+      let pendingFrame: Uint8Array | null = null
+      const decodeLatest = async () => {
+        if (decoding) return
         decoding = true
         try {
-          const image = await createImageBitmap(
-            new Blob([new Uint8Array(bytes)], { type: "image/jpeg" }),
-          )
-          if (active) {
-            liveRekordboxImage?.close()
-            liveRekordboxImage = image
-          } else {
-            image.close()
+          while (active && pendingFrame) {
+            const bytes = pendingFrame
+            pendingFrame = null
+            try {
+              const image = await createImageBitmap(
+                new Blob([new Uint8Array(bytes)], { type: "image/jpeg" }),
+              )
+              if (active) {
+                liveRekordboxImage?.close()
+                liveRekordboxImage = image
+              } else {
+                image.close()
+              }
+            } catch {
+              // Skip an invalid frame and continue with the latest complete frame.
+            }
           }
-        } catch {
-          // A partial frame is skipped; the next complete frame will replace it.
         } finally {
           decoding = false
         }
+      }
+      const unsubscribe = bridge.onFrame((bytes) => {
+        if (!active) return
+        // At most one waiting frame: new arrivals replace old pending images.
+        pendingFrame = bytes
+        void decodeLatest()
       })
       return () => {
         active = false
+        pendingFrame = null
         unsubscribe()
         liveRekordboxImage?.close()
         liveRekordboxImage = null
@@ -93,7 +107,7 @@ export function useRekordboxVideoCapture(): void {
               maxWidth: 1600,
               minHeight: 180,
               maxHeight: 900,
-              maxFrameRate: 30,
+              maxFrameRate: 60,
             },
           } as unknown as MediaTrackConstraints
           stream = await navigator.mediaDevices.getUserMedia({
@@ -107,6 +121,7 @@ export function useRekordboxVideoCapture(): void {
           liveRekordboxVideo = video
 
           while (active && stream.getVideoTracks()[0]?.readyState === "live") {
+            const startedAt = performance.now()
             if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
               if (
                 canvas.width !== video.videoWidth ||
@@ -123,7 +138,7 @@ export function useRekordboxVideoCapture(): void {
                 await bridge.pushFrame(new Uint8Array(await blob.arrayBuffer()))
               }
             }
-            await wait(FRAME_INTERVAL_MS)
+            await wait(Math.max(0, FRAME_INTERVAL_MS - (performance.now() - startedAt)))
           }
         } catch {
           // A closed or restarted rekordbox window is rediscovered on the next attempt.

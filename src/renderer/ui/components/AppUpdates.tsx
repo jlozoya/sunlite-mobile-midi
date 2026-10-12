@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react"
+import { Dialog, Modal, ModalOverlay } from "react-aria-components"
 import type { UpdateStatus } from "../../../shared/update-types"
 import { ActionButton, Notice, SectionHeader, Surface, tokens } from "../ui-kit"
 
@@ -78,15 +79,6 @@ export function AppUpdates() {
       window.clearInterval(timer)
     }
   }, [api])
-
-  useEffect(() => {
-    if (!confirming) return
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setConfirming(false)
-    }
-    window.addEventListener("keydown", close)
-    return () => window.removeEventListener("keydown", close)
-  }, [confirming])
 
   if (!api) return null
 
@@ -169,7 +161,10 @@ export function AppUpdates() {
       </div>
 
       {confirming && (
-        <div
+        <ModalOverlay
+          isOpen
+          onOpenChange={setConfirming}
+          isDismissable
           style={{
             position: "fixed",
             inset: 0,
@@ -179,51 +174,47 @@ export function AppUpdates() {
             backgroundColor: "rgba(2, 6, 23, 0.74)",
             padding: 20,
           }}
-          onMouseDown={() => setConfirming(false)}
         >
-          <Surface
-            variant="solid"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Confirmar la instalación"
-            style={{ width: "min(100%, 460px)" }}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <SectionHeader
-              title="Instalar y reiniciar"
-              description={
-                status?.availableVersion
-                  ? `Versión ${status.availableVersion}`
-                  : "La aplicación se cerrará para actualizarse."
-              }
-            />
-            <Notice tone="warning" layout="stack">
-              Las actualizaciones se instalan cuando eliges reiniciar. Termina la
-              grabación y cambia a modo Manual antes de instalar.
-            </Notice>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 12,
-                marginTop: 16,
-              }}
-            >
-              <ActionButton variant="secondary" onPress={() => setConfirming(false)}>
-                Cancelar
-              </ActionButton>
-              <ActionButton
-                isDisabled={busy}
-                onPress={() => {
-                  setConfirming(false)
-                  void act("install")
-                }}
-              >
-                Instalar y reiniciar
-              </ActionButton>
-            </div>
-          </Surface>
-        </div>
+          <Modal style={{ width: "min(100%, 460px)" }}>
+            <Dialog aria-label="Confirmar la instalación" style={{ outline: "none" }}>
+              <Surface variant="solid">
+                <SectionHeader
+                  title="Instalar y reiniciar"
+                  description={
+                    status?.availableVersion
+                      ? `Versión ${status.availableVersion}`
+                      : "La aplicación se cerrará para actualizarse."
+                  }
+                />
+                <Notice tone="warning" layout="stack">
+                  Las actualizaciones se instalan cuando eliges reiniciar. Termina la
+                  grabación y cambia a modo Manual antes de instalar.
+                </Notice>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 12,
+                    marginTop: 16,
+                  }}
+                >
+                  <ActionButton variant="secondary" onPress={() => setConfirming(false)}>
+                    Cancelar
+                  </ActionButton>
+                  <ActionButton
+                    isDisabled={busy}
+                    onPress={() => {
+                      setConfirming(false)
+                      void act("install")
+                    }}
+                  >
+                    Instalar y reiniciar
+                  </ActionButton>
+                </div>
+              </Surface>
+            </Dialog>
+          </Modal>
+        </ModalOverlay>
       )}
     </Surface>
   )

@@ -6,7 +6,7 @@ import {
   type ControllerCustomization,
 } from "../../shared/controller-config.ts"
 import { MidiController } from "./components/MidiController"
-import { AppUpdates } from "./components/AppUpdates"
+import { AppSettings } from "./components/AppSettings"
 import { Toast } from "./components/Toast"
 import { AnimatedDisclosure } from "./components/AnimatedDisclosure"
 import { AutomationStudio } from "./automation/AutomationStudio"
@@ -39,7 +39,7 @@ const DESKTOP_TABS: Array<{
   {
     id: "connection",
     label: "Conexión",
-    description: "Software, red, teléfono y router MIDI",
+    description: "Software y router MIDI",
   },
 ]
 
@@ -67,9 +67,7 @@ export function App() {
   const [activeDesktopTab, setActiveDesktopTab] = useState<DesktopTab>("controller")
   const initialTabSelected = useRef(false)
   const [softwareBusy, setSoftwareBusy] = useState(false)
-  const [copyBusy, setCopyBusy] = useState(false)
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
-  const urlRef = useRef<HTMLInputElement | null>(null)
 
   function selectTab(tab: DesktopTab) {
     initialTabSelected.current = true
@@ -93,24 +91,6 @@ export function App() {
     tabRefs.current[nextIndex]?.focus()
   }
 
-  async function copyControllerUrl() {
-    if (!status?.preferredLanUrl || copyBusy) return
-    setCopyBusy(true)
-    try {
-      await navigator.clipboard.writeText(status.preferredLanUrl)
-      setSetupMessage(
-        "Enlace copiado. Ábrelo en un dispositivo conectado a la misma red Wi-Fi.",
-      )
-    } catch {
-      urlRef.current?.focus()
-      urlRef.current?.select()
-      setSetupMessage(
-        "No se pudo copiar automáticamente. El enlace está seleccionado para copiarlo manualmente.",
-      )
-    } finally {
-      setCopyBusy(false)
-    }
-  }
   const software = status?.lightingSoftware ?? "sunlite"
   const softwareLabel = LIGHTING_SOFTWARE_LABELS[software]
 
@@ -225,15 +205,24 @@ export function App() {
           </p>
         </div>
 
-        <StatusBadge
-          tone={
-            isOnline ? "success" : connectionState === "connecting" ? "warning" : "danger"
-          }
-          dot
-          role="status"
-        >
-          {statusLabel}
-        </StatusBadge>
+        <div {...stylex.props(styles.headerActions)}>
+          <StatusBadge
+            tone={
+              isOnline
+                ? "success"
+                : connectionState === "connecting"
+                  ? "warning"
+                  : "danger"
+            }
+            dot
+            role="status"
+          >
+            {statusLabel}
+          </StatusBadge>
+          {!isMobileView ? (
+            <AppSettings status={status} statusError={statusError} />
+          ) : null}
+        </div>
       </header>
 
       {!isOnline || statusError ? (
@@ -263,8 +252,6 @@ export function App() {
           </ActionButton>
         </Notice>
       ) : null}
-
-      {!isMobileView ? <AppUpdates /> : null}
 
       {!isMobileView ? (
         <nav {...stylex.props(styles.tabs)} aria-label="Secciones de la aplicación">
@@ -333,61 +320,6 @@ export function App() {
           {...stylex.props(activeDesktopTab !== "connection" && styles.tabPanelHidden)}
         >
           <section {...stylex.props(styles.heroGrid)}>
-            <Surface {...stylex.props(styles.qrPanel)}>
-              <SectionHeader
-                title="Conecta tu teléfono"
-                description="Escanea el código QR desde un dispositivo conectado a la misma red Wi-Fi."
-              />
-
-              {status?.qrDataUrl ? (
-                <div {...stylex.props(styles.qrWrap)}>
-                  <img
-                    {...stylex.props(styles.qrImage)}
-                    src={status.qrDataUrl}
-                    alt="Código QR para abrir el controlador en tu teléfono"
-                  />
-                </div>
-              ) : (
-                <div {...stylex.props(styles.qrPlaceholder)}>
-                  {statusError ? "Código QR no disponible" : "Preparando código QR…"}
-                </div>
-              )}
-
-              <div {...stylex.props(styles.shareLink)}>
-                <label htmlFor="controller-url" {...stylex.props(styles.shareLabel)}>
-                  Enlace del controlador
-                </label>
-                <input
-                  id="controller-url"
-                  ref={urlRef}
-                  {...stylex.props(styles.urlBox)}
-                  readOnly
-                  value={status?.preferredLanUrl ?? ""}
-                  placeholder="Detectando dirección de red…"
-                  onFocus={(event) => event.currentTarget.select()}
-                />
-                <ActionButton
-                  variant="secondary"
-                  stretch
-                  isDisabled={!status?.preferredLanUrl || copyBusy}
-                  onPress={() => void copyControllerUrl()}
-                >
-                  {copyBusy ? "Copiando…" : "Copiar enlace"}
-                </ActionButton>
-              </div>
-
-              {status?.networkUrlCandidates && status.networkUrlCandidates.length > 1 ? (
-                <div {...stylex.props(styles.networkList)}>
-                  <strong>Otras direcciones de red</strong>
-                  {status.networkUrlCandidates.slice(1).map((candidate) => (
-                    <span key={`${candidate.interfaceName}-${candidate.address}`}>
-                      {candidate.url} · {candidate.interfaceName} · {candidate.note}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-            </Surface>
-
             <Surface {...stylex.props(styles.connectionPanel)}>
               <SectionHeader
                 title="Conexión automática"
@@ -699,6 +631,7 @@ export function App() {
 }
 
 const styles = stylex.create({
+  headerActions: { display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 },
   mobileWaveforms: {
     marginBottom: "10px",
     borderWidth: "1px",
@@ -862,88 +795,18 @@ const styles = stylex.create({
   },
   heroGrid: {
     display: "grid",
-    gridTemplateColumns: {
-      default: "1fr",
-      "@media (min-width: 1100px)": "340px minmax(0, 1fr)",
-    },
+    gridTemplateColumns: "minmax(0, 1fr)",
     gap: "16px",
   },
   connectionPanel: { marginTop: "16px" },
-  qrPanel: {
-    marginTop: "16px",
-    display: "grid",
-    justifyItems: "center",
-    alignSelf: "start",
-  },
-  qrWrap: {
-    width: "min(100%, 260px)",
-    boxSizing: "border-box",
-    borderRadius: "22px",
-    backgroundColor: "#ffffff",
-    padding: "12px",
-  },
-  qrImage: {
-    display: "block",
-    width: "100%",
-    height: "auto",
-  },
-  qrPlaceholder: {
-    display: "grid",
-    placeItems: "center",
-    width: "min(100%, 320px)",
-    aspectRatio: "1 / 1",
-    borderRadius: "22px",
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    color: "#94a3b8",
-    fontWeight: 800,
-  },
   connectionNotice: {
     marginTop: "12px",
     flexWrap: "wrap",
-  },
-  shareLink: {
-    display: "grid",
-    gap: "10px",
-    width: "100%",
-    marginTop: "16px",
-  },
-  shareLabel: {
-    fontSize: "0.78rem",
-    fontWeight: 800,
-    color: "#cbd5e1",
-  },
-  urlBox: {
-    width: "100%",
-    boxSizing: "border-box",
-    border: "1px solid rgba(139, 92, 246, 0.3)",
-    outline: { default: "none", ":focus-visible": "2px solid #a78bfa" },
-    borderRadius: "14px",
-    backgroundColor: "rgba(8, 10, 18, 0.74)",
-    padding: "12px",
-    color: "#ddd6fe",
-    fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
-    fontSize: "0.86rem",
-    overflowWrap: "anywhere",
-    textAlign: "center",
   },
   errorText: {
     width: "100%",
     color: "#fecaca",
     fontSize: "0.85rem",
-    overflowWrap: "anywhere",
-  },
-  networkList: {
-    boxSizing: "border-box",
-    display: "grid",
-    gap: "6px",
-    width: "100%",
-    marginTop: "10px",
-    borderRadius: "14px",
-    backgroundColor: "rgba(8, 10, 18, 0.42)",
-    padding: "10px",
-    color: "#94a3b8",
-    fontSize: "0.76rem",
-    lineHeight: 1.4,
     overflowWrap: "anywhere",
   },
   setupFlow: {

@@ -89,6 +89,7 @@ function LiveDeckCanvas({
     let stableSince = 0
     let distinctFrames = 0
     let previousImage: CanvasImageSource | null = null
+    let lastDrawnImage: CanvasImageSource | null = null
     const markReady = (
       source: "local" | "remote",
       width: number,
@@ -134,9 +135,12 @@ function LiveDeckCanvas({
           canvas.width = width
           canvas.height = height
         }
-        const context = canvas.getContext("2d")
+        const context = canvas.getContext("2d", { alpha: false })
         if (context) {
-          context.drawImage(frame.image, x, y, width, height, 0, 0, width, height)
+          if (frame.image !== lastDrawnImage || frame.image instanceof HTMLVideoElement) {
+            context.drawImage(frame.image, x, y, width, height, 0, 0, width, height)
+            lastDrawnImage = frame.image
+          }
           markReady("local", frame.width, frame.height, frame.image)
         }
       }
@@ -153,7 +157,8 @@ function LiveDeckCanvas({
         return
       }
       controller = new AbortController()
-      let delay = desktop ? 350 : 70
+      const startedAt = performance.now()
+      let delay = desktop ? 350 : 1000 / 30
       try {
         const response = await fetch(
           `/api/automation/rekordbox/decks/${deck}/frame?at=${sequence++}`,
@@ -167,7 +172,7 @@ function LiveDeckCanvas({
             canvas.width = bitmap.width
             canvas.height = bitmap.height
           }
-          const context = canvas.getContext("2d")
+          const context = canvas.getContext("2d", { alpha: false })
           if (context) {
             context.drawImage(bitmap, 0, 0)
             markReady("remote", bitmap.width, bitmap.height, bitmap)
@@ -177,7 +182,11 @@ function LiveDeckCanvas({
       } catch {
         delay = 400
       }
-      if (active) timer = window.setTimeout(() => void drawRemote(), delay)
+      if (active)
+        timer = window.setTimeout(
+          () => void drawRemote(),
+          Math.max(0, delay - (performance.now() - startedAt)),
+        )
     }
     void drawRemote()
     return () => {
