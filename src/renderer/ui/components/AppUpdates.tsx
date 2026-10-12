@@ -125,7 +125,7 @@ export function AppUpdates() {
         title="Actualizaciones"
         description={
           status
-            ? `Versión de la aplicación: ${status.currentVersion}`
+            ? `Versión ${status.currentVersion} · Búsqueda y descarga automáticas`
             : "Consultando versión…"
         }
       />
@@ -158,7 +158,7 @@ export function AppUpdates() {
         {isDisabled && status ? <Hint text={status.message}>{check}</Hint> : check}
         {status?.availableVersion && ["available", "error"].includes(status.phase) && (
           <ActionButton isDisabled={busy} onPress={() => void act("download")}>
-            Descargar {status.availableVersion}
+            Reintentar descarga de {status.availableVersion}
           </ActionButton>
         )}
         {status?.phase === "downloaded" && (

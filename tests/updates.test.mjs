@@ -30,15 +30,14 @@ function fixture(disabled = null, prepare = () => {}) {
   return { updater, manager: new UpdateManager(updater, "0.3.1", disabled, prepare) }
 }
 
-test("search, explicit download and explicit install; no install on ordinary quit", async () => {
+test("search automatically downloads; installation stays explicit", async () => {
   const { updater, manager } = fixture()
   assert.equal(updater.autoDownload, false)
   assert.equal(updater.autoInstallOnAppQuit, false)
   assert.equal(updater.allowDowngrade, false)
   assert.equal(updater.allowPrerelease, false)
-  assert.equal((await manager.check()).phase, "available")
-  assert.equal(updater.downloads, 0)
-  manager.install()
+  assert.equal((await manager.check()).phase, "downloaded")
+  assert.equal(updater.downloads, 1)
   assert.equal(updater.installs, 0)
   assert.equal((await manager.download()).phase, "downloaded")
   await manager.check()
@@ -81,17 +80,16 @@ test("network failure is visible and check can be retried", async () => {
   }
   assert.equal((await manager.check()).phase, "error")
   updater.checkForUpdates = FakeUpdater.prototype.checkForUpdates
-  assert.equal((await manager.check()).phase, "available")
+  assert.equal((await manager.check()).phase, "downloaded")
 })
 
 test("download failure does not install; retry succeeds", async () => {
   const { updater, manager } = fixture()
-  await manager.check()
   updater.downloadUpdate = async () => {
     updater.emit("error", new Error("checksum"))
     throw new Error("checksum")
   }
-  assert.equal((await manager.download()).phase, "error")
+  assert.equal((await manager.check()).phase, "error")
   manager.install()
   assert.equal(updater.installs, 0)
   updater.downloadUpdate = FakeUpdater.prototype.downloadUpdate
@@ -100,7 +98,6 @@ test("download failure does not install; retry succeeds", async () => {
 
 test("simultaneous operations cannot replace an in-progress download", async () => {
   const { updater, manager } = fixture()
-  await manager.check()
   let finish
   updater.downloadUpdate = () =>
     new Promise((resolve) => {
@@ -109,7 +106,9 @@ test("simultaneous operations cannot replace an in-progress download", async () 
         resolve([])
       }
     })
-  const download = manager.download()
+  const download = manager.check()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(manager.status().phase, "downloading")
   await manager.check()
   await manager.download()
   manager.install()
@@ -122,6 +121,9 @@ test("simultaneous operations cannot replace an in-progress download", async () 
 
 test("no-update event clears old candidate; null check is an error", async () => {
   const { updater, manager } = fixture()
+  updater.downloadUpdate = async () => {
+    throw new Error("offline")
+  }
   await manager.check()
   updater.checkForUpdates = async () => {
     updater.emit("update-not-available")
@@ -129,8 +131,39 @@ test("no-update event clears old candidate; null check is an error", async () =>
   }
   assert.equal((await manager.check()).phase, "idle")
   assert.equal(manager.status().availableVersion, null)
+  assert.equal(updater.downloads, 0)
   updater.checkForUpdates = async () => null
   assert.equal((await manager.check()).phase, "error")
+})
+
+test("scheduled startup and periodic checks download without user interaction", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] })
+  const { updater, manager } = fixture()
+  updater.checkForUpdates = async () => {
+    updater.checks++
+    if (updater.checks === 1) updater.emit("update-not-available")
+    else updater.emit("update-available", { version: "0.4.0" })
+    return {}
+  }
+  try {
+    manager.start()
+    manager.start()
+    t.mock.timers.tick(5000)
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(updater.checks, 1)
+    assert.equal(updater.downloads, 0)
+    t.mock.timers.tick(4 * 60 * 60 * 1000)
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(updater.checks, 2)
+    assert.equal(updater.downloads, 1)
+    assert.equal(manager.status().phase, "downloaded")
+    assert.equal(updater.installs, 0)
+    manager.stop()
+    t.mock.timers.tick(4 * 60 * 60 * 1000)
+    assert.equal(updater.checks, 2)
+  } finally {
+    manager.stop()
+  }
 })
 
 test("feed override requires HTTPS outside loopback and rejects credentials", () => {

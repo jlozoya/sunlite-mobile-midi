@@ -72,10 +72,15 @@ Updates are served from GitHub releases of this repository:
 ]
 ```
 
-Updates are deliberately not automatic. The app never downloads or installs on its own,
-and never installs on quit. The **Actualizaciones** panel exposes three explicit steps:
-search, download, install. Installing is refused while a training session is recording
-or while automation is not in Manual mode, so an update cannot interrupt a live show.
+The installed app checks five seconds after startup and every four hours. When a new
+stable version is found, it downloads automatically and reports progress in the
+**Actualizaciones** panel. Failed downloads can be retried from the panel or through
+the next scheduled check. Only one check/download runs at a time, and a downloaded
+installer is preserved until you choose **Instalar y reiniciar**.
+
+The app never installs on ordinary quit. Installing is refused while a training
+session is recording or while automation is not in Manual mode, so an update cannot
+interrupt a live show.
 
 Updates are disabled, with the reason shown in the panel, when the app runs in
 development, outside Windows, as a portable executable, or from a copy that was not
@@ -83,16 +88,31 @@ installed by the NSIS installer.
 
 ## Publishing a release
 
-1. Update `version` in `package.json` to a version newer than the current GitHub
-   release, then run `bun install` to update `bun.lock`.
-2. Commit the changes, tag that commit as `v<version>`, and push the commit and tag.
-   The `Windows installer` workflow refuses to build if the tag and package version differ.
-3. After the build and release verification pass, CI creates the GitHub release with
-   generated notes and uploads the installer, its `.blockmap`, and `latest.yml`.
-   Installed copies can then find the new version in **Actualizaciones**.
+1. Increase `version` in `package.json` to a stable `x.y.z` version newer than the
+   current published release.
+2. Commit and push the changes to `master`. The `Windows installer` workflow checks
+   the version, runs checks/tests, builds the NSIS installer and verifies its files.
+3. CI creates a draft GitHub release tagged `v<version>` at the triggering commit,
+   uploads the installer, its `.blockmap`, and `latest.yml`, then makes it public.
+   Installed copies automatically find and download it.
 
-A manual `workflow_dispatch` run builds and uploads a workflow artifact without
-publishing a GitHub release. A tagged run never replaces an existing release.
+No local publishing token is required: CI uses `github.token` with write access only
+in the publish job. The repository must be public for installed clients to download
+updates without credentials. GitHub Actions must be enabled and repository policies
+must allow the workflow to create tags and releases.
+
+Existing published versions are skipped, and older versions cannot replace the latest
+stable release. Upload failures leave a draft which can be resumed by rerunning the
+workflow. Publication is serialized to avoid concurrent uploads. A version tag that
+already points at a different commit is rejected.
+
+Pushing a matching `v<version>` tag also supports the same pipeline. Manual
+`workflow_dispatch` runs build without publishing by default; select **publish** to
+publish from `master` or a matching version tag. Version tags must match `package.json`.
+
+Run `bun run test:updates` to verify download behavior and release planning locally.
+Installed copies must first receive a build containing this automatic download logic;
+older builds retain their previous manual download behavior.
 
 ## Local update feed override
 

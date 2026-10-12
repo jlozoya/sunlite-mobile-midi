@@ -1,13 +1,47 @@
 name: Windows installer
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publicar la versión de package.json después de verificarla
+        type: boolean
+        default: false
   push:
+    branches:
+      - master
+    paths:
+      - package.json
+      - .github/workflows/release-windows.yml
+      - scripts/plan-release.mjs
     tags:
       - "v*"
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      publish: ${{ steps.release.outputs.publish }}
+      build: ${{ steps.release.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Resolve release version
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/plan-release.mjs
   build:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     # Pinned, not windows-latest. That label now resolves to windows-2025-vs2026,
     # and the node-gyp bundled with @electron/rebuild cannot detect Visual Studio
     # 2026, so rebuilding the native MIDI and SQLite modules fails with
@@ -33,12 +67,6 @@ jobs:
       - name: Point node-gyp at Python 3.11
         shell: pwsh
         run: echo "PYTHON=${{ steps.python.outputs.python-path }}" >> $env:GITHUB_ENV
-      - name: Validate release tag
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).version
-          if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag must match package.json version" }
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run test:updates
@@ -54,12 +82,13 @@ jobs:
             release/latest.yml
 
   publish:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    if: needs.plan.outputs.publish == 'true'
+    needs: [plan, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: sunlite-windows
@@ -67,12 +96,28 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          set -euo pipefail
+          # Resume a draft on retry; published versions are skipped by the plan job.
+          releases=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 10000 --json tagName,isDraft)
+          existing=$(printf '%s' "$releases" | jq -r --arg tag "$RELEASE_TAG" '.[] | select(.tagName == $tag) | if .isDraft then "draft" else "published" end')
+          if [ "$existing" = "published" ]; then
+            echo "Release already published: $RELEASE_TAG"
+            exit 0
+          fi
+          if [ "$existing" != "draft" ]; then
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TAG" \
+              --generate-notes \
+              --draft
+          fi
+          gh release upload "$RELEASE_TAG" \
             release/Sunlite-Mobile-MIDI-Setup-*.exe \
             release/Sunlite-Mobile-MIDI-Setup-*.exe.blockmap \
             release/latest.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --verify-tag \
-            --generate-notes \
-            --latest
+            --clobber
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft=false --latest

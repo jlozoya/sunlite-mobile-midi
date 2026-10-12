@@ -47,9 +47,11 @@ export class UpdateManager {
       phase: disabledReason ? "disabled" : "idle",
       availableVersion: null,
       percent: null,
-      message: disabledReason ?? "Puedes buscar una nueva versión.",
+      message:
+        disabledReason ?? "Las actualizaciones se buscan y descargan automáticamente.",
       checkedAt: null,
     }
+    // Keep the check and download under one lock, including retries and errors.
     updater.autoDownload = false
     updater.autoInstallOnAppQuit = false
     updater.allowPrerelease = false
@@ -140,6 +142,7 @@ export class UpdateManager {
     try {
       const result = await this.updater.checkForUpdates()
       if (!result) this.fail()
+      else if (this.state.phase === "available") await this.fetchUpdate()
     } catch {
       this.fail()
     } finally {
@@ -156,6 +159,15 @@ export class UpdateManager {
     )
       return this.status()
     this.busy = true
+    try {
+      await this.fetchUpdate()
+    } finally {
+      this.busy = false
+    }
+    return this.status()
+  }
+
+  private async fetchUpdate(): Promise<void> {
     this.change({
       phase: "downloading",
       percent: 0,
@@ -165,10 +177,7 @@ export class UpdateManager {
       await this.updater.downloadUpdate()
     } catch {
       this.fail()
-    } finally {
-      this.busy = false
     }
-    return this.status()
   }
 
   install(): UpdateStatus {
