@@ -138,7 +138,10 @@ const styles = stylex.create({
   deckImage: {
     display: "block",
     width: "100%",
-    height: "auto",
+    height: {
+      default: "auto",
+      "@media (max-width: 760px)": "clamp(48px, 12vw, 80px)",
+    },
     borderRadius: "7px",
     opacity: 1,
     transitionProperty: "opacity",

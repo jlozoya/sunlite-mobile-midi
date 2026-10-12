@@ -47,7 +47,6 @@ export function RekordboxWaveforms({ enabled = true }: { enabled?: boolean }) {
       <div {...stylex.props(styles.heading)}>
         <div>
           <span {...stylex.props(styles.eyebrow)}>REKORDBOX</span>
-          <strong>Waveforms de los decks</strong>
         </div>
         <span {...stylex.props(styles.detail)}>
           {status.available ? "En vivo" : "Esperando Rekordbox"}

@@ -11,6 +11,7 @@ import { ControllerConfigModal } from "./ControllerConfigModal"
 import { FaderStrip } from "./FaderStrip"
 import { PadButton } from "./PadButton"
 import { SceneButton } from "./SceneButton"
+import { MobileControllerGroup } from "./MobileControllerGroup"
 import { Notice, Surface } from "../ui-kit"
 
 export type MidiControllerProps = {
@@ -87,70 +88,77 @@ export function MidiController({
             })}
           </div>
 
-          {model.sideButtons.length ? (
-            <div {...stylex.props(styles.sideButtonColumn)}>
-              {model.sideButtons.map((button) => (
-                <MappedSceneButton
-                  key={button.id}
-                  button={button}
-                  padStates={padStates}
-                  customization={customization}
-                  isMobileView={isMobileView}
-                  isDisabled={!isConnected}
-                  sendCommand={sendCommand}
-                  onEdit={() =>
-                    setEditingControl({
-                      kind: "scene",
-                      id: button.id,
-                      note: button.note,
-                    })
-                  }
-                />
-              ))}
-            </div>
-          ) : null}
+          {model.sideButtons.length || model.bottomButtons.length || cornerButton ? (
+            <MobileControllerGroup label="Pads Complementarios" mobile={isMobileView}>
+              {model.sideButtons.length ? (
+                <div {...stylex.props(styles.sideButtonColumn)}>
+                  {model.sideButtons.map((button) => (
+                    <MappedSceneButton
+                      key={button.id}
+                      button={button}
+                      padStates={padStates}
+                      customization={customization}
+                      isMobileView={isMobileView}
+                      isDisabled={!isConnected}
+                      sendCommand={sendCommand}
+                      onEdit={() =>
+                        setEditingControl({
+                          kind: "scene",
+                          id: button.id,
+                          note: button.note,
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              ) : null}
 
-          {model.bottomButtons.length ? (
-            <div {...stylex.props(styles.bottomButtonRow)} style={bottomButtonRowStyle}>
-              {model.bottomButtons.map((button) => (
-                <MappedSceneButton
-                  key={button.id}
-                  button={button}
-                  padStates={padStates}
-                  customization={customization}
-                  isMobileView={isMobileView}
-                  isDisabled={!isConnected}
-                  sendCommand={sendCommand}
-                  onEdit={() =>
-                    setEditingControl({
-                      kind: "scene",
-                      id: button.id,
-                      note: button.note,
-                    })
-                  }
-                />
-              ))}
-            </div>
-          ) : null}
+              {model.bottomButtons.length ? (
+                <div
+                  {...stylex.props(styles.bottomButtonRow)}
+                  style={bottomButtonRowStyle}
+                >
+                  {model.bottomButtons.map((button) => (
+                    <MappedSceneButton
+                      key={button.id}
+                      button={button}
+                      padStates={padStates}
+                      customization={customization}
+                      isMobileView={isMobileView}
+                      isDisabled={!isConnected}
+                      sendCommand={sendCommand}
+                      onEdit={() =>
+                        setEditingControl({
+                          kind: "scene",
+                          id: button.id,
+                          note: button.note,
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              ) : null}
 
-          {cornerButton ? (
-            <div {...stylex.props(styles.cornerButton)}>
-              <MappedSceneButton
-                button={cornerButton}
-                padStates={padStates}
-                customization={customization}
-                isMobileView={isMobileView}
-                isDisabled={!isConnected}
-                sendCommand={sendCommand}
-                onEdit={() =>
-                  setEditingControl({
-                    kind: "scene",
-                    id: cornerButton.id,
-                    note: cornerButton.note,
-                  })
-                }
-              />
-            </div>
+              {cornerButton ? (
+                <div {...stylex.props(styles.cornerButton)}>
+                  <MappedSceneButton
+                    button={cornerButton}
+                    padStates={padStates}
+                    customization={customization}
+                    isMobileView={isMobileView}
+                    isDisabled={!isConnected}
+                    sendCommand={sendCommand}
+                    onEdit={() =>
+                      setEditingControl({
+                        kind: "scene",
+                        id: cornerButton.id,
+                        note: cornerButton.note,
+                      })
+                    }
+                  />
+                </div>
+              ) : null}
+            </MobileControllerGroup>
           ) : null}
         </div>
 
