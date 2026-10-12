@@ -73,9 +73,9 @@ function LiveDeckCanvas({
   const [ready, setReady] = useState(false)
   const readyRef = useRef(false)
   useEffect(() => {
+    readyRef.current = false
+    setReady(false)
     if (!enabled) {
-      readyRef.current = false
-      setReady(false)
       return
     }
     let active = true
@@ -84,7 +84,32 @@ function LiveDeckCanvas({
     let controller: AbortController | null = null
     let sequence = 0
     const desktop = Boolean(window.rekordboxCapture)
-    const markReady = () => {
+    const nativeCapture = Boolean(window.rekordboxCapture?.nativeCursorFree)
+    let sourceKey = ""
+    let stableSince = 0
+    let distinctFrames = 0
+    let previousImage: CanvasImageSource | null = null
+    const markReady = (
+      source: "local" | "remote",
+      width: number,
+      height: number,
+      image: CanvasImageSource,
+    ) => {
+      const key = `${source}:${width}:${height}`
+      if (key !== sourceKey) {
+        sourceKey = key
+        stableSince = performance.now()
+        distinctFrames = 0
+        previousImage = null
+        readyRef.current = false
+        setReady(false)
+      }
+      if (image !== previousImage || image instanceof HTMLVideoElement) {
+        previousImage = image
+        distinctFrames++
+      }
+      // A decoded frame alone does not mean capture has finished resizing.
+      if (distinctFrames < 2 || performance.now() - stableSince < 300) return
       if (readyRef.current) return
       readyRef.current = true
       setReady(true)
@@ -112,7 +137,7 @@ function LiveDeckCanvas({
         const context = canvas.getContext("2d")
         if (context) {
           context.drawImage(frame.image, x, y, width, height, 0, 0, width, height)
-          markReady()
+          markReady("local", frame.width, frame.height, frame.image)
         }
       }
       if (active) animationFrame = window.requestAnimationFrame(drawLocal)
@@ -121,7 +146,9 @@ function LiveDeckCanvas({
 
     // The server remains the fallback on this PC and the live source on phones.
     const drawRemote = async () => {
-      if (desktop && getRekordboxFrame()) {
+      // Windows thumbnails use different window bounds from the native stream.
+      // Keep the loading indicator until that stream supplies the correct crop.
+      if (desktop && (nativeCapture || getRekordboxFrame())) {
         if (active) timer = window.setTimeout(() => void drawRemote(), 350)
         return
       }
@@ -143,7 +170,7 @@ function LiveDeckCanvas({
           const context = canvas.getContext("2d")
           if (context) {
             context.drawImage(bitmap, 0, 0)
-            markReady()
+            markReady("remote", bitmap.width, bitmap.height, bitmap)
           }
         }
         bitmap.close()

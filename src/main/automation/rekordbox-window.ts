@@ -137,6 +137,9 @@ export class RekordboxWindowCapture {
     if (!region) return null
     const image = await this.capture()
     if (!image) return null
+    // The startup thumbnail and PrintWindow stream have different window bounds.
+    // Deck crops must wait for the live stream, including clients on phones.
+    if (process.platform === "win32" && Date.now() - this.streamedAt >= 1000) return null
     const { width, height } = image.getSize()
     const x = Math.floor(region.x * width)
     const y = Math.floor(region.y * height)
