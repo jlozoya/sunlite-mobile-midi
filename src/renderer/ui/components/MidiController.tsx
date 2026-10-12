@@ -32,12 +32,10 @@ export function MidiController({
   model,
   padStates,
   ccValues,
-  lastCommand,
   customization,
   onSaveCustomization,
   isMobileView,
   isConnected = true,
-  feedbackReady,
   feedbackWarning,
   midiChannel,
   sendCommand,
@@ -54,8 +52,8 @@ export function MidiController({
     gridTemplateColumns: `repeat(${isMobileView ? Math.min(5, model.faderColumns) : model.faderColumns}, minmax(0, 1fr))`,
   }
 
-  return (
-    <Surface variant="solid" padding="custom" {...stylex.props(styles.controllerPanel)}>
+  const content = (
+    <>
       {feedbackWarning ? (
         <Notice tone="warning" layout="stack" {...stylex.props(styles.warningText)}>
           {feedbackWarning}
@@ -191,7 +189,14 @@ export function MidiController({
           onSave={onSaveCustomization}
         />
       ) : null}
+    </>
+  )
+  return isMobileView ? (
+    <Surface variant="solid" padding="custom" {...stylex.props(styles.controllerPanel)}>
+      {content}
     </Surface>
+  ) : (
+    <div {...stylex.props(styles.controllerLayout)}>{content}</div>
   )
 }
 
@@ -234,6 +239,7 @@ function MappedSceneButton({
 }
 
 const styles = stylex.create({
+  controllerLayout: { width: "100%", minWidth: 0, boxSizing: "border-box" },
   controllerPanel: {
     width: "100%",
     minWidth: 0,

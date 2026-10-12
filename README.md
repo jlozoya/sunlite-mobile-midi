@@ -109,19 +109,22 @@ App C  ->  Router Entrada 3  ─┘                └─  Router Salida 3  ->  
 
 In **Conexión → Comparte un dispositivo MIDI**:
 
-1. Select the MIDI device. The wizard pairs its input and output when their names match,
-   including Windows numbered endpoints such as `MIDIIN2 (X)` / `MIDIOUT2 (X)`.
-   For different or ambiguous names, select its output in **Opciones avanzadas**.
-2. Choose 2–8 programs and press **Compartir dispositivo**. This saves the configuration,
-   prepares two virtual ports per program and starts the router. Rebuilding a running
-   setup briefly stops routing while it prepares the new connections.
-3. In each program, choose the pair shown in the table. For example:
+1. Select the device and the number of programs (2–8). Matching input/output names
+   are paired automatically, including Windows numbered endpoints. If pairing fails,
+   the return-output selector appears directly in the assistant.
+2. Review the exact MIDI ports shown for each program and press **Compartir y arrancar**.
+   The app saves the setup, prepares its virtual ports and starts the router. A startup
+   failure keeps the saved setup available for retry.
+3. In each program's MIDI settings, select **Router Salida N** as input and
+   **Router Entrada N** as output. Use the copy buttons beside each name.
 
-| Program   | MIDI input (receives) | MIDI output (sends) |
-| --------- | --------------------- | ------------------- |
-| Sunlite   | Router Salida 1       | Router Entrada 1    |
-| rekordbox | Router Salida 2       | Router Entrada 2    |
-| Ableton   | Router Salida 3       | Router Entrada 3    |
+Use **Opciones avanzadas → Repartir por canales** to give each program its own channel
+selection. **Cambiar dispositivo o programas** reopens the assistant with the saved
+choices; applying while running briefly stops the router to prepare its ports.
+**Editar puertos y rutas** exposes the manual editor: add ports first, then routes.
+Changes are staged until **Aplicar cambios**, **Guardar y arrancar** or **Guardar borrador**;
+**Descartar cambios** restores the saved setup. Incomplete drafts can be saved, while
+routing errors and feedback loops prevent startup.
 
 Only the router opens the physical device; each program opens its own virtual pair.
 All channels and message types are copied by default. Channel splitting is optional
@@ -299,8 +302,8 @@ minimized or its window layout changes, restore it or adjust the selected region
 
 This is a visual capture of the rekordbox window. It does not provide track metadata,
 beat data, audio features, or precise transport events to the automation engine. If
-rekordbox plays through a Windows audio output on this PC, click **Capturar audio del PC**
-in the training bar (or select **Audio del PC (Rekordbox)** and **Activar audio**). This
+rekordbox plays through a Windows audio output on this PC, select **Audio del PC (Rekordbox)**
+under **1. Fuente de audio** and click **Iniciar audio**. This
 supplies real system audio to training and automation. If rekordbox plays through an
 external mixer/controller instead, select its USB/REC OUT audio input. Compatible CDJs
 can also provide player data as described below.
@@ -311,8 +314,15 @@ can also provide player data as described below.
 2. Use rekordbox-analyzed tracks so the application can retrieve their HD waveform and beat grid.
 3. Open Automation Studio and wait for the loaded track waveform to appear.
 4. Optionally connect the mixer audio using its USB driver or REC OUT through an audio interface. This lets the model react to the final mixed signal as well.
-5. Keep the application in **Manual** mode and record a training session while using the buttons and faders in this app. Actions performed only inside Sunlite or FreeStyler are not training examples; MIDI LED feedback is recorded for review only.
-6. Stop the recording to train the local model, then test **Assisted** mode before enabling **Auto**.
+5. Click **Empezar entrenamiento**. The application first switches to **Manual**. Use **Ir al Controlador** to record actions with the buttons and faders in this app. Actions performed only inside Sunlite or FreeStyler are not training examples; MIDI LED feedback is recorded for review only.
+6. Return to Automatización and click **Finalizar y aprender** to save the session and train the local model. Then test **Asistido** before enabling **Auto**. These modes require training examples and a live audio or playing CDJ source; their unavailable state explains the missing prerequisite.
+
+To use an existing model, start the audio without recording another session. Audio
+selection and capture controls stay visible. Errors remain on screen until you retry
+an action. When the source disappears during recording, reconnect the same audio
+input or finalize the session before choosing another source. Saved sessions open
+their review timeline with keyboard focus; editing and deletion are unavailable
+while a recording is in progress.
 
 To obtain detailed player state and waveform data, the application announces itself as a virtual PRO DJ LINK device. Only one application can normally own the required network ports, so rekordbox or another PRO DJ LINK integration may conflict on the same computer.
 
@@ -350,6 +360,9 @@ is shown: Rekordbox on this PC or a connected CDJ.
 Select a saved session to display its spectrogram, beats and MIDI actions. Incorrect actions can be excluded from the model, and the model is immediately rebuilt without those examples.
 
 ## Development
+
+See [Project structure and architecture](docs/ARCHITECTURE.md) for module ownership,
+dependency rules and file-size conventions.
 
 ```bash
 bun install

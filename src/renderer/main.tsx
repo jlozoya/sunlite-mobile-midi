@@ -1,6 +1,8 @@
 import React from "react"
 import "./stylex.css"
 import "./midi-led.css"
+import "./scrollbar.css"
+import "./form-controls.css"
 import { createRoot } from "react-dom/client"
 import * as stylex from "@stylexjs/stylex"
 import { App } from "./ui/App"

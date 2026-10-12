@@ -18,3 +18,5 @@ export type {
   TextInputFieldProps,
 } from "./components"
 export { tokens } from "./tokens.stylex"
+
+export { InfoTooltip } from "./InfoTooltip"

@@ -19,6 +19,8 @@ appears repeatedly in the controller, connection setup or automation studio.
 - `Notice`: neutral, informational, success, warning and danger feedback.
 - `SectionHeader`: consistent title, optional eyebrow and description hierarchy.
 - `TextInputField`: accessible labelled text input with optional help text.
+- `InfoTooltip`: an information icon with help on hover, keyboard focus or press;
+  optional persistent descriptions keep form help available to screen readers.
 
 Import components from `ui-kit` and design values from `tokens.stylex`. Prefer a
 kit primitive before adding a new local button, panel, alert or field style.

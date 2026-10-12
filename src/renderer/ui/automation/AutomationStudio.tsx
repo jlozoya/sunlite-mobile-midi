@@ -1,244 +1,40 @@
 import * as stylex from "@stylexjs/stylex"
-import { useEffect, useId, useRef, useState, type ReactNode } from "react"
-import type {
-  AutomationMidiCommand,
-  AutomationMode,
-  AutomationSettings,
-  AutomationSocketCommand,
-} from "../../../shared/automation-types"
+import { useState } from "react"
+import type { AutomationSocketCommand } from "../../../shared/automation-types"
 import { Toast } from "../components/Toast"
-import { AnimatedCollapse, AnimatedDisclosure } from "../components/AnimatedDisclosure"
-import { ActionButton, StatusBadge, Surface } from "../ui-kit"
+import { AnimatedDisclosure } from "../components/AnimatedDisclosure"
+import { ActionButton, InfoTooltip, Notice } from "../ui-kit"
 import { DeckWaveforms } from "./DeckWaveforms"
 import { RekordboxWaveforms } from "./RekordboxWaveforms"
-import { SliderCurveEditor } from "./SliderCurveEditor"
-import { SpectrogramTimeline } from "./SpectrogramTimeline"
-import { detectSliderGestures } from "./slider-curves"
 import { SYSTEM_AUDIO_DEVICE_ID, useAutomationStudio } from "./useAutomationStudio"
+import { styles } from "./AutomationStudio.styles"
+import { formatDuration } from "./automation-format"
+import { AutomationSettingsPanel } from "./AutomationSettingsPanel"
+import { TrainingSessionsPanel } from "./TrainingSessionsPanel"
+import { SessionReview } from "./SessionReview"
+import { AutomationAudioSource } from "./AutomationAudioSource"
+import { AutomationModeControls } from "./AutomationModeControls"
+import { automationReadiness } from "./automation-readiness"
 
 type Props = {
   sendAutomationCommand: (command: AutomationSocketCommand) => boolean
   captureVisible: boolean
+  onShowController: () => void
 }
 
-function parseMidiList(value: string): number[] | null {
-  const entries = value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean)
-  if (entries.some((item) => !/^\d+$/.test(item) || Number(item) > 127)) return null
-  return [...new Set(entries.map(Number))]
-}
-
-/** Renders a duration the way a person reads it, next to the raw millisecond input. */
-function formatMilliseconds(milliseconds: number): string {
-  if (!Number.isFinite(milliseconds)) return "—"
-  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`
-  if (milliseconds >= 60000) {
-    const minutes = milliseconds / 60000
-    const rounded = Math.round(minutes * 10) / 10
-    return `${String(rounded).replace(".", ",")} min`
-  }
-  const seconds = milliseconds / 1000
-  const rounded = seconds >= 10 ? Math.round(seconds) : Math.round(seconds * 10) / 10
-  return `${String(rounded).replace(".", ",")} s`
-}
-
-/** One themed block of related rules, so the panel reads as four questions, not nine inputs. */
-function SettingsGroup({
-  title,
-  description,
-  children,
-}: {
-  title: string
-  description: string
-  children: ReactNode
-}) {
-  return (
-    <section {...stylex.props(styles.settingsGroup)}>
-      <div {...stylex.props(styles.groupHeading)}>
-        <span {...stylex.props(styles.groupTitle)}>{title}</span>
-        <span {...stylex.props(styles.groupDescription)}>{description}</span>
-      </div>
-      <div {...stylex.props(styles.settingsGrid)}>{children}</div>
-    </section>
-  )
-}
-
-function NumberField({
-  label,
-  unit,
-  value,
-  min,
-  max,
-  help,
-  isDuration,
-  isDisabled,
-  onChange,
-}: {
-  label: string
-  unit: string
-  value: number
-  min: number
-  max: number
-  help: string
-  /** Renders the value and the accepted range in seconds and minutes, not raw ms. */
-  isDuration?: boolean
-  isDisabled?: boolean
-  onChange: (value: number) => void
-}) {
-  const [draft, setDraft] = useState(String(value))
-  const focusedRef = useRef(false)
-  const helpId = useId()
-  useEffect(() => {
-    if (!focusedRef.current) setDraft(String(value))
-  }, [value])
-  const number = Number(draft)
-  const invalid =
-    !draft.trim() || !Number.isInteger(number) || number < min || number > max
-  const range = isDuration
-    ? `${formatMilliseconds(value)} · entre ${formatMilliseconds(min)} y ${formatMilliseconds(max)}`
-    : `Entre ${min} y ${max} ${unit}`
-
-  return (
-    <label {...stylex.props(styles.field, isDisabled && styles.fieldDisabled)}>
-      <span {...stylex.props(styles.fieldLabel)}>
-        {label}
-        <span {...stylex.props(styles.fieldUnit)}>{unit}</span>
-      </span>
-      <input
-        type="number"
-        min={min}
-        max={max}
-        disabled={isDisabled}
-        {...stylex.props(styles.input)}
-        required
-        step={1}
-        value={draft}
-        aria-invalid={!isDisabled && invalid}
-        aria-describedby={helpId}
-        onFocus={() => {
-          focusedRef.current = true
-        }}
-        onBlur={() => {
-          focusedRef.current = false
-        }}
-        onChange={(event) => {
-          setDraft(event.target.value)
-          if (event.target.validity.valid) onChange(Number(event.target.value))
-        }}
-      />
-      <span
-        id={helpId}
-        {...stylex.props(styles.fieldHelp, !isDisabled && invalid && styles.fieldError)}
-      >
-        {!isDisabled && invalid
-          ? `Introduce un número entero entre ${min} y ${max}.`
-          : help}
-      </span>
-      <span {...stylex.props(styles.fieldRange)}>{range}</span>
-    </label>
-  )
-}
-
-function MidiListField({
-  label,
-  values,
-  help,
-  kind,
-  onChange,
-}: {
-  label: string
-  values: number[]
-  help: string
-  kind: "notas" | "CC"
-  onChange: (values: number[]) => void
-}) {
-  const serialized = values.join(",")
-  const [draft, setDraft] = useState(serialized)
-  const focusedRef = useRef(false)
-  const helpId = useId()
-  const invalid = parseMidiList(draft) === null
-  useEffect(() => {
-    if (!focusedRef.current) setDraft(serialized)
-  }, [serialized])
-  return (
-    <label {...stylex.props(styles.field)}>
-      <span {...stylex.props(styles.fieldLabel)}>{label}</span>
-      <input
-        {...stylex.props(styles.input)}
-        value={draft}
-        placeholder="Ej. 36,37"
-        aria-invalid={invalid}
-        aria-describedby={helpId}
-        onFocus={() => {
-          focusedRef.current = true
-        }}
-        onChange={(event) => {
-          const next = event.target.value
-          const parsed = parseMidiList(next)
-          event.target.setCustomValidity(
-            parsed === null ? "Usa números enteros de 0 a 127 separados por comas." : "",
-          )
-          setDraft(next)
-          if (parsed !== null) onChange(parsed)
-        }}
-        onBlur={() => {
-          focusedRef.current = false
-          const parsed = parseMidiList(draft)
-          if (parsed !== null) setDraft(parsed.join(","))
-        }}
-      />
-      <span id={helpId} {...stylex.props(styles.fieldHelp, invalid && styles.fieldError)}>
-        {invalid ? "Usa números enteros de 0 a 127 separados por comas." : help}
-      </span>
-      <span {...stylex.props(styles.fieldRange)}>
-        {values.length === 0 ? "Ninguno" : `${values.length} en la lista`} · {kind} 0–127
-      </span>
-    </label>
-  )
-}
-
-function formatDuration(milliseconds: number): string {
-  const minutes = Math.floor(milliseconds / 60000)
-  const seconds = Math.floor((milliseconds % 60000) / 1000)
-  return `${minutes}:${String(seconds).padStart(2, "0")}`
-}
-
-function formatCommand(command: AutomationMidiCommand | undefined): string {
-  if (!command) return "Acción MIDI"
-  if (command.type === "note" || command.type === "noteon") return `Nota ${command.note}`
-  if (command.type === "noteoff") return `Nota ${command.note} off`
-  if (command.type === "cc") return `CC ${command.controller} = ${command.value}`
-  return `Programa ${command.number}`
-}
-
-export function AutomationStudio({ sendAutomationCommand, captureVisible }: Props) {
+export function AutomationStudio({
+  sendAutomationCommand,
+  captureVisible,
+  onShowController,
+}: Props) {
   const [analysisOpen, setAnalysisOpen] = useState(false)
-  const analysisPanelId = useId()
   const automation = useAutomationStudio(sendAutomationCommand, analysisOpen)
   const [sessionName, setSessionName] = useState("")
   const [startingTraining, setStartingTraining] = useState(false)
-  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
-  const [sessionNameDraft, setSessionNameDraft] = useState("")
-  const [editingSliderGestureId, setEditingSliderGestureId] = useState<string | null>(
-    null,
-  )
-  const [settingsDraft, setSettingsDraft] = useState<AutomationSettings | null>(null)
-  const [settingsDirty, setSettingsDirty] = useState(false)
-
-  useEffect(() => {
-    if (automation.status && !settingsDirty) {
-      setSettingsDraft(automation.status.settings)
-    }
-  }, [automation.status, settingsDirty])
 
   const status = automation.status
-  const controlsDisabled = !status || Boolean(automation.busy) || startingTraining
-  const selectedSession = status?.sessions.find(
-    (session) => session.id === automation.selectedSessionId,
-  )
-  const settings = settingsDraft ?? status?.settings ?? null
+  const controlsDisabled =
+    !status || Boolean(automation.busy) || startingTraining || automation.audioBusy
   const latestBeat = status
     ? Object.values(status.latestBeats).sort((a, b) => b.receivedAt - a.receivedAt)[0]
     : null
@@ -248,21 +44,10 @@ export function AutomationStudio({ sendAutomationCommand, captureVisible }: Prop
   const waveforms = Object.values(status?.waveforms ?? {}).filter((waveform) =>
     connectedDecks.has(waveform.deviceNumber),
   )
-  const sourceReady = Boolean(status?.audioConnected || status?.waveformConnected)
+  const { sourceReady } = automationReadiness(status, automation.audioRunning)
   const usesPcAudio =
     automation.selectedDeviceId === SYSTEM_AUDIO_DEVICE_ID ||
     (!automation.selectedDeviceId && Boolean(window.rekordboxCapture))
-  const sourceLabel = status?.waveformConnected
-    ? status.audioConnected
-      ? "CDJ y audio listos"
-      : "CDJ listo"
-    : status?.audioConnected
-      ? automation.selectedDeviceId === SYSTEM_AUDIO_DEVICE_ID
-        ? "Audio del PC listo"
-        : "Audio listo"
-      : usesPcAudio
-        ? "Audio del PC pendiente"
-        : "Audio pendiente"
   const trainingDescription = status?.recording
     ? `${formatDuration(status.activeSession?.durationMs ?? 0)} · usa los botones y sliders de Controlador`
     : sourceReady
@@ -272,44 +57,12 @@ export function AutomationStudio({ sendAutomationCommand, captureVisible }: Prop
       : usesPcAudio
         ? "Al empezar se capturará el audio de este PC; después usa los controles de luces para enseñarle."
         : "Al empezar se abrirá la entrada de audio; después usa los controles de luces para enseñarle."
-  const showSpectrogram = Boolean(
-    status?.audioConnected ||
-    automation.liveFrames.length > 0 ||
-    automation.timeline.length > 0 ||
-    automation.selectedSessionId,
-  )
-  const sliderGestures = detectSliderGestures(automation.timeline)
-  const groupedSliderExamples = new Set(
-    sliderGestures.flatMap((gesture) => gesture.points.map((point) => point.id)),
-  )
-  const standaloneExamples = automation.timeline.filter(
-    (event) =>
-      event.kind === "example" &&
-      event.example &&
-      !groupedSliderExamples.has(event.example.id),
-  )
-  const editingSliderGesture = sliderGestures.find(
-    (gesture) => gesture.id === editingSliderGestureId,
-  )
-
-  function setSetting<K extends keyof AutomationSettings>(
-    key: K,
-    value: AutomationSettings[K],
-  ) {
-    if (!settings) return
-    setSettingsDraft({ ...settings, [key]: value })
-    setSettingsDirty(true)
-  }
-
-  async function saveSettings() {
-    if (!settingsDraft) return
-    if (await automation.updateSettings(settingsDraft)) setSettingsDirty(false)
-  }
 
   async function beginTraining() {
     if (!status || startingTraining || automation.busy || automation.audioBusy) return
     setStartingTraining(true)
     try {
+      if (status.mode !== "manual" && !(await automation.updateMode("manual"))) return
       if (!status.waveformConnected && (!sourceReady || !automation.audioRunning)) {
         const deviceId =
           automation.selectedDeviceId ||
@@ -327,72 +80,17 @@ export function AutomationStudio({ sendAutomationCommand, captureVisible }: Prop
     }
   }
 
-  async function saveSessionName(id: string) {
-    if (!sessionNameDraft.trim() || automation.busy) return
-    if (await automation.renameSession(id, sessionNameDraft)) {
-      setEditingSessionId(null)
-      setSessionNameDraft("")
-    }
-  }
-
-  async function removeSession(id: string, name: string) {
-    if (
-      !window.confirm(`¿Eliminar "${name}"? Sus ejemplos también se quitarán del modelo.`)
-    ) {
-      return
-    }
-    if (await automation.deleteSession(id)) {
-      setEditingSessionId(null)
-      setSessionNameDraft("")
-    }
-  }
-
-  async function removeSliderGesture(controller: number, pointIds: string[]) {
-    if (
-      !window.confirm(
-        `¿Eliminar el movimiento completo del slider CC ${controller}? Se quitarán ${pointIds.length} puntos del modelo.`,
-      )
-    ) {
-      return
-    }
-    await automation.updateTrainingExamples(
-      pointIds.map((id) => ({ id, delete: true })),
-      `Movimiento CC ${controller} eliminado`,
-    )
-  }
-
   return (
     <section {...stylex.props(styles.studio)}>
       <div {...stylex.props(styles.headingRow)}>
         <div>
-          <p {...stylex.props(styles.eyebrow)}>Automation Studio</p>
-          <h2 {...stylex.props(styles.title)}>Entrenamiento y control automático</h2>
-          <p {...stylex.props(styles.description)}>
-            Usa el audio de este PC, una entrada del mixer o un CDJ. Graba tus acciones
-            para entrenar el control automático.
-          </p>
-        </div>
-        <div
-          {...stylex.props(styles.modeGroup)}
-          role="group"
-          aria-label="Modo de automatización"
-        >
-          {(["manual", "assist", "auto"] as AutomationMode[]).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              {...stylex.props(
-                styles.modeButton,
-                status?.mode === mode && styles.modeButtonActive,
-                mode === "auto" && status?.mode === mode && styles.modeButtonAuto,
-              )}
-              disabled={controlsDisabled}
-              aria-pressed={status?.mode === mode}
-              onClick={() => void automation.updateMode(mode)}
-            >
-              {mode === "manual" ? "Manual" : mode === "assist" ? "Asistido" : "Auto"}
-            </button>
-          ))}
+          <div {...stylex.props(styles.labelWithHelp)}>
+            <h2 {...stylex.props(styles.title)}>Entrenamiento y automatización</h2>
+            <InfoTooltip
+              label="Entrenamiento y automatización"
+              content="Prepara una fuente de audio, graba tus acciones desde Controlador y finaliza la sesión para entrenar el modelo. Después prueba sus sugerencias en Asistido y activa Auto cuando estés listo."
+            />
+          </div>
         </div>
       </div>
 
@@ -418,6 +116,14 @@ export function AutomationStudio({ sendAutomationCommand, captureVisible }: Prop
         </div>
       ) : null}
 
+      {automation.error ? (
+        <Notice tone="danger" role="alert" layout="stack">
+          <strong>No se pudo completar la acción</strong>
+          {automation.error}
+        </Notice>
+      ) : null}
+      <AutomationAudioSource automation={automation} disabled={controlsDisabled} />
+
       <div
         {...stylex.props(
           styles.recordingBar,
@@ -436,27 +142,27 @@ export function AutomationStudio({ sendAutomationCommand, captureVisible }: Prop
             <strong>
               {status?.recording
                 ? (status.activeSession?.name ?? "Grabando sesión")
-                : sourceReady
-                  ? "La música está lista"
-                  : "Empieza a entrenar con tu música"}
+                : "2. Graba una sesión"}
             </strong>
             <span>{trainingDescription}</span>
           </div>
         </div>
         <div {...stylex.props(styles.trainingControls)}>
-          <StatusBadge tone={sourceReady ? "info" : "neutral"} dot={sourceReady}>
-            {sourceLabel}
-          </StatusBadge>
           {status?.recording ? (
-            <ActionButton
-              variant="danger"
-              isDisabled={controlsDisabled}
-              onPress={() => void automation.stopSession()}
-            >
-              {automation.busy === "session"
-                ? "Guardando sesión…"
-                : "Finalizar y aprender"}
-            </ActionButton>
+            <>
+              <ActionButton variant="secondary" size="small" onPress={onShowController}>
+                Ir al Controlador
+              </ActionButton>
+              <ActionButton
+                variant="danger"
+                isDisabled={controlsDisabled}
+                onPress={() => void automation.stopSession()}
+              >
+                {automation.busy === "session"
+                  ? "Guardando sesión…"
+                  : "Finalizar y aprender"}
+              </ActionButton>
+            </>
           ) : (
             <ActionButton
               tone="cyan"
@@ -472,46 +178,11 @@ export function AutomationStudio({ sendAutomationCommand, captureVisible }: Prop
       </div>
 
       <AnimatedDisclosure
-        summary="Fuente de audio y opciones de sesión"
+        summary="Opciones de entrenamiento"
         containerProps={stylex.props(styles.setupDetails)}
         buttonProps={stylex.props(styles.disclosureTrigger, styles.setupSummary)}
       >
         <div {...stylex.props(styles.setupContent)}>
-          <label {...stylex.props(styles.setupField)}>
-            <span>Fuente de audio</span>
-            <select
-              {...stylex.props(styles.select)}
-              value={automation.selectedDeviceId}
-              onChange={(event) => automation.setSelectedDeviceId(event.target.value)}
-              disabled={
-                automation.audioRunning ||
-                automation.audioBusy ||
-                controlsDisabled ||
-                Boolean(status?.recording)
-              }
-            >
-              <option value="">Entrada predeterminada</option>
-              {window.rekordboxCapture ? (
-                <option value={SYSTEM_AUDIO_DEVICE_ID}>Audio del PC (Rekordbox)</option>
-              ) : null}
-              {automation.selectedDeviceId &&
-              automation.selectedDeviceId !== SYSTEM_AUDIO_DEVICE_ID &&
-              !automation.audioDevices.some(
-                (device) => device.deviceId === automation.selectedDeviceId,
-              ) ? (
-                <option value={automation.selectedDeviceId}>
-                  Entrada guardada no disponible
-                </option>
-              ) : null}
-              {automation.audioDevices
-                .filter((device) => device.deviceId)
-                .map((device, index) => (
-                  <option key={device.deviceId} value={device.deviceId}>
-                    {device.label || `Entrada de audio ${index + 1}`}
-                  </option>
-                ))}
-            </select>
-          </label>
           <label {...stylex.props(styles.setupField)}>
             <span>Nombre de sesión (opcional)</span>
             <input
@@ -523,16 +194,6 @@ export function AutomationStudio({ sendAutomationCommand, captureVisible }: Prop
               disabled={controlsDisabled || Boolean(status?.recording)}
             />
           </label>
-          {automation.audioRunning ? (
-            <ActionButton
-              variant="secondary"
-              size="small"
-              isDisabled={controlsDisabled || Boolean(status?.recording)}
-              onPress={() => automation.stopAudio()}
-            >
-              Detener audio
-            </ActionButton>
-          ) : null}
           {status?.devices.length ? (
             <div {...stylex.props(styles.setupCdj)}>
               <span>
@@ -561,6 +222,15 @@ export function AutomationStudio({ sendAutomationCommand, captureVisible }: Prop
           ) : null}
         </div>
       </AnimatedDisclosure>
+
+      <AutomationModeControls automation={automation} disabled={controlsDisabled} />
+      {status?.mode === "auto" && status.manualOverrideUntil ? (
+        <Notice tone="info" role="status">
+          Pausa por control manual · Auto volverá a actuar en{" "}
+          {Math.max(1, Math.ceil((status.manualOverrideUntil - Date.now()) / 1000))} s si
+          la señal sigue disponible.
+        </Notice>
+      ) : null}
 
       {!status?.devices.length ? (
         <AnimatedDisclosure
@@ -595,165 +265,12 @@ export function AutomationStudio({ sendAutomationCommand, captureVisible }: Prop
         <RekordboxWaveforms enabled={captureVisible} />
       )}
 
-      {showSpectrogram && !automation.selectedSessionId ? (
-        <div {...stylex.props(styles.analysisToggle)}>
-          <button
-            type="button"
-            aria-expanded={analysisOpen}
-            aria-controls={analysisPanelId}
-            {...stylex.props(styles.analysisButton)}
-            onClick={() => setAnalysisOpen((open) => !open)}
-          >
-            {analysisOpen ? "Ocultar detalles de audio" : "Ver detalles de audio"}
-          </button>
-        </div>
-      ) : null}
-
-      <AnimatedCollapse
-        id={analysisPanelId}
-        open={Boolean(showSpectrogram && (analysisOpen || automation.selectedSessionId))}
-        unmountOnExit
-      >
-        <div {...stylex.props(styles.timelinePanel)}>
-          <div {...stylex.props(styles.timelineHeading)}>
-            <strong>
-              {automation.selectedSessionId
-                ? `Sesión: ${selectedSession?.name ?? "guardada"}`
-                : "Audio en vivo"}
-            </strong>
-            {automation.selectedSessionId ? (
-              <ActionButton
-                variant="secondary"
-                size="small"
-                isDisabled={Boolean(automation.busy)}
-                onPress={() => {
-                  setEditingSliderGestureId(null)
-                  automation.showLiveTimeline()
-                }}
-              >
-                Volver al directo
-              </ActionButton>
-            ) : null}
-          </div>
-          {automation.selectedSessionId ? (
-            <p {...stylex.props(styles.cardDetail)}>
-              Arrastra los marcadores para ajustar tus acciones en la sesión.
-            </p>
-          ) : null}
-          <SpectrogramTimeline
-            key={automation.selectedSessionId ?? "live"}
-            liveFrames={automation.selectedSessionId ? [] : automation.liveFrames}
-            timeline={automation.timeline}
-            editable={Boolean(automation.selectedSessionId)}
-            busy={controlsDisabled}
-            onMoveExample={(id, t) =>
-              automation.updateTrainingExamples(
-                [{ id, t }],
-                `Acción movida a ${formatDuration(t)}`,
-              )
-            }
-          />
-        </div>
-
-        {automation.timeline.some((event) => event.kind === "example") ? (
-          <div {...stylex.props(styles.exampleEditor)}>
-            <div {...stylex.props(styles.cardHeading)}>
-              <strong>Ajustar ejemplos de la sesión</strong>
-              <span {...stylex.props(styles.cardDetail)}>
-                Arrastra acciones en la línea de tiempo o edita los sliders como curvas
-              </span>
-            </div>
-            {sliderGestures.length ? (
-              <div {...stylex.props(styles.sliderGestureList)}>
-                {sliderGestures.map((gesture) => (
-                  <div key={gesture.id} {...stylex.props(styles.sliderGestureRow)}>
-                    <div {...stylex.props(styles.sliderGestureCopy)}>
-                      <strong>Slider CC {gesture.controller}</strong>
-                      <span {...stylex.props(styles.cardDetail)}>
-                        {gesture.points.length} mensajes · {formatDuration(gesture.start)}
-                        –{formatDuration(gesture.end)}
-                      </span>
-                    </div>
-                    <div {...stylex.props(styles.sliderGestureActions)}>
-                      <ActionButton
-                        variant="secondary"
-                        size="small"
-                        {...stylex.props(styles.curveButton)}
-                        onPress={() => setEditingSliderGestureId(gesture.id)}
-                      >
-                        Editar curva
-                      </ActionButton>
-                      <ActionButton
-                        variant="danger"
-                        size="small"
-                        {...stylex.props(styles.curveButton)}
-                        isDisabled={controlsDisabled}
-                        onPress={() =>
-                          void removeSliderGesture(
-                            gesture.controller,
-                            gesture.points.map((point) => point.id),
-                          )
-                        }
-                      >
-                        Eliminar
-                      </ActionButton>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            <div {...stylex.props(styles.exampleList)}>
-              {standaloneExamples
-                .slice(-12)
-                .reverse()
-                .map((event) => (
-                  <div key={event.example?.id} {...stylex.props(styles.exampleRow)}>
-                    <span>{formatDuration(event.t)}</span>
-                    <strong>{formatCommand(event.command)}</strong>
-                    <small>
-                      beat {event.beatWithinBar || "—"} · {event.bpm?.toFixed(1) || "—"}{" "}
-                      BPM
-                    </small>
-                    <ActionButton
-                      variant="danger"
-                      size="small"
-                      {...stylex.props(styles.excludeButton)}
-                      isDisabled={controlsDisabled}
-                      onPress={() =>
-                        event.example && void automation.excludeExample(event.example.id)
-                      }
-                    >
-                      Excluir
-                    </ActionButton>
-                  </div>
-                ))}
-            </div>
-          </div>
-        ) : null}
-      </AnimatedCollapse>
-
-      {editingSliderGesture ? (
-        <SliderCurveEditor
-          gesture={editingSliderGesture}
-          busy={controlsDisabled}
-          onClose={() => setEditingSliderGestureId(null)}
-          onSave={({ points, deletedIds }) =>
-            automation.updateTrainingExamples(
-              [
-                ...points.map((point) => ({
-                  id: point.id,
-                  t: point.t,
-                  value: point.value,
-                  create: Boolean(point.isNew),
-                  controller: point.isNew ? editingSliderGesture.controller : undefined,
-                })),
-                ...deletedIds.map((id) => ({ id, delete: true })),
-              ],
-              `Curva CC ${editingSliderGesture.controller} actualizada`,
-            )
-          }
-        />
-      ) : null}
+      <SessionReview
+        automation={automation}
+        controlsDisabled={controlsDisabled}
+        analysisOpen={analysisOpen}
+        setAnalysisOpen={setAnalysisOpen}
+      />
 
       {status?.lastSuggestion ? (
         <div {...stylex.props(styles.suggestion)}>
@@ -773,291 +290,15 @@ export function AutomationStudio({ sendAutomationCommand, captureVisible }: Prop
       ) : null}
 
       <div {...stylex.props(styles.lowerGrid)}>
-        <Surface
-          as="article"
-          variant="subtle"
-          padding="custom"
-          {...stylex.props(styles.subPanel)}
-        >
-          <div {...stylex.props(styles.cardHeading)}>
-            <strong>Sesiones guardadas</strong>
-            <span {...stylex.props(styles.cardDetail)} role="status">
-              {automation.busy === "timeline"
-                ? "Cargando sesión…"
-                : `${status?.sessions.length ?? 0} sesiones · ${status?.modelExampleCount ?? 0} ejemplos`}
-            </span>
-          </div>
-          <div {...stylex.props(styles.sessionList)}>
-            {status?.sessions.map((session) => {
-              const isEditing = editingSessionId === session.id
-              const isSelected = automation.selectedSessionId === session.id
+        <TrainingSessionsPanel
+          automation={automation}
+          controlsDisabled={controlsDisabled}
+        />
 
-              return (
-                <div
-                  key={session.id}
-                  {...stylex.props(
-                    styles.sessionRow,
-                    isSelected && styles.sessionRowActive,
-                  )}
-                >
-                  {isEditing ? (
-                    <div {...stylex.props(styles.sessionEdit)}>
-                      <input
-                        autoFocus
-                        {...stylex.props(styles.input, styles.sessionNameInput)}
-                        value={sessionNameDraft}
-                        disabled={controlsDisabled}
-                        maxLength={80}
-                        onChange={(event) => setSessionNameDraft(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") void saveSessionName(session.id)
-                          if (event.key === "Escape") setEditingSessionId(null)
-                        }}
-                        aria-label="Nombre de la sesión"
-                      />
-                      <ActionButton
-                        variant="secondary"
-                        size="small"
-                        {...stylex.props(styles.sessionActionButton)}
-                        isDisabled={!sessionNameDraft.trim() || controlsDisabled}
-                        onPress={() => void saveSessionName(session.id)}
-                      >
-                        Guardar
-                      </ActionButton>
-                      <ActionButton
-                        variant="ghost"
-                        size="small"
-                        {...stylex.props(styles.sessionActionButton)}
-                        onPress={() => setEditingSessionId(null)}
-                      >
-                        Cancelar
-                      </ActionButton>
-                    </div>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        {...stylex.props(styles.sessionButton)}
-                        disabled={controlsDisabled}
-                        aria-pressed={isSelected}
-                        onClick={() => void automation.loadSession(session.id)}
-                      >
-                        <span>{session.name}</span>
-                        <small>
-                          {formatDuration(session.durationMs)} ·{" "}
-                          {session.trainingExampleCount} ejemplos
-                        </small>
-                      </button>
-                      <div {...stylex.props(styles.sessionActions)}>
-                        <ActionButton
-                          variant="ghost"
-                          size="small"
-                          {...stylex.props(styles.sessionActionButton)}
-                          isDisabled={controlsDisabled}
-                          onPress={() => {
-                            setEditingSessionId(session.id)
-                            setSessionNameDraft(session.name)
-                          }}
-                        >
-                          Renombrar
-                        </ActionButton>
-                        <ActionButton
-                          variant="danger"
-                          size="small"
-                          {...stylex.props(styles.sessionActionButton)}
-                          isDisabled={controlsDisabled}
-                          onPress={() => void removeSession(session.id, session.name)}
-                        >
-                          Eliminar
-                        </ActionButton>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )
-            })}
-            {!status?.sessions.length ? (
-              <span {...stylex.props(styles.emptyText)}>
-                Aún no hay sesiones grabadas.
-              </span>
-            ) : null}
-          </div>
-        </Surface>
-
-        <Surface
-          as="article"
-          variant="subtle"
-          padding="custom"
-          {...stylex.props(styles.subPanel)}
-        >
-          <AnimatedDisclosure
-            summary={
-              <span {...stylex.props(styles.rulesSummaryContent)}>
-                <strong>Reglas de seguridad</strong>
-                <span {...stylex.props(styles.cardDetail)}>
-                  {settingsDirty ? "Cambios sin guardar" : "Ajustes avanzados"}
-                </span>
-              </span>
-            }
-            buttonProps={stylex.props(styles.disclosureTrigger, styles.rulesSummary)}
-          >
-            <p {...stylex.props(styles.cardDetail)}>
-              Estas reglas limitan lo que puede hacer el modo automático. Los valores
-              actuales se mantienen hasta que guardes algún cambio.
-            </p>
-            {settings ? (
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  if (!controlsDisabled) void saveSettings()
-                }}
-              >
-                <fieldset
-                  disabled={controlsDisabled}
-                  {...stylex.props(styles.settingsFieldset)}
-                >
-                  <SettingsGroup
-                    title="Cuándo puede actuar"
-                    description="Evita que la automatización dispare de más o con poca certeza."
-                  >
-                    <NumberField
-                      label="Confianza mínima"
-                      unit="%"
-                      min={25}
-                      max={98}
-                      value={Math.round(settings.confidenceThreshold * 100)}
-                      help="Descarta la sugerencia si el modelo está menos seguro que esto."
-                      onChange={(value) => setSetting("confidenceThreshold", value / 100)}
-                    />
-                    <NumberField
-                      label="Intervalo mínimo"
-                      unit="ms"
-                      min={250}
-                      max={30000}
-                      value={settings.minActionIntervalMs}
-                      isDuration
-                      help="Tiempo que debe pasar entre dos acciones automáticas cualesquiera."
-                      onChange={(value) => setSetting("minActionIntervalMs", value)}
-                    />
-                    <NumberField
-                      label="Espera para repetir"
-                      unit="ms"
-                      min={500}
-                      max={120000}
-                      value={settings.repeatActionCooldownMs}
-                      isDuration
-                      help="Igual que el anterior, pero solo para repetir la misma nota o CC."
-                      onChange={(value) => setSetting("repeatActionCooldownMs", value)}
-                    />
-                  </SettingsGroup>
-
-                  <SettingsGroup
-                    title="Qué no debe tocar nunca"
-                    description="Números MIDI de tu mapeo de luces, separados por comas."
-                  >
-                    <MidiListField
-                      label="Notas protegidas"
-                      kind="notas"
-                      values={settings.blockedNotes}
-                      help="La automatización nunca envía estas notas. Reserva aquí lo que quieras controlar solo a mano."
-                      onChange={(values) => setSetting("blockedNotes", values)}
-                    />
-                    <MidiListField
-                      label="CC protegidos"
-                      kind="CC"
-                      values={settings.blockedControllers}
-                      help="Controles continuos que la automatización nunca mueve, como el máster de intensidad."
-                      onChange={(values) => setSetting("blockedControllers", values)}
-                    />
-                  </SettingsGroup>
-
-                  <SettingsGroup
-                    title="Strobe"
-                    description="Los strobes llevan su propio límite, aparte del resto de acciones."
-                  >
-                    <MidiListField
-                      label="Notas strobe"
-                      kind="notas"
-                      values={settings.strobeNotes}
-                      help="Notas que se tratan como strobe y quedan sujetas a la espera de abajo."
-                      onChange={(values) => setSetting("strobeNotes", values)}
-                    />
-                    <NumberField
-                      label="Espera entre strobes"
-                      unit="ms"
-                      min={1000}
-                      max={120000}
-                      value={settings.strobeCooldownMs}
-                      isDuration
-                      isDisabled={settings.strobeNotes.length === 0}
-                      help={
-                        settings.strobeNotes.length === 0
-                          ? "Sin efecto mientras no haya ninguna nota strobe declarada."
-                          : "Tiempo mínimo entre dos disparos de cualquier nota strobe."
-                      }
-                      onChange={(value) => setSetting("strobeCooldownMs", value)}
-                    />
-                  </SettingsGroup>
-
-                  <SettingsGroup
-                    title="Control manual y deck"
-                    description="Quién manda cuando intervienes tú, y de qué deck se lee el audio."
-                  >
-                    <NumberField
-                      label="Pausa tras control manual"
-                      unit="ms"
-                      min={1000}
-                      max={60000}
-                      value={settings.manualOverrideMs}
-                      isDuration
-                      help="Al tocar un control a mano, la automatización se detiene este tiempo."
-                      onChange={(value) => setSetting("manualOverrideMs", value)}
-                    />
-                    <label {...stylex.props(styles.field)}>
-                      <span {...stylex.props(styles.fieldLabel)}>Deck preferido</span>
-                      <select
-                        {...stylex.props(styles.select)}
-                        value={settings.preferredDeck ?? ""}
-                        onChange={(event) =>
-                          setSetting(
-                            "preferredDeck",
-                            event.target.value ? Number(event.target.value) : null,
-                          )
-                        }
-                      >
-                        <option value="">Automático</option>
-                        {[1, 2, 3, 4, 5, 6].map((deck) => (
-                          <option key={deck} value={deck}>
-                            Deck {deck}
-                          </option>
-                        ))}
-                      </select>
-                      <span {...stylex.props(styles.fieldHelp)}>
-                        Automático sigue al deck que esté sonando. Fíjalo si siempre
-                        pinchas desde el mismo.
-                      </span>
-                    </label>
-                  </SettingsGroup>
-
-                  <div {...stylex.props(styles.rulesFooter)}>
-                    <span {...stylex.props(styles.dirtyHint)}>
-                      {settingsDirty
-                        ? "Tienes cambios sin guardar; se aplican al pulsar Guardar."
-                        : "Sin cambios pendientes."}
-                    </span>
-                    <ActionButton
-                      tone="cyan"
-                      isDisabled={!settingsDirty || controlsDisabled}
-                      type="submit"
-                    >
-                      {automation.busy === "settings" ? "Guardando…" : "Guardar reglas"}
-                    </ActionButton>
-                  </div>
-                </fieldset>
-              </form>
-            ) : null}
-          </AnimatedDisclosure>
-        </Surface>
+        <AutomationSettingsPanel
+          automation={automation}
+          controlsDisabled={controlsDisabled}
+        />
       </div>
 
       {automation.message ? (
@@ -1066,426 +307,3 @@ export function AutomationStudio({ sendAutomationCommand, captureVisible }: Prop
     </section>
   )
 }
-
-const styles = stylex.create({
-  studio: {
-    marginTop: "16px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(34, 211, 238, 0.2)",
-    borderRadius: "24px",
-    backgroundColor: "rgba(11, 17, 31, 0.94)",
-    boxShadow: "0 22px 70px rgba(0, 0, 0, 0.34)",
-    padding: "18px",
-  },
-  statusNotice: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    gap: "10px",
-    marginTop: "16px",
-    borderRadius: "12px",
-    backgroundColor: "rgba(245,158,11,0.1)",
-    color: "#fde68a",
-    padding: "12px",
-    fontSize: "0.82rem",
-  },
-  timelineHeading: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    gap: "8px",
-    padding: "2px 4px 12px",
-    fontSize: "0.82rem",
-  },
-  settingsFieldset: { borderWidth: 0, padding: 0, margin: 0, minWidth: 0 },
-  fieldError: { color: "#fca5a5" },
-  headingRow: {
-    display: "flex",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: "18px",
-    flexWrap: "wrap",
-  },
-  eyebrow: {
-    margin: "0 0 5px",
-    color: "#22d3ee",
-    fontSize: "0.72rem",
-    fontWeight: 900,
-    letterSpacing: "0.12em",
-    textTransform: "uppercase",
-  },
-  title: { margin: 0, fontSize: "1.35rem" },
-  description: {
-    maxWidth: "720px",
-    margin: "7px 0 0",
-    color: "#94a3b8",
-    lineHeight: 1.5,
-    fontSize: "0.88rem",
-  },
-  modeGroup: {
-    display: "flex",
-    borderRadius: "14px",
-    backgroundColor: "rgba(255,255,255,0.05)",
-    padding: "4px",
-  },
-  modeButton: {
-    display: "inline-grid",
-    placeItems: "center",
-    minHeight: "38px",
-    boxSizing: "border-box",
-    borderWidth: 0,
-    borderRadius: "10px",
-    backgroundColor: "transparent",
-    color: "#94a3b8",
-    cursor: "pointer",
-    fontWeight: 800,
-    padding: "9px 13px",
-  },
-  modeButtonActive: { backgroundColor: "#334155", color: "#fff" },
-  modeButtonAuto: { backgroundColor: "#0891b2" },
-  cdjDetails: {
-    marginTop: "8px",
-    color: "#94a3b8",
-    fontSize: "0.78rem",
-  },
-  cdjSummary: { cursor: "pointer", color: "#67e8f9" },
-  cdjContent: { paddingTop: "2px" },
-  disclosureTrigger: {
-    display: "flex",
-    alignItems: "center",
-    width: "100%",
-    borderWidth: 0,
-    backgroundColor: "transparent",
-    color: "inherit",
-    cursor: "pointer",
-    padding: 0,
-    fontSize: "inherit",
-  },
-  disclosureTriggerCompact: { width: "auto", minHeight: "28px" },
-  cardHeading: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "10px",
-  },
-  cardDetail: { color: "#94a3b8", fontSize: "0.74rem", lineHeight: 1.4 },
-  select: {
-    width: "100%",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255,255,255,0.12)",
-    borderRadius: "10px",
-    backgroundColor: "#0f172a",
-    color: "#e2e8f0",
-    padding: "9px 10px",
-  },
-  input: {
-    minWidth: 0,
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255,255,255,0.12)",
-    borderRadius: "10px",
-    backgroundColor: "#0f172a",
-    color: "#e2e8f0",
-    padding: "9px 10px",
-  },
-  recordingBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "14px",
-    flexWrap: "wrap",
-    marginTop: "12px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255,255,255,0.08)",
-    borderRadius: "18px",
-    backgroundColor: "rgba(255,255,255,0.03)",
-    padding: "13px",
-  },
-  recordingActive: {
-    borderColor: "rgba(248,113,113,0.38)",
-    backgroundColor: "rgba(127,29,29,0.16)",
-  },
-  recordingCopy: { display: "flex", alignItems: "center", gap: "11px" },
-  recordingText: {
-    display: "grid",
-    gap: "3px",
-  },
-  recordingDot: {
-    width: "10px",
-    height: "10px",
-    borderRadius: "50%",
-    backgroundColor: "#475569",
-    boxShadow: "none",
-  },
-  sourceReadyDot: {
-    backgroundColor: "#22d3ee",
-    boxShadow: "0 0 14px rgba(34,211,238,0.72)",
-  },
-  recordingActiveDot: {
-    backgroundColor: "#ef4444",
-    boxShadow: "0 0 16px rgba(239,68,68,0.8)",
-  },
-  trainingControls: {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    flexWrap: "wrap",
-  },
-  setupDetails: {
-    marginTop: "8px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(255,255,255,0.08)",
-    borderRadius: "12px",
-    backgroundColor: "rgba(255,255,255,0.02)",
-    padding: "9px 12px",
-  },
-  setupSummary: {
-    color: "#67e8f9",
-    cursor: "pointer",
-    fontSize: "0.8rem",
-    fontWeight: 700,
-  },
-  setupContent: {
-    display: "grid",
-    gridTemplateColumns: {
-      default: "minmax(0, 1fr)",
-      "@media (min-width: 760px)": "repeat(2, minmax(0, 1fr))",
-    },
-    alignItems: "end",
-    gap: "10px",
-    marginTop: "12px",
-  },
-  setupField: {
-    display: "grid",
-    gap: "6px",
-    minWidth: 0,
-    color: "#cbd5e1",
-    fontSize: "0.76rem",
-  },
-  setupCdj: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    flexWrap: "wrap",
-    color: "#cbd5e1",
-    fontSize: "0.8rem",
-  },
-  analysisToggle: { display: "flex", justifyContent: "flex-end", marginTop: "10px" },
-  analysisButton: {
-    borderWidth: 0,
-    backgroundColor: "transparent",
-    color: "#67e8f9",
-    cursor: "pointer",
-    fontSize: "0.82rem",
-  },
-  timelinePanel: {
-    marginTop: "12px",
-    borderRadius: "18px",
-    backgroundColor: "#070a12",
-    padding: "10px",
-  },
-  suggestion: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "16px",
-    marginTop: "12px",
-    borderRadius: "15px",
-    backgroundColor: "rgba(139,92,246,0.1)",
-    padding: "12px 14px",
-  },
-  exampleEditor: {
-    marginTop: "12px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "rgba(245,158,11,0.18)",
-    borderRadius: "15px",
-    backgroundColor: "rgba(245,158,11,0.035)",
-    padding: "12px",
-  },
-  exampleList: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
-    gap: "7px",
-    marginTop: "10px",
-  },
-  sliderGestureList: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-    gap: "7px",
-    marginTop: "10px",
-  },
-  sliderGestureRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "10px",
-    flexWrap: "wrap",
-    borderRadius: "11px",
-    backgroundColor: "rgba(139,92,246,0.1)",
-    color: "#ddd6fe",
-    padding: "9px 10px",
-  },
-  sliderGestureCopy: {
-    display: "grid",
-    gap: "5px",
-    minWidth: 0,
-  },
-  sliderGestureActions: {
-    display: "flex",
-    gap: "7px",
-    flexShrink: 0,
-  },
-  curveButton: {
-    flexShrink: 0,
-    width: "112px",
-    textAlign: "center",
-    whiteSpace: "nowrap",
-  },
-  exampleRow: {
-    display: "grid",
-    gridTemplateColumns: "auto 1fr auto",
-    alignItems: "center",
-    gap: "4px 9px",
-    borderRadius: "10px",
-    backgroundColor: "rgba(255,255,255,0.04)",
-    color: "#cbd5e1",
-    padding: "8px",
-  },
-  excludeButton: {
-    gridColumn: "3",
-    gridRow: "1 / span 2",
-    width: "112px",
-  },
-  suggestionResult: { display: "grid", justifyItems: "end", color: "#c4b5fd" },
-  lowerGrid: {
-    display: "grid",
-    gridTemplateColumns: {
-      default: "1fr",
-      "@media (min-width: 960px)": "0.8fr 1.2fr",
-    },
-    gap: "12px",
-    alignItems: "start",
-    marginTop: "12px",
-  },
-  subPanel: {
-    padding: "13px",
-  },
-  sessionList: {
-    display: "grid",
-    gap: "6px",
-    maxHeight: "360px",
-    marginTop: "10px",
-    overflowY: "auto",
-  },
-  sessionRow: {
-    display: "grid",
-    gridTemplateColumns: {
-      default: "minmax(0, 1fr) auto",
-      "@media (max-width: 600px)": "minmax(0, 1fr)",
-    },
-    alignItems: "center",
-    gap: "6px",
-    borderRadius: "10px",
-    backgroundColor: "rgba(255,255,255,0.04)",
-    padding: "4px",
-  },
-  sessionRowActive: {
-    backgroundColor: "rgba(34,211,238,0.12)",
-  },
-  sessionButton: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "10px",
-    minWidth: 0,
-    borderWidth: 0,
-    borderRadius: "8px",
-    backgroundColor: "transparent",
-    color: "#cbd5e1",
-    cursor: "pointer",
-    padding: "7px 8px",
-    textAlign: "left",
-    overflowWrap: "anywhere",
-    flexWrap: "wrap",
-  },
-  sessionActions: {
-    display: "flex",
-    gap: "4px",
-  },
-  sessionActionButton: {
-    width: "82px",
-    fontSize: "0.7rem",
-  },
-  sessionEdit: {
-    gridColumn: "1 / -1",
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto auto",
-    gap: "5px",
-  },
-  sessionNameInput: {
-    width: "100%",
-  },
-  emptyText: { color: "#64748b", fontSize: "0.8rem", padding: "10px 2px" },
-  rulesSummary: { fontWeight: 700 },
-  rulesSummaryContent: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    gap: "8px",
-    width: "100%",
-  },
-  settingsGroup: {
-    marginTop: "12px",
-    borderTopWidth: "1px",
-    borderTopStyle: "solid",
-    borderTopColor: "rgba(255, 255, 255, 0.07)",
-    paddingTop: "11px",
-  },
-  groupHeading: { display: "grid", gap: "2px", marginBottom: "9px" },
-  groupTitle: { color: "#e2e8f0", fontSize: "0.78rem", fontWeight: 700 },
-  groupDescription: { color: "#7c8ba1", fontSize: "0.72rem", lineHeight: 1.4 },
-  settingsGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(216px, 1fr))",
-    alignItems: "start",
-    gap: "12px",
-  },
-  field: {
-    display: "grid",
-    gap: "4px",
-    alignContent: "start",
-    color: "#94a3b8",
-    fontSize: "0.74rem",
-  },
-  fieldDisabled: { opacity: 0.5 },
-  fieldLabel: {
-    display: "flex",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    gap: "6px",
-    color: "#cbd5e1",
-    fontWeight: 600,
-  },
-  fieldUnit: { color: "#64748b", fontSize: "0.68rem", fontWeight: 500 },
-  fieldHelp: { color: "#8496ad", fontSize: "0.7rem", lineHeight: 1.35 },
-  fieldRange: { color: "#5c6b82", fontSize: "0.66rem" },
-  rulesFooter: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    gap: "9px",
-    marginTop: "14px",
-    borderTopWidth: "1px",
-    borderTopStyle: "solid",
-    borderTopColor: "rgba(255, 255, 255, 0.07)",
-    paddingTop: "12px",
-  },
-  dirtyHint: { color: "#94a3b8", fontSize: "0.72rem" },
-})

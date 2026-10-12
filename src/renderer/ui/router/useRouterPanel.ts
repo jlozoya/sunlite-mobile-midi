@@ -8,7 +8,7 @@ import type {
 } from "../../../shared/router-types"
 
 type RouterPayload = RouterState & { monitor: RouterMonitorEvent[] }
-
+export type RouterSaveResult = { state: RouterState; started: boolean }
 const MONITOR_LIMIT = 200
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -17,69 +17,93 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
     | T
     | { message?: string }
     | null
-  if (!response.ok) {
+  if (!response.ok)
     throw new Error(
       payload && typeof payload === "object" && "message" in payload
-        ? (payload.message ?? `Request failed: ${response.status}`)
-        : `Request failed: ${response.status}`,
+        ? (payload.message ?? `Error HTTP ${response.status}`)
+        : `Error HTTP ${response.status}`,
     )
-  }
   return payload as T
 }
 
-/**
- * Router state plus the live monitor.
- *
- * The panel opens its own WebSocket rather than threading router events through the
- * controller socket: the two share nothing, and the server broadcasts to every client.
- */
 export function useRouterPanel() {
   const [state, setState] = useState<RouterState | null>(null)
   const [monitor, setMonitor] = useState<RouterMonitorEvent[]>([])
   const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   const [busy, setBusy] = useState<"start" | "stop" | "save" | null>(null)
   const operationRef = useRef(false)
   const requestRef = useRef<AbortController | null>(null)
 
+  const accept = useCallback((payload: RouterPayload) => {
+    requestRef.current?.abort()
+    requestRef.current = null
+    setRefreshing(false)
+    const { monitor: events, ...next } = payload
+    setState(next)
+    setMonitor(events ?? [])
+    setError(null)
+    return next
+  }, [])
+
   const refresh = useCallback(async () => {
+    if (operationRef.current) return
     requestRef.current?.abort()
     const request = new AbortController()
     requestRef.current = request
+    setRefreshing(true)
+    let timedOut = false
+    const timeout = window.setTimeout(() => {
+      timedOut = true
+      request.abort()
+    }, 8000)
     try {
       const payload = await requestJson<RouterPayload>("/api/router/state", {
         signal: request.signal,
       })
-      if (request.signal.aborted) return
-      const { monitor: events, ...rest } = payload
-      setState(rest)
-      setMonitor(events ?? [])
-    } catch (error) {
-      if (request.signal.aborted) return
-      setMessage(error instanceof Error ? error.message : "No se pudo leer el router.")
+      if (requestRef.current !== request || request.signal.aborted) return
+      accept(payload)
+    } catch (cause) {
+      if (requestRef.current !== request) return
+      setError(
+        timedOut
+          ? "El router tarda demasiado en responder. Vuelve a actualizar los dispositivos."
+          : request.signal.aborted
+            ? "Se perdió la conexión con el router. Vuelve a actualizar los dispositivos."
+            : cause instanceof Error
+              ? cause.message
+              : "No se pudo leer el router.",
+      )
     } finally {
-      if (requestRef.current === request) requestRef.current = null
+      window.clearTimeout(timeout)
+      if (requestRef.current === request) {
+        requestRef.current = null
+        setRefreshing(false)
+      }
     }
-  }, [])
+  }, [accept])
 
   useEffect(() => {
     void refresh()
     const disconnect = createReconnectingSocket(
       websocketUrlForPage(window.location.href),
       {
-        // Recover changes missed during a network interruption or server restart.
         onOpen: () => void refresh(),
         onClose: () => requestRef.current?.abort(),
         onMessage(event) {
           try {
             const payload = JSON.parse(String(event.data)) as Record<string, unknown>
             if (payload.event === "router-state") void refresh()
-            if (payload.event === "router-overload") setMessage(String(payload.message))
-            if (payload.event === "router-monitor") {
-              const events = payload.events as RouterMonitorEvent[]
-              setMonitor((current) => [...current, ...events].slice(-MONITOR_LIMIT))
-            }
+            if (payload.event === "router-overload") setError(String(payload.message))
+            if (payload.event === "router-monitor")
+              setMonitor((current) =>
+                [...current, ...(payload.events as RouterMonitorEvent[])].slice(
+                  -MONITOR_LIMIT,
+                ),
+              )
           } catch {
-            // Not our message.
+            /* Ignore events belonging to other features. */
           }
         },
       },
@@ -92,22 +116,25 @@ export function useRouterPanel() {
   }, [refresh])
 
   const saveConfig = useCallback(
-    async (config: RouterConfig, startAfterSave = false) => {
-      if (operationRef.current) return false
+    async (
+      config: RouterConfig,
+      startAfterSave = false,
+    ): Promise<RouterSaveResult | null> => {
+      if (operationRef.current) return null
       operationRef.current = true
-      setBusy("save")
-      const accept = (payload: RouterPayload) => {
-        const { monitor: events, ...rest } = payload
-        setState(rest)
-        setMonitor(events ?? [])
-        return rest
-      }
+      requestRef.current?.abort()
+      requestRef.current = null
+      setRefreshing(false)
+      setError(null)
+      setMessage(null)
+      let saved: RouterState | null = null
       try {
-        // Re-provision when rebuilding a running setup, including newly added programs.
         if (startAfterSave && state?.running) {
+          setBusy("stop")
           accept(await requestJson<RouterPayload>("/api/router/stop", { method: "POST" }))
         }
-        accept(
+        setBusy("save")
+        saved = accept(
           await requestJson<RouterPayload>("/api/router/config", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -115,66 +142,81 @@ export function useRouterPanel() {
           }),
         )
         if (startAfterSave) {
+          setBusy("start")
           const next = accept(
             await requestJson<RouterPayload>("/api/router/start", { method: "POST" }),
           )
-          setMessage(
-            next.provisioning?.ok === false
-              ? next.provisioning.message
-              : "Configuración guardada. Router iniciado.",
-          )
-        } else {
-          setMessage("Configuración guardada.")
+          const started = next.running && next.provisioning?.ok !== false
+          if (started) setMessage("Configuración guardada. Router iniciado.")
+          else
+            setError(
+              next.provisioning?.message ??
+                "La configuración se guardó, pero el router no pudo arrancar. Revisa las conexiones y vuelve a intentarlo.",
+            )
+          return { state: next, started }
         }
-        return true
-      } catch (error) {
         setMessage(
-          error instanceof Error
-            ? error.message
-            : "No se pudo preparar la configuración.",
+          saved.errors.length
+            ? "Borrador guardado. Corrige los pendientes antes de arrancar."
+            : saved.running
+              ? "Cambios aplicados al router."
+              : "Configuración guardada.",
         )
-        return false
+        return { state: saved, started: false }
+      } catch (cause) {
+        const reason =
+          cause instanceof Error ? cause.message : "No se pudo preparar la configuración."
+        setError(
+          saved ? `La configuración se guardó, pero no pudo arrancar: ${reason}` : reason,
+        )
+        return saved ? { state: saved, started: false } : null
       } finally {
         operationRef.current = false
         setBusy(null)
       }
     },
-    [state?.running],
+    [accept, state?.running],
   )
 
-  const run = useCallback(async (action: "start" | "stop") => {
-    if (operationRef.current) return
-    operationRef.current = true
-    setBusy(action)
-    try {
-      const payload = await requestJson<RouterPayload>(`/api/router/${action}`, {
-        method: "POST",
-      })
-      const { monitor: events, ...rest } = payload
-      setState(rest)
-      setMonitor(events ?? [])
-      setMessage(
-        action === "start"
-          ? (rest.provisioning?.message ?? "Router iniciado.")
-          : "Router detenido.",
-      )
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo cambiar el estado.")
-    } finally {
-      operationRef.current = false
-      setBusy(null)
-    }
-  }, [])
+  const run = useCallback(
+    async (action: "start" | "stop") => {
+      if (operationRef.current) return
+      operationRef.current = true
+      requestRef.current?.abort()
+      requestRef.current = null
+      setRefreshing(false)
+      setBusy(action)
+      setError(null)
+      setMessage(null)
+      try {
+        const next = accept(
+          await requestJson<RouterPayload>(`/api/router/${action}`, { method: "POST" }),
+        )
+        if (action === "start" && (!next.running || next.provisioning?.ok === false))
+          setError(next.provisioning?.message ?? "No se pudo arrancar el router.")
+        else setMessage(action === "start" ? "Router iniciado." : "Router detenido.")
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "No se pudo cambiar el estado.")
+      } finally {
+        operationRef.current = false
+        setBusy(null)
+      }
+    },
+    [accept],
+  )
 
   return {
     state,
     monitor,
     message,
+    error,
+    refreshing,
     busy,
     refresh,
     saveConfig,
     start: () => run("start"),
     stop: () => run("stop"),
+    clearError: () => setError(null),
     clearMessage: () => setMessage(null),
     clearMonitor: () => setMonitor([]),
   }

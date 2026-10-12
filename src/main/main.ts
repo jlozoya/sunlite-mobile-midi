@@ -1,44 +1,45 @@
-import {
-  app as electronApp,
-  BrowserWindow,
-  desktopCapturer,
-  ipcMain,
-  session,
-  shell,
-} from "electron"
-import electronUpdater from "electron-updater"
-import { UpdateManager, validateUpdateFeed } from "./update-manager.js"
-import { spawn } from "node:child_process"
+import { app as electronApp, BrowserWindow, shell } from "electron"
+import { UpdateManager } from "./update-manager.js"
 import fs from "node:fs"
-import easymidi from "easymidi"
 import express from "express"
 import http from "node:http"
-import os from "node:os"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import QRCode from "qrcode"
-import type {
-  AutomationMidiCommand,
-  AutomationSocketCommand,
-} from "../shared/automation-types.js"
+import type { AutomationMidiCommand } from "../shared/automation-types.js"
 import { DEV_BACKEND_PORT_PARAM } from "../shared/websocket-url.js"
-import {
-  DEFAULT_CONTROLLER_CUSTOMIZATION,
-  mergeControllerCustomization,
-  type ControllerCustomization,
-} from "../shared/controller-config.js"
 import { AutomationEngine } from "./automation/automation-engine.js"
 import { ProDjLinkSidecar } from "./automation/prodj-link-sidecar.js"
 import { RekordboxWindowCapture } from "./automation/rekordbox-window.js"
-import type { RekordboxDeckNumber } from "../shared/rekordbox-capture.js"
 import { RouterService } from "./router-service.js"
-import { ensureVirtualPorts, findLoopMidiExecutable } from "../router/loop-midi.js"
-import { WebSocketServer, type WebSocket } from "ws"
+import { findLoopMidiExecutable } from "../router/loop-midi.js"
+import { WebSocketServer } from "ws"
+import { isLightingSoftware, type LightingSoftware } from "../shared/lighting-software.js"
+import type { ServerStatus } from "../shared/server-status.js"
+import { getNetworkUrlCandidates, listenWithPortFallback } from "./server/network.js"
+import { createMidiFeedbackStore } from "./persistence/midi-feedback-store.js"
+import { createControllerStore } from "./persistence/controller-store.js"
 import {
-  isLightingSoftware,
-  noteRelease,
-  type LightingSoftware,
-} from "../shared/lighting-software.js"
+  MIDI_CHANNEL_ZERO_BASED,
+  MIDI_OUTPUT_NAME,
+  MIDI_INPUT_NAME,
+} from "./midi/settings.js"
+import {
+  createMidiControllerService,
+  type IncomingCommand,
+} from "./midi/controller-service.js"
+import {
+  mainDirectory,
+  rendererDir,
+  getWindowIconPath,
+  getLoopMidiInstallerPath,
+} from "./runtime-paths.js"
+import { createMidiBridgeService } from "./midi/bridge-service.js"
+import { registerControllerRoutes } from "./server/controller-routes.js"
+import { registerAutomationRoutes } from "./server/automation-routes.js"
+import { registerRouterRoutes } from "./server/router-routes.js"
+import { registerControllerSocket, broadcast } from "./server/controller-socket.js"
+import { configureAutoUpdates } from "./electron/updates.js"
+import { configureCapture } from "./electron/capture.js"
 
 let lightingSoftware: LightingSoftware = "sunlite"
 
@@ -72,1074 +73,53 @@ function createAutomationEngine(): AutomationEngine {
   )
 }
 
-const { autoUpdater } = electronUpdater
 let updateManager: UpdateManager | null = null
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-
 const DEFAULT_PORT = Number(process.env.PORT || 3000)
-const MAX_PORT_ATTEMPTS = 25
-const DEFAULT_MIDI_OUTPUT_NAME = "Sunlite Mobile In"
-const DEFAULT_MIDI_INPUT_NAME = "Sunlite Mobile Out"
-const MIDI_CHANNEL_ZERO_BASED = Number(process.env.MIDI_CHANNEL || 0)
-const MIDI_OUTPUT_NAME = process.env.MIDI_OUTPUT_NAME || DEFAULT_MIDI_OUTPUT_NAME
-const MIDI_INPUT_NAME = process.env.MIDI_INPUT_NAME || DEFAULT_MIDI_INPUT_NAME
-const rendererDir = path.resolve(__dirname, "../renderer")
 
-function getRuntimeResourcePath(fileName: string): string {
-  if (electronApp.isPackaged) {
-    return path.join(process.resourcesPath, fileName)
-  }
+const controllerStore = createControllerStore(lightingProfilePath)
+const { loadControllerCustomization } = controllerStore
+const feedbackStore = createMidiFeedbackStore(lightingProfilePath)
+const { cloneMidiFeedbackState, loadMidiFeedbackState } = feedbackStore
 
-  return path.resolve(__dirname, "../../resources", fileName)
+const midiController = createMidiControllerService({
+  broadcastToAll,
+  recordFeedback: (command) => automationEngine?.recordFeedback(command),
+  getLightingSoftware: () => lightingSoftware,
+  feedbackStore,
+})
+const { closeMidiConnection, handleCommand } = midiController
+function refreshMidiConnection() {
+  const status = midiController.refreshMidiConnection()
+  if (serverStatus)
+    serverStatus = { ...serverStatus, ...status, ...midiBridge.getStatus() }
+  return serverStatus
 }
 
-function getWindowIconPath(): string {
-  return getRuntimeResourcePath(process.platform === "win32" ? "icon.ico" : "icon.png")
-}
-
-function getApplicationVersion(): string {
-  if (electronApp.isPackaged) return electronApp.getVersion()
-
-  // In development getVersion() reports Electron's own version, not this app's.
-  const manifest = JSON.parse(
-    fs.readFileSync(path.resolve(__dirname, "../../package.json"), "utf8"),
-  ) as { version?: unknown }
-  if (typeof manifest.version !== "string" || !manifest.version.trim()) {
-    throw new Error("package.json no contiene una versión válida de la aplicación.")
-  }
-  return manifest.version
-}
-
-function configureAutoUpdates() {
-  let disabledReason = !electronApp.isPackaged
-    ? "Las actualizaciones están desactivadas en desarrollo."
-    : process.platform !== "win32"
-      ? "Las actualizaciones integradas requieren la instalación de Windows."
-      : process.env.PORTABLE_EXECUTABLE_FILE
-        ? "Edición portable: instala la edición Setup para recibir actualizaciones."
-        : !fs.existsSync(
-              path.join(process.resourcesPath, "..", "Uninstall Sunlite Mobile MIDI.exe"),
-            )
-          ? "Esta copia no está instalada. Ejecuta el instalador Setup para activar actualizaciones."
-          : null
-  if (!disabledReason && process.env.SUNLITE_UPDATE_FEED_URL) {
-    try {
-      autoUpdater.setFeedURL({
-        provider: "generic",
-        url: validateUpdateFeed(process.env.SUNLITE_UPDATE_FEED_URL),
-      })
-    } catch {
-      disabledReason = "El servidor de actualizaciones configurado no es válido."
-    }
-  }
-  updateManager = new UpdateManager(
-    autoUpdater,
-    getApplicationVersion(),
-    disabledReason,
-    () => {
-      const state = automationEngine?.getStatus()
-      if (state?.recording) throw new Error("Termina la grabación antes de instalar.")
-      if (state && state.mode !== "manual")
-        throw new Error("Cambia a modo Manual antes de instalar.")
-    },
-  )
-  const trustedUrl = process.env.SUNLITE_DEV_RENDERER_URL || serverStatus?.localUrl
-  for (const action of ["status", "check", "download", "install"] as const) {
-    ipcMain.handle(`updates:${action}`, (event) => {
-      const frame = event.senderFrame
-      if (
-        !mainWindow ||
-        event.sender !== mainWindow.webContents ||
-        frame !== mainWindow.webContents.mainFrame ||
-        !trustedUrl ||
-        new URL(frame.url).origin !== new URL(trustedUrl).origin
-      ) {
-        throw new Error("Solicitud de actualización no autorizada.")
-      }
-      return updateManager![action]()
-    })
-  }
-  updateManager.start()
-}
-
-type MidiConnection = {
-  outputName: string
-  output: easymidi.Output
-  inputName: string | null
-  input: easymidi.Input | null
-  midi: ReturnType<typeof createMidiSender>
-}
-
-type NetworkUrlCandidate = {
-  interfaceName: string
-  address: string
-  url: string
-  priority: number
-  note: string
-}
-
-type ServerStatus = {
-  lightingSoftware: LightingSoftware
-  port: number
-  localUrl: string
-  lanUrls: string[]
-  networkUrlCandidates: NetworkUrlCandidate[]
-  preferredLanUrl: string
-  qrDataUrl: string
-  midiOutputName: string | null
-  midiInputName: string | null
-  expectedMidiOutputName: string
-  expectedMidiInputName: string
-  midiReady: boolean
-  feedbackReady: boolean
-  feedbackDisabledReason: string | null
-  midiChannel: number
-  availableMidiOutputs: string[]
-  availableMidiInputs: string[]
-  loopMidiInstallerAvailable: boolean
-  loopMidiExecutablePath: string | null
-  loopMidiInstalled: boolean
-  midiAutoConfigured: boolean
-  midiProvisioningMessage: string | null
-}
-
-type IncomingCommand =
-  | { type: "note"; note: number; velocity?: number; offDelayMs?: number }
-  | { type: "noteon"; note: number; velocity?: number }
-  | { type: "noteoff"; note: number; velocity?: number }
-  | { type: "cc"; controller: number; value: number }
-  | { type: "program"; number: number }
-
-type MidiPayload = Record<string, number>
-type MidiSend = (messageType: string, payload: MidiPayload) => void
-type ProcessEventEmitter = {
-  on(event: "error", listener: (error: Error) => void): void
-  on(event: "close", listener: (code: number | null) => void): void
-}
-
-function sendMidi(output: easymidi.Output, messageType: string, payload: MidiPayload) {
-  ;(output.send as unknown as MidiSend)(messageType, payload)
-}
-
-function midiMessageToRecord(message: unknown): Record<string, unknown> {
-  return message as unknown as Record<string, unknown>
-}
+const midiBridge = createMidiBridgeService({
+  closeMidiConnection,
+  refreshMidiConnection,
+  getRouterService: () => routerService,
+})
+const { provisionMidiBridge } = midiBridge
 
 let serverStatus: ServerStatus | null = null
-let midiConnection: MidiConnection | null = null
 let mainWindow: BrowserWindow | null = null
-let controllerCustomization: ControllerCustomization = DEFAULT_CONTROLLER_CUSTOMIZATION
-let feedbackDisabledReason: string | null = null
 let automationEngine: AutomationEngine | null = null
 let routerService: RouterService | null = null
 let prodjLinkSidecar: ProDjLinkSidecar | null = null
 let rekordboxCapture: RekordboxWindowCapture | null = null
-let midiAutoConfigured = false
-let midiProvisioningMessage: string | null = null
-
-type MidiGuardEvent = { at: number; fingerprint: string }
-type MidiPadFeedback = {
-  velocity: number
-  behaviorChannel: number
-}
-
-type MidiFeedbackState = {
-  padStates: Record<number, MidiPadFeedback>
-  ccValues: Record<number, number>
-}
-
-const MIDI_LOOP_GUARD_WINDOW_MS = 1000
-const MIDI_LOOP_GUARD_MAX_TOTAL_MESSAGES = 240
-const MIDI_LOOP_GUARD_MAX_REPEATED_MESSAGES = 80
-const MIDI_LOOP_GUARD_WARNING_INTERVAL_MS = 3000
-
-let midiGuardEvents: MidiGuardEvent[] = []
-let midiFeedbackState: MidiFeedbackState = { padStates: {}, ccValues: {} }
-let midiFeedbackBroadcastTimer: NodeJS.Timeout | null = null
-let lastMidiLoopGuardWarningAt = 0
-
-function cloneMidiFeedbackState(): MidiFeedbackState {
-  return {
-    padStates: Object.fromEntries(
-      Object.entries(midiFeedbackState.padStates).map(([note, state]) => [
-        note,
-        { ...state },
-      ]),
-    ),
-    ccValues: { ...midiFeedbackState.ccValues },
-  }
-}
-
-function getMidiFeedbackStatePath(): string {
-  return path.join(lightingProfilePath(), "midi-feedback-state.json")
-}
-
-function normalizeStoredMidiFeedbackState(value: unknown): MidiFeedbackState {
-  if (!value || typeof value !== "object") {
-    return { padStates: {}, ccValues: {} }
-  }
-
-  const source = value as Partial<MidiFeedbackState> & {
-    padVelocities?: Record<string, unknown>
-  }
-
-  function normalizeMidiNumberRecord(record: unknown): Record<number, number> {
-    if (!record || typeof record !== "object") {
-      return {}
-    }
-
-    const normalized: Record<number, number> = {}
-
-    for (const [key, rawValue] of Object.entries(record as Record<string, unknown>)) {
-      const midiKey = clampMidiValue(key)
-      const midiValue = clampMidiValue(rawValue)
-      normalized[midiKey] = midiValue
-    }
-
-    return normalized
-  }
-
-  function normalizePadStates(record: unknown): Record<number, MidiPadFeedback> {
-    if (!record || typeof record !== "object") {
-      return {}
-    }
-
-    const normalized: Record<number, MidiPadFeedback> = {}
-
-    for (const [key, rawValue] of Object.entries(record as Record<string, unknown>)) {
-      const note = clampMidiValue(key)
-
-      if (rawValue && typeof rawValue === "object") {
-        const item = rawValue as Partial<MidiPadFeedback>
-        const velocity = clampMidiValue(item.velocity)
-
-        if (velocity > 0) {
-          normalized[note] = {
-            velocity,
-            behaviorChannel: clampMidiLedBehaviorChannel(item.behaviorChannel),
-          }
-        }
-
-        continue
-      }
-
-      const legacyVelocity = clampMidiValue(rawValue)
-      if (legacyVelocity > 0) {
-        normalized[note] = { velocity: legacyVelocity, behaviorChannel: 6 }
-      }
-    }
-
-    return normalized
-  }
-
-  const padStates = normalizePadStates(source.padStates ?? source.padVelocities)
-
-  return {
-    padStates,
-    ccValues: normalizeMidiNumberRecord(source.ccValues),
-  }
-}
-
-function clampMidiLedBehaviorChannel(value: unknown): number {
-  const numericValue = Number(value)
-
-  if (Number.isNaN(numericValue)) {
-    return 6
-  }
-
-  return Math.max(0, Math.min(15, Math.round(numericValue)))
-}
-
-function loadMidiFeedbackState(): MidiFeedbackState {
-  const statePath = getMidiFeedbackStatePath()
-
-  try {
-    if (!fs.existsSync(statePath)) {
-      midiFeedbackState = { padStates: {}, ccValues: {} }
-      return cloneMidiFeedbackState()
-    }
-
-    const raw = fs.readFileSync(statePath, "utf8")
-    midiFeedbackState = normalizeStoredMidiFeedbackState(JSON.parse(raw))
-    return cloneMidiFeedbackState()
-  } catch {
-    midiFeedbackState = { padStates: {}, ccValues: {} }
-    return cloneMidiFeedbackState()
-  }
-}
-
-function saveMidiFeedbackState() {
-  const statePath = getMidiFeedbackStatePath()
-
-  try {
-    fs.mkdirSync(path.dirname(statePath), { recursive: true })
-    fs.writeFileSync(statePath, JSON.stringify(cloneMidiFeedbackState(), null, 2), "utf8")
-  } catch {
-    // Ignore persistence failures; live MIDI feedback should continue working.
-  }
-}
-
-function updateMidiFeedbackState(
-  kind: "noteon" | "noteoff" | "cc",
-  message: Record<string, unknown>,
-): MidiFeedbackState {
-  if (kind === "noteon") {
-    const note = clampMidiValue(message.note)
-    const velocity = clampMidiValue(message.velocity)
-    const behaviorChannel = clampMidiLedBehaviorChannel(message.channel)
-
-    if (velocity <= 0) {
-      const nextPadStates = { ...midiFeedbackState.padStates }
-      delete nextPadStates[note]
-      midiFeedbackState = { ...midiFeedbackState, padStates: nextPadStates }
-      saveMidiFeedbackState()
-      return cloneMidiFeedbackState()
-    }
-
-    midiFeedbackState = {
-      ...midiFeedbackState,
-      padStates: {
-        ...midiFeedbackState.padStates,
-        [note]: { velocity, behaviorChannel },
-      },
-    }
-    saveMidiFeedbackState()
-    return cloneMidiFeedbackState()
-  }
-
-  if (kind === "noteoff") {
-    const note = clampMidiValue(message.note)
-    const nextPadStates = { ...midiFeedbackState.padStates }
-    delete nextPadStates[note]
-    midiFeedbackState = { ...midiFeedbackState, padStates: nextPadStates }
-    saveMidiFeedbackState()
-    return cloneMidiFeedbackState()
-  }
-
-  const controller = clampMidiValue(message.controller)
-  const value = clampMidiValue(message.value)
-  midiFeedbackState = {
-    ...midiFeedbackState,
-    ccValues: { ...midiFeedbackState.ccValues, [controller]: value },
-  }
-  saveMidiFeedbackState()
-  return cloneMidiFeedbackState()
-}
 
 function broadcastMidiFeedbackState() {
   broadcastToAll({ event: "midi-feedback-state", state: cloneMidiFeedbackState() })
 }
 
-function queueMidiFeedbackStateBroadcast() {
-  if (midiFeedbackBroadcastTimer) {
-    clearTimeout(midiFeedbackBroadcastTimer)
-  }
-
-  midiFeedbackBroadcastTimer = setTimeout(() => {
-    midiFeedbackBroadcastTimer = null
-    broadcastMidiFeedbackState()
-  }, 35)
-}
-
-function getControllerConfigPath(): string {
-  return path.join(lightingProfilePath(), "controller-config.json")
-}
-
-function loadControllerCustomization(): ControllerCustomization {
-  const configPath = getControllerConfigPath()
-
-  try {
-    if (!fs.existsSync(configPath)) {
-      controllerCustomization = DEFAULT_CONTROLLER_CUSTOMIZATION
-      return controllerCustomization
-    }
-
-    const raw = fs.readFileSync(configPath, "utf8")
-    controllerCustomization = mergeControllerCustomization(JSON.parse(raw))
-    return controllerCustomization
-  } catch {
-    controllerCustomization = DEFAULT_CONTROLLER_CUSTOMIZATION
-    return controllerCustomization
-  }
-}
-
-function saveControllerCustomization(
-  nextCustomization: ControllerCustomization,
-): ControllerCustomization {
-  controllerCustomization = mergeControllerCustomization(nextCustomization)
-  const configPath = getControllerConfigPath()
-  fs.mkdirSync(path.dirname(configPath), { recursive: true })
-  fs.writeFileSync(configPath, JSON.stringify(controllerCustomization, null, 2), "utf8")
-  return controllerCustomization
-}
-
-function clampMidiValue(value: unknown): number {
-  const numericValue = Number(value)
-
-  if (Number.isNaN(numericValue)) {
-    return 0
-  }
-
-  return Math.max(0, Math.min(127, Math.round(numericValue)))
-}
-
-function isLikelyVirtualInterface(interfaceName: string): boolean {
-  const name = interfaceName.toLowerCase()
-  const virtualMarkers = [
-    "vethernet",
-    "virtual",
-    "vmware",
-    "virtualbox",
-    "docker",
-    "wsl",
-    "hyper-v",
-    "tailscale",
-    "zerotier",
-    "vpn",
-    "tap",
-    "wintun",
-    "hamachi",
-    "anyconnect",
-    "nord",
-    "loopback",
-    "bluetooth",
-    "npcap",
-  ]
-
-  return virtualMarkers.some((marker) => name.includes(marker))
-}
-
-function isPreferredLanInterface(interfaceName: string): boolean {
-  const name = interfaceName.toLowerCase()
-  return (
-    name.includes("wi-fi") ||
-    name.includes("wifi") ||
-    name.includes("wireless") ||
-    name.includes("wlan") ||
-    name.includes("ethernet")
-  )
-}
-
-function isPrivateIpv4(address: string): boolean {
-  const parts = address.split(".").map(Number)
-
-  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) {
-    return false
-  }
-
-  const [first, second] = parts
-
-  return (
-    first === 10 ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  )
-}
-
-function isLinkLocalIpv4(address: string): boolean {
-  return address.startsWith("169.254.")
-}
-
-function getNetworkUrlCandidates(port: number): NetworkUrlCandidate[] {
-  const interfaces = os.networkInterfaces()
-  const candidates: NetworkUrlCandidate[] = []
-
-  for (const [interfaceName, addresses] of Object.entries(interfaces)) {
-    if (!addresses) continue
-
-    for (const address of addresses) {
-      if (address.family !== "IPv4" || address.internal) continue
-
-      const isVirtual = isLikelyVirtualInterface(interfaceName)
-      const isPreferredInterface = isPreferredLanInterface(interfaceName)
-      const isPrivate = isPrivateIpv4(address.address)
-      const isLinkLocal = isLinkLocalIpv4(address.address)
-
-      let priority = 0
-      if (isPreferredInterface) priority += 100
-      if (isPrivate) priority += 40
-      if (isVirtual) priority -= 200
-      if (isLinkLocal) priority -= 120
-
-      candidates.push({
-        interfaceName,
-        address: address.address,
-        url: `http://${address.address}:${port}`,
-        priority,
-        note: isVirtual
-          ? "virtual adapter"
-          : isPreferredInterface
-            ? "preferred LAN adapter"
-            : isPrivate
-              ? "private LAN adapter"
-              : "network adapter",
-      })
-    }
-  }
-
-  return candidates.sort(
-    (a, b) => b.priority - a.priority || a.interfaceName.localeCompare(b.interfaceName),
-  )
-}
-
-function getAvailableMidiOutputs(): string[] {
-  try {
-    return easymidi.getOutputs()
-  } catch {
-    return []
-  }
-}
-
-function getAvailableMidiInputs(): string[] {
-  try {
-    return easymidi.getInputs()
-  } catch {
-    return []
-  }
-}
-
-function findMidiName(names: string[], targetName: string): string | null {
-  const exactMatch = names.find((name) => name === targetName)
-  if (exactMatch) return exactMatch
-
-  const partialMatch = names.find((name) =>
-    name.toLowerCase().includes(targetName.toLowerCase()),
-  )
-
-  return partialMatch ?? null
-}
-
-function findMidiOutputName(targetName: string): string | null {
-  return findMidiName(getAvailableMidiOutputs(), targetName)
-}
-
-function findMidiInputName(targetName: string): string | null {
-  return findMidiName(getAvailableMidiInputs(), targetName)
-}
-
-function createMidiSender(output: easymidi.Output) {
-  function sendNoteOn(note: number, velocity = 127) {
-    sendMidi(output, "noteon", {
-      note: clampMidiValue(note),
-      velocity: clampMidiValue(velocity),
-      channel: MIDI_CHANNEL_ZERO_BASED,
-    })
-  }
-
-  function sendNoteOff(note: number, velocity = 0) {
-    const release = noteRelease(lightingSoftware, clampMidiValue(velocity))
-    sendMidi(output, release.type, {
-      note: clampMidiValue(note),
-      velocity: release.velocity,
-      channel: MIDI_CHANNEL_ZERO_BASED,
-    })
-  }
-
-  function sendNote(note: number, velocity = 127, offDelayMs = 500) {
-    sendNoteOn(note, velocity)
-    const release = noteRelease(lightingSoftware)
-
-    setTimeout(
-      () => {
-        try {
-          sendMidi(output, release.type, {
-            note: clampMidiValue(note),
-            velocity: release.velocity,
-            channel: MIDI_CHANNEL_ZERO_BASED,
-          })
-        } catch (error) {
-          console.warn("Could not release MIDI note", error)
-        }
-      },
-      Math.max(0, Math.min(5000, Number.isFinite(offDelayMs) ? offDelayMs : 500)),
-    )
-  }
-
-  function sendControlChange(controller: number, value: number) {
-    sendMidi(output, "cc", {
-      controller: clampMidiValue(controller),
-      value: clampMidiValue(value),
-      channel: MIDI_CHANNEL_ZERO_BASED,
-    })
-  }
-
-  function sendProgramChange(number: number) {
-    sendMidi(output, "program", {
-      number: clampMidiValue(number),
-      channel: MIDI_CHANNEL_ZERO_BASED,
-    })
-  }
-
-  return { sendNote, sendNoteOn, sendNoteOff, sendControlChange, sendProgramChange }
-}
-
-function closeMidiConnection() {
-  try {
-    midiConnection?.input?.close()
-  } catch {
-    // Ignore close failures from native MIDI backends.
-  }
-
-  try {
-    midiConnection?.output.close()
-  } catch {
-    // Ignore close failures from native MIDI backends.
-  }
-
-  midiConnection = null
-}
-
-function getMidiMessageFingerprint(
-  kind: string,
-  message: Record<string, unknown>,
-): string {
-  const channel = String(message.channel ?? "")
-  const note = String(message.note ?? "")
-  const velocity = String(message.velocity ?? "")
-  const controller = String(message.controller ?? "")
-  const value = String(message.value ?? "")
-
-  return `${kind}:${channel}:${note}:${velocity}:${controller}:${value}`
-}
-
-function resetMidiLoopGuard() {
-  midiGuardEvents = []
-  lastMidiLoopGuardWarningAt = 0
-}
-
-function updateFeedbackStatus(reason: string | null) {
-  feedbackDisabledReason = reason
-
-  if (serverStatus) {
-    serverStatus = {
-      ...serverStatus,
-      feedbackReady: Boolean(midiConnection?.input) && !reason,
-      feedbackDisabledReason: reason,
-      midiInputName: reason ? null : (midiConnection?.inputName ?? null),
-    }
-  }
-}
-
-function disableMidiFeedback(reason: string) {
-  updateFeedbackStatus(reason)
-  broadcastToAll({ event: "feedback-disabled", message: reason })
-}
-
-function shouldAcceptMidiFeedback(
-  kind: string,
-  message: Record<string, unknown>,
-): boolean {
-  if (feedbackDisabledReason) return false
-
-  const now = Date.now()
-  const fingerprint = getMidiMessageFingerprint(kind, message)
-
-  midiGuardEvents = midiGuardEvents.filter(
-    (event) => now - event.at <= MIDI_LOOP_GUARD_WINDOW_MS,
-  )
-  midiGuardEvents.push({ at: now, fingerprint })
-
-  const repeatedCount = midiGuardEvents.filter(
-    (event) => event.fingerprint === fingerprint,
-  ).length
-  const totalCount = midiGuardEvents.length
-
-  if (
-    repeatedCount >= MIDI_LOOP_GUARD_MAX_REPEATED_MESSAGES ||
-    totalCount >= MIDI_LOOP_GUARD_MAX_TOTAL_MESSAGES
-  ) {
-    if (now - lastMidiLoopGuardWarningAt >= MIDI_LOOP_GUARD_WARNING_INTERVAL_MS) {
-      lastMidiLoopGuardWarningAt = now
-    }
-
-    return true
-  }
-
-  return true
-}
-
-function refreshMidiConnection() {
-  const outputName = findMidiOutputName(MIDI_OUTPUT_NAME)
-  const inputNameCandidate = findMidiInputName(MIDI_INPUT_NAME)
-  const availableMidiOutputs = getAvailableMidiOutputs()
-  const availableMidiInputs = getAvailableMidiInputs()
-
-  closeMidiConnection()
-  resetMidiLoopGuard()
-  updateFeedbackStatus(null)
-
-  if (outputName) {
-    const output = new easymidi.Output(outputName)
-    let inputName =
-      inputNameCandidate && inputNameCandidate !== outputName ? inputNameCandidate : null
-
-    if (inputNameCandidate && inputNameCandidate === outputName) {
-      disableMidiFeedback(
-        `MIDI feedback is disabled because input and output resolve to the same port: "${outputName}". Use separate ports: "${MIDI_OUTPUT_NAME}" for App → Sunlite and "${MIDI_INPUT_NAME}" for Sunlite → App.`,
-      )
-      inputName = null
-    }
-
-    const input = inputName ? new easymidi.Input(inputName) : null
-
-    if (input) {
-      input.on("noteon", (message) => {
-        const record = midiMessageToRecord(message)
-        if (!shouldAcceptMidiFeedback("noteon", record)) return
-        updateMidiFeedbackState("noteon", record)
-        automationEngine?.recordFeedback({
-          type: "noteon",
-          note: clampMidiValue(message.note),
-          velocity: clampMidiValue(message.velocity),
-        })
-        broadcastToAll({ event: "midi-input", message: { kind: "noteon", ...message } })
-        queueMidiFeedbackStateBroadcast()
-      })
-
-      input.on("noteoff", (message) => {
-        const record = midiMessageToRecord(message)
-        if (!shouldAcceptMidiFeedback("noteoff", record)) return
-        updateMidiFeedbackState("noteoff", record)
-        automationEngine?.recordFeedback({
-          type: "noteoff",
-          note: clampMidiValue(message.note),
-          velocity: clampMidiValue(message.velocity),
-        })
-        broadcastToAll({ event: "midi-input", message: { kind: "noteoff", ...message } })
-        queueMidiFeedbackStateBroadcast()
-      })
-
-      input.on("cc", (message) => {
-        const record = midiMessageToRecord(message)
-        if (!shouldAcceptMidiFeedback("cc", record)) return
-        updateMidiFeedbackState("cc", record)
-        automationEngine?.recordFeedback({
-          type: "cc",
-          controller: clampMidiValue(message.controller),
-          value: clampMidiValue(message.value),
-        })
-        broadcastToAll({ event: "midi-input", message: { kind: "cc", ...message } })
-        queueMidiFeedbackStateBroadcast()
-      })
-    }
-
-    midiConnection = {
-      outputName,
-      output,
-      inputName,
-      input,
-      midi: createMidiSender(output),
-    }
-  }
-
-  if (serverStatus) {
-    const loopMidiExecutablePath = findLoopMidiExecutable()
-
-    serverStatus = {
-      ...serverStatus,
-      availableMidiOutputs,
-      availableMidiInputs,
-      midiOutputName: midiConnection?.outputName ?? null,
-      midiInputName: feedbackDisabledReason ? null : (midiConnection?.inputName ?? null),
-      midiReady: Boolean(midiConnection),
-      feedbackReady: Boolean(midiConnection?.input) && !feedbackDisabledReason,
-      feedbackDisabledReason,
-      loopMidiExecutablePath,
-      loopMidiInstalled: Boolean(loopMidiExecutablePath),
-      midiAutoConfigured,
-      midiProvisioningMessage,
-    }
-  }
-
-  return serverStatus
-}
-
-function safeSend(socket: WebSocket, payload: unknown) {
-  if (socket.readyState === socket.OPEN) {
-    socket.send(JSON.stringify(payload))
-  }
-}
-
 let activeWebSocketServer: WebSocketServer | null = null
-
-function broadcast(wss: WebSocketServer, payload: unknown) {
-  for (const client of wss.clients) {
-    safeSend(client, payload)
-  }
-}
 
 function broadcastToAll(payload: unknown) {
   if (activeWebSocketServer) {
     broadcast(activeWebSocketServer, payload)
   }
-}
-
-function getLoopMidiInstallerPath(): string {
-  const devPath = path.resolve(__dirname, "../../resources/installers/loopMIDISetup.exe")
-  const packagedPath = path.join(process.resourcesPath, "installers", "loopMIDISetup.exe")
-
-  return electronApp.isPackaged ? packagedPath : devPath
-}
-
-function runProcess(command: string, args: string[], windowsHide = true) {
-  return new Promise<{ code: number | null; stdout: string; stderr: string }>(
-    (resolve, reject) => {
-      const child = spawn(command, args, {
-        windowsHide,
-        shell: false,
-      })
-
-      let stdout = ""
-      let stderr = ""
-
-      child.stdout?.on("data", (chunk) => {
-        stdout += String(chunk)
-      })
-
-      child.stderr?.on("data", (chunk) => {
-        stderr += String(chunk)
-      })
-
-      const childEvents = child as unknown as ProcessEventEmitter
-
-      childEvents.on("error", reject)
-      childEvents.on("close", (code: number | null) => {
-        resolve({ code, stdout, stderr })
-      })
-    },
-  )
-}
-
-async function provisionMidiBridge(options: { installIfMissing: boolean }) {
-  midiAutoConfigured = false
-  midiProvisioningMessage = "Preparing the local MIDI bridge..."
-
-  const executablePath = findLoopMidiExecutable()
-  if (!executablePath && !options.installIfMissing) {
-    midiProvisioningMessage = "The local MIDI bridge is not installed."
-    return false
-  }
-
-  const installerPath = getLoopMidiInstallerPath()
-  if (!executablePath && !fs.existsSync(installerPath)) {
-    throw new Error("The bundled MIDI bridge installer is missing.")
-  }
-
-  let routerWasStopped = false
-  const provisioning = await ensureVirtualPorts(
-    [
-      { name: MIDI_OUTPUT_NAME, role: "output" },
-      { name: MIDI_INPUT_NAME, role: "input" },
-    ],
-    {
-      installerPath: options.installIfMissing ? installerPath : undefined,
-      onBeforeRestart: () => {
-        closeMidiConnection()
-        if (routerService?.getState().running) {
-          routerService.stop()
-          routerWasStopped = true
-        }
-      },
-      onAfterRestart: async () => {
-        refreshMidiConnection()
-        if (routerWasStopped && routerService) {
-          await routerService.start({
-            installerPath,
-            onBeforeRestart: () => closeMidiConnection(),
-            onAfterRestart: () => {
-              refreshMidiConnection()
-            },
-          })
-          routerWasStopped = false
-        }
-      },
-    },
-  )
-
-  if (!provisioning.ok) {
-    midiProvisioningMessage = provisioning.message
-    return false
-  }
-
-  midiAutoConfigured = true
-  midiProvisioningMessage = provisioning.message
-  refreshMidiConnection()
-  return true
-}
-
-async function installLoopMidi() {
-  const existingExecutablePath = findLoopMidiExecutable()
-
-  if (existingExecutablePath) {
-    const ready = await provisionMidiBridge({ installIfMissing: false })
-    if (!ready) {
-      throw new Error(
-        midiProvisioningMessage ?? "No se pudieron preparar los puertos MIDI.",
-      )
-    }
-    return {
-      code: 0,
-      stdout: existingExecutablePath,
-      stderr: "",
-      skipped: true,
-    }
-  }
-
-  const installerPath = getLoopMidiInstallerPath()
-
-  if (!fs.existsSync(installerPath)) {
-    throw new Error(`loopMIDI installer was not found at: ${installerPath}`)
-  }
-
-  const result = await runProcess(installerPath, ["/quiet", "/norestart"], false)
-  if (result.code === 0) {
-    const ready = await provisionMidiBridge({ installIfMissing: false })
-    if (!ready) {
-      throw new Error(
-        midiProvisioningMessage ?? "No se pudieron preparar los puertos MIDI.",
-      )
-    }
-  }
-
-  return result
-}
-
-async function openLoopMidi() {
-  const executablePath = findLoopMidiExecutable()
-
-  if (executablePath) {
-    spawn(executablePath, [], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: false,
-    }).unref()
-
-    return executablePath
-  }
-
-  const installerPath = getLoopMidiInstallerPath()
-
-  if (fs.existsSync(installerPath)) {
-    await shell.openPath(installerPath)
-    return installerPath
-  }
-
-  throw new Error("loopMIDI is not installed and the bundled installer is missing.")
-}
-
-function handleCommand(payload: IncomingCommand) {
-  if (!midiConnection) {
-    throw new Error(
-      `MIDI output "${MIDI_OUTPUT_NAME}" is not available. Install/open loopMIDI and create the port first.`,
-    )
-  }
-
-  if (payload.type === "note") {
-    const note = clampMidiValue(payload.note)
-    const velocity = clampMidiValue(payload.velocity ?? 127)
-    const delay = Number(payload.offDelayMs ?? 500)
-    const offDelayMs = Math.max(0, Math.min(5000, Number.isFinite(delay) ? delay : 500))
-    midiConnection.midi.sendNote(note, velocity, offDelayMs)
-
-    return { ok: true, type: "note", note, velocity, offDelayMs }
-  }
-
-  if (payload.type === "noteon") {
-    const note = clampMidiValue(payload.note)
-    const velocity = clampMidiValue(payload.velocity ?? 127)
-    midiConnection.midi.sendNoteOn(note, velocity)
-
-    return { ok: true, type: "noteon", note, velocity }
-  }
-
-  if (payload.type === "noteoff") {
-    const note = clampMidiValue(payload.note)
-    const velocity = clampMidiValue(payload.velocity ?? 0)
-    midiConnection.midi.sendNoteOff(note, velocity)
-
-    return { ok: true, type: "noteoff", note, velocity }
-  }
-
-  if (payload.type === "cc") {
-    const controller = clampMidiValue(payload.controller)
-    const value = clampMidiValue(payload.value)
-    midiConnection.midi.sendControlChange(controller, value)
-
-    return { ok: true, type: "cc", controller, value }
-  }
-
-  if (payload.type === "program") {
-    const number = clampMidiValue(payload.number)
-    midiConnection.midi.sendProgramChange(number)
-
-    return { ok: true, type: "program", number }
-  }
-
-  throw new Error("Unsupported MIDI command.")
-}
-
-function isAutomationSocketCommand(value: unknown): value is AutomationSocketCommand {
-  if (!value || typeof value !== "object" || !("type" in value)) return false
-  const type = (value as { type?: unknown }).type
-  return type === "automation-audio-frame" || type === "automation-audio-disconnected"
-}
-
-function isPortInUseError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "EADDRINUSE"
-  )
-}
-
-function listenWithPortFallback(
-  httpServer: http.Server,
-  preferredPort: number,
-): Promise<number> {
-  return new Promise((resolve, reject) => {
-    let currentPort = preferredPort
-    let attempts = 0
-
-    function tryListen() {
-      httpServer.removeAllListeners("error")
-
-      httpServer.once("error", (error) => {
-        if (!isPortInUseError(error) || attempts >= MAX_PORT_ATTEMPTS) {
-          reject(error)
-          return
-        }
-
-        console.warn(
-          `[HTTP] Port ${currentPort} is busy. Trying port ${currentPort + 1}.`,
-        )
-
-        attempts += 1
-        currentPort += 1
-        setTimeout(tryListen, 50)
-      })
-
-      httpServer.listen(currentPort, "0.0.0.0", () => {
-        const address = httpServer.address()
-        const resolvedPort =
-          typeof address === "object" && address?.port ? address.port : currentPort
-
-        if (resolvedPort !== preferredPort) {
-          console.warn(
-            `[HTTP] Preferred port ${preferredPort} was busy. Server started on ${resolvedPort}.`,
-          )
-        } else {
-          console.info(`[HTTP] Server started on port ${resolvedPort}.`)
-        }
-
-        resolve(resolvedPort)
-      })
-    }
-
-    tryListen()
-  })
 }
 
 async function startControllerServer(): Promise<ServerStatus> {
@@ -1150,9 +130,7 @@ async function startControllerServer(): Promise<ServerStatus> {
   try {
     await provisionMidiBridge({ installIfMissing: electronApp.isPackaged })
   } catch (error) {
-    midiAutoConfigured = false
-    midiProvisioningMessage =
-      error instanceof Error ? error.message : "Automatic MIDI setup failed."
+    midiBridge.reportError(error)
     console.warn("Automatic MIDI provisioning failed", error)
   }
 
@@ -1174,7 +152,7 @@ async function startControllerServer(): Promise<ServerStatus> {
     (payload) => broadcastToAll(payload),
   )
 
-  const projectRoot = path.resolve(__dirname, "../..")
+  const projectRoot = path.resolve(mainDirectory, "../..")
   prodjLinkSidecar = new ProDjLinkSidecar({
     isPackaged: electronApp.isPackaged,
     resourcesPath: process.resourcesPath,
@@ -1186,366 +164,36 @@ async function startControllerServer(): Promise<ServerStatus> {
   appServer.use(express.json())
   appServer.use(express.static(rendererDir))
 
-  appServer.get("/api/status", (_request, response) => {
-    refreshMidiConnection()
-    response.json(serverStatus)
+  registerControllerRoutes(appServer, {
+    getStatus: () => serverStatus,
+    getLightingSoftware: () => lightingSoftware,
+    isRecording: () => Boolean(automationEngine?.getStatus().recording),
+    switchLightingSoftware,
+    refreshMidiConnection,
+    controllerStore,
+    feedbackStore,
+    midiBridge,
+    broadcastToAll,
   })
-
-  appServer.put("/api/lighting-software", (request, response) => {
-    const software = request.body?.software
-    if (!isLightingSoftware(software)) {
-      response.status(400).json({ message: "Software de luces no válido" })
-      return
-    }
-    if (software === lightingSoftware) {
-      response.json(serverStatus)
-      return
-    }
-    if (automationEngine?.getStatus().recording) {
-      response
-        .status(409)
-        .json({ message: "Detén la grabación antes de cambiar de software" })
-      return
-    }
-    const previousSoftware = lightingSoftware
-    let nextEngine: AutomationEngine
-    try {
-      lightingSoftware = software
-      nextEngine = createAutomationEngine()
-      fs.writeFileSync(
-        path.join(electronApp.getPath("userData"), "lighting-software.json"),
-        JSON.stringify({ software }),
-        "utf8",
-      )
-    } catch (error) {
-      lightingSoftware = previousSoftware
-      response.status(500).json({
-        message:
-          error instanceof Error ? error.message : "No se pudo cambiar de software",
-      })
-      return
-    }
-    automationEngine?.dispose()
-    automationEngine = nextEngine
-    loadControllerCustomization()
-    midiFeedbackState = { padStates: {}, ccValues: {} }
-    if (serverStatus) serverStatus.lightingSoftware = software
-    broadcastToAll({ event: "controller-config", config: controllerCustomization })
-    broadcastMidiFeedbackState()
-    broadcastToAll({ event: "automation-status", status: automationEngine.getStatus() })
-    response.json(serverStatus)
+  registerAutomationRoutes(appServer, {
+    getEngine: () => automationEngine,
+    getCapture: () => rekordboxCapture,
+    getSidecar: () => prodjLinkSidecar,
   })
-
-  appServer.post("/api/midi/refresh", (_request, response) => {
-    response.json(refreshMidiConnection())
+  registerRouterRoutes(appServer, {
+    routerService,
+    closeMidiConnection,
+    refreshMidiConnection,
   })
-
-  appServer.post("/api/loopmidi/install", async (_request, response) => {
-    try {
-      const result = await installLoopMidi()
-      response.json({ ok: result.code === 0, ...result, status: refreshMidiConnection() })
-    } catch (error) {
-      response.status(500).json({
-        ok: false,
-        message: error instanceof Error ? error.message : "Unknown install error",
-      })
-    }
+  registerControllerSocket(wss, {
+    refreshMidiConnection,
+    midiController,
+    controllerStore,
+    feedbackStore,
+    getEngine: () => automationEngine,
   })
-
-  appServer.post("/api/loopmidi/open", async (_request, response) => {
-    try {
-      const openedPath = await openLoopMidi()
-      response.json({ ok: true, openedPath, status: refreshMidiConnection() })
-    } catch (error) {
-      response.status(500).json({
-        ok: false,
-        message: error instanceof Error ? error.message : "Unknown open error",
-      })
-    }
-  })
-
-  appServer.get("/api/controller-config", (_request, response) => {
-    response.json(loadControllerCustomization())
-  })
-
-  appServer.put("/api/controller-config", (request, response) => {
-    try {
-      const nextCustomization = saveControllerCustomization(request.body)
-      broadcastToAll({ event: "controller-config", config: nextCustomization })
-      response.json(nextCustomization)
-    } catch (error) {
-      response.status(500).json({
-        ok: false,
-        message:
-          error instanceof Error ? error.message : "Unknown controller config error",
-      })
-    }
-  })
-
-  appServer.get("/api/midi-feedback/state", (_request, response) => {
-    response.json({ ok: true, state: cloneMidiFeedbackState() })
-  })
-
-  appServer.post("/api/midi-feedback/clear", (_request, response) => {
-    midiFeedbackState = { padStates: {}, ccValues: {} }
-    saveMidiFeedbackState()
-    broadcastMidiFeedbackState()
-    response.json({ ok: true, state: cloneMidiFeedbackState() })
-  })
-
-  appServer.get("/api/automation/status", (_request, response) => {
-    response.json(automationEngine?.getStatus())
-  })
-
-  appServer.get("/api/automation/rekordbox/status", async (_request, response) => {
-    try {
-      response.setHeader("Cache-Control", "no-store")
-      response.json({
-        available: Boolean(await rekordboxCapture?.capture()),
-        regions: rekordboxCapture?.getRegions() ?? {},
-      })
-    } catch {
-      response.status(503).json({ available: false, regions: {} })
-    }
-  })
-
-  appServer.get(
-    "/api/automation/rekordbox/decks/:deck/frame",
-    async (request, response) => {
-      const deck = Number(request.params.deck)
-      if (![1, 2, 3, 4].includes(deck)) {
-        response.status(400).end()
-        return
-      }
-      try {
-        const image = await rekordboxCapture?.captureDeck(deck as RekordboxDeckNumber)
-        if (!image) {
-          response.status(404).end()
-          return
-        }
-        response.setHeader("Cache-Control", "no-store")
-        response.type("jpeg").send(image.toJPEG(80))
-      } catch {
-        response.status(503).end()
-      }
-    },
-  )
-
-  appServer.put("/api/automation/mode", (request, response) => {
-    try {
-      response.json(automationEngine?.setMode(request.body?.mode))
-    } catch (error) {
-      response.status(400).json({
-        message: error instanceof Error ? error.message : "Invalid automation mode",
-      })
-    }
-  })
-
-  appServer.put("/api/automation/settings", (request, response) => {
-    try {
-      response.json(automationEngine?.updateSettings(request.body))
-    } catch (error) {
-      response.status(400).json({
-        message: error instanceof Error ? error.message : "Invalid automation settings",
-      })
-    }
-  })
-
-  appServer.post("/api/automation/session/start", (request, response) => {
-    response.json(automationEngine?.startSession(request.body?.name))
-  })
-
-  appServer.post("/api/automation/session/stop", (_request, response) => {
-    response.json(automationEngine?.stopSession())
-  })
-
-  appServer.post("/api/automation/train", (_request, response) => {
-    response.json(automationEngine?.train())
-  })
-
-  appServer.get("/api/automation/sessions/:id", (request, response) => {
-    response.json({
-      id: request.params.id,
-      events: automationEngine?.readTimeline(request.params.id) ?? [],
-    })
-  })
-
-  appServer.put("/api/automation/sessions/:id", (request, response) => {
-    try {
-      response.json(
-        automationEngine?.renameSession(request.params.id, request.body?.name),
-      )
-    } catch (error) {
-      response.status(400).json({
-        message: error instanceof Error ? error.message : "Invalid training session",
-      })
-    }
-  })
-
-  appServer.delete("/api/automation/sessions/:id", (request, response) => {
-    try {
-      response.json(automationEngine?.deleteSession(request.params.id))
-    } catch (error) {
-      response.status(400).json({
-        message: error instanceof Error ? error.message : "Invalid training session",
-      })
-    }
-  })
-
-  appServer.patch("/api/automation/sessions/:id/examples", (request, response) => {
-    try {
-      response.json(
-        automationEngine?.updateTrainingExamples(request.params.id, request.body?.edits),
-      )
-    } catch (error) {
-      response.status(400).json({
-        message:
-          error instanceof Error ? error.message : "Invalid training example edits",
-      })
-    }
-  })
-
-  appServer.post("/api/automation/examples/:id/exclude", (request, response) => {
-    try {
-      response.json(automationEngine?.excludeTrainingExample(request.params.id))
-    } catch (error) {
-      response.status(400).json({
-        message: error instanceof Error ? error.message : "Invalid example",
-      })
-    }
-  })
-
-  appServer.post("/api/automation/prodj-link/restart", (_request, response) => {
-    prodjLinkSidecar?.stop()
-    prodjLinkSidecar?.start()
-    response.json(automationEngine?.getStatus())
-  })
-
-  const routerReservedDevices = () => [MIDI_OUTPUT_NAME, MIDI_INPUT_NAME]
-
-  const routerPayload = () => ({
-    ...routerService!.getState(routerReservedDevices()),
-    monitor: routerService!.getMonitor(),
-  })
-
-  appServer.get("/api/router/state", (_request, response) => {
-    response.json(routerPayload())
-  })
-
-  appServer.put("/api/router/config", (request, response) => {
-    try {
-      routerService!.updateConfig(request.body)
-      response.json(routerPayload())
-    } catch (error) {
-      response.status(400).json({
-        message: error instanceof Error ? error.message : "Invalid router configuration",
-      })
-    }
-  })
-
-  appServer.post("/api/router/start", async (_request, response) => {
-    try {
-      await routerService!.start({
-        installerPath: getLoopMidiInstallerPath(),
-        // Creating a new virtual port can require restarting loopMIDI, and RtMidi
-        // crashes the process if a port disappears while it is open. Release the
-        // controller's pair first, then reopen once the bridge is back.
-        onBeforeRestart: () => closeMidiConnection(),
-        onAfterRestart: () => {
-          refreshMidiConnection()
-        },
-      })
-      response.json(routerPayload())
-    } catch (error) {
-      response.status(400).json({
-        message: error instanceof Error ? error.message : "Could not start the router",
-      })
-    }
-  })
-
-  appServer.post("/api/router/stop", (_request, response) => {
-    routerService!.stop()
-    response.json(routerPayload())
-  })
-
   appServer.get("*", (_request, response) => {
     response.sendFile(path.join(rendererDir, "index.html"))
-  })
-
-  wss.on("connection", (socket) => {
-    refreshMidiConnection()
-    safeSend(socket, { event: "controller-config", config: controllerCustomization })
-    safeSend(socket, { event: "midi-feedback-state", state: cloneMidiFeedbackState() })
-    if (automationEngine) {
-      safeSend(socket, {
-        event: "automation-status",
-        status: automationEngine.getStatus(),
-      })
-    }
-
-    setTimeout(
-      () =>
-        safeSend(socket, {
-          event: "midi-feedback-state",
-          state: cloneMidiFeedbackState(),
-        }),
-      350,
-    )
-
-    setTimeout(
-      () =>
-        safeSend(socket, {
-          event: "midi-feedback-state",
-          state: cloneMidiFeedbackState(),
-        }),
-      1200,
-    )
-
-    if (midiConnection) {
-      safeSend(socket, {
-        type: "server-ready",
-        midiOutputName: midiConnection.outputName,
-        midiInputName: feedbackDisabledReason ? null : midiConnection.inputName,
-        feedbackReady: Boolean(midiConnection.input) && !feedbackDisabledReason,
-        feedbackDisabledReason,
-        midiChannel: MIDI_CHANNEL_ZERO_BASED + 1,
-      })
-    } else {
-      safeSend(socket, {
-        type: "setup-required",
-        expectedMidiOutputName: MIDI_OUTPUT_NAME,
-        expectedMidiInputName: MIDI_INPUT_NAME,
-        availableMidiOutputs: getAvailableMidiOutputs(),
-        feedbackDisabledReason,
-      })
-    }
-
-    socket.on("message", (rawMessage) => {
-      try {
-        const payload = JSON.parse(rawMessage.toString()) as unknown
-
-        if (isAutomationSocketCommand(payload)) {
-          if (payload.type === "automation-audio-frame") {
-            automationEngine?.handleAudioFrame(payload.frame)
-          } else {
-            automationEngine?.handleAudioDisconnected()
-          }
-          return
-        }
-
-        const midiPayload = payload as IncomingCommand
-        const result = handleCommand(midiPayload)
-        automationEngine?.recordManualCommand(midiPayload)
-
-        safeSend(socket, { event: "command-result", command: result })
-        broadcast(wss, { event: "last-command", command: result })
-      } catch (error) {
-        safeSend(socket, {
-          type: "error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        })
-      }
-    })
   })
 
   const port = await listenWithPortFallback(httpServer, DEFAULT_PORT)
@@ -1575,16 +223,15 @@ async function startControllerServer(): Promise<ServerStatus> {
     expectedMidiInputName: MIDI_INPUT_NAME,
     midiReady: false,
     feedbackReady: false,
-    feedbackDisabledReason,
+    feedbackDisabledReason: midiController.getStatus().feedbackDisabledReason,
     midiChannel: MIDI_CHANNEL_ZERO_BASED + 1,
-    availableMidiOutputs: getAvailableMidiOutputs(),
-    availableMidiInputs: getAvailableMidiInputs(),
+    availableMidiOutputs: midiController.getStatus().availableMidiOutputs,
+    availableMidiInputs: midiController.getStatus().availableMidiInputs,
     midiInputName: null,
     loopMidiInstallerAvailable: fs.existsSync(loopMidiInstallerPath),
     loopMidiExecutablePath,
     loopMidiInstalled: Boolean(loopMidiExecutablePath),
-    midiAutoConfigured,
-    midiProvisioningMessage,
+    ...midiBridge.getStatus(),
   }
 
   refreshMidiConnection()
@@ -1608,7 +255,7 @@ async function createWindow(status: ServerStatus) {
       nodeIntegration: false,
       sandbox: true,
       backgroundThrottling: false,
-      preload: path.join(__dirname, "preload.cjs"),
+      preload: path.join(mainDirectory, "preload.cjs"),
     },
   })
 
@@ -1624,7 +271,11 @@ async function createWindow(status: ServerStatus) {
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (new URL(url).origin !== rendererUrl.origin) event.preventDefault()
   })
-  configureAutoUpdates()
+  updateManager = configureAutoUpdates({
+    getWindow: () => mainWindow,
+    getAutomationStatus: () => automationEngine?.getStatus(),
+    trustedUrl: process.env.SUNLITE_DEV_RENDERER_URL || serverStatus?.localUrl,
+  })
   await mainWindow.loadURL(rendererUrl.toString())
   mainWindow.maximize()
   mainWindow.show()
@@ -1635,78 +286,12 @@ if (!hasSingleInstanceLock) electronApp.quit()
 else
   electronApp.whenReady().then(async () => {
     try {
-      session.defaultSession.setPermissionRequestHandler(
-        (webContents, permission, callback) => {
-          const currentUrl = webContents.getURL()
-          let isLocalController = false
-          try {
-            const parsed = new URL(currentUrl)
-            isLocalController =
-              parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost"
-          } catch {
-            isLocalController = false
-          }
-          callback(permission === "media" && isLocalController)
-        },
-      )
       const status = await startControllerServer()
       const trustedUrl = process.env.SUNLITE_DEV_RENDERER_URL || status.localUrl
-      session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
-        let trustedOrigin = false
-        try {
-          trustedOrigin =
-            new URL(request.securityOrigin).origin === new URL(trustedUrl).origin
-        } catch {
-          trustedOrigin = false
-        }
-        const trustedFrame =
-          mainWindow &&
-          request.frame === mainWindow.webContents.mainFrame &&
-          trustedOrigin
-        if (
-          !trustedFrame ||
-          !request.userGesture ||
-          !request.audioRequested ||
-          !request.videoRequested
-        ) {
-          callback({})
-          return
-        }
-        try {
-          const sources = await desktopCapturer.getSources({
-            types: ["screen"],
-            thumbnailSize: { width: 1, height: 1 },
-          })
-          callback(sources[0] ? { video: sources[0], audio: "loopback" } : {})
-        } catch {
-          callback({})
-        }
-      })
-      const trustedRekordboxRequest = (event: Electron.IpcMainInvokeEvent) =>
-        mainWindow &&
-        event.sender === mainWindow.webContents &&
-        event.senderFrame === mainWindow.webContents.mainFrame &&
-        new URL(event.senderFrame.url).origin === new URL(trustedUrl).origin
-
-      ipcMain.handle("rekordbox:preview", async (event) => {
-        if (!trustedRekordboxRequest(event)) throw new Error("Solicitud no autorizada")
-        const image = await rekordboxCapture?.capture()
-        return image
-          ? `data:image/jpeg;base64,${image.toJPEG(80).toString("base64")}`
-          : null
-      })
-      ipcMain.handle("rekordbox:source-id", async (event) => {
-        if (!trustedRekordboxRequest(event)) throw new Error("Solicitud no autorizada")
-        return (await rekordboxCapture?.getSourceId()) ?? null
-      })
-      ipcMain.handle("rekordbox:push-frame", (event, bytes: Uint8Array) => {
-        if (!trustedRekordboxRequest(event)) throw new Error("Solicitud no autorizada")
-        if (!(bytes instanceof Uint8Array)) throw new Error("Imagen no válida")
-        rekordboxCapture?.pushFrame(bytes)
-      })
-      ipcMain.handle("rekordbox:save-regions", (event, regions: unknown) => {
-        if (!trustedRekordboxRequest(event)) throw new Error("Solicitud no autorizada")
-        return rekordboxCapture?.saveRegions(regions) ?? {}
+      configureCapture({
+        getWindow: () => mainWindow,
+        getCapture: () => rekordboxCapture,
+        trustedUrl,
       })
       await createWindow(status)
     } catch (error) {
@@ -1759,3 +344,31 @@ electronApp.on("window-all-closed", () => {
     electronApp.quit()
   }
 })
+
+function switchLightingSoftware(software: LightingSoftware) {
+  const previousSoftware = lightingSoftware
+  let nextEngine: AutomationEngine
+  try {
+    lightingSoftware = software
+    nextEngine = createAutomationEngine()
+    fs.writeFileSync(
+      path.join(electronApp.getPath("userData"), "lighting-software.json"),
+      JSON.stringify({ software }),
+      "utf8",
+    )
+  } catch (error) {
+    lightingSoftware = previousSoftware
+    throw error
+  }
+  automationEngine?.dispose()
+  automationEngine = nextEngine
+  loadControllerCustomization()
+  feedbackStore.clear()
+  if (serverStatus) serverStatus.lightingSoftware = software
+  broadcastToAll({
+    event: "controller-config",
+    config: controllerStore.getCustomization(),
+  })
+  broadcastMidiFeedbackState()
+  broadcastToAll({ event: "automation-status", status: automationEngine.getStatus() })
+}

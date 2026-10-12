@@ -57,6 +57,7 @@ export function AnimatedCollapse({
 
 export function AnimatedDisclosure({
   summary,
+  summaryActions,
   children,
   containerProps,
   buttonProps,
@@ -64,6 +65,7 @@ export function AnimatedDisclosure({
   unmountOnExit = false,
 }: {
   summary: ReactNode
+  summaryActions?: ReactNode
   children: ReactNode
   containerProps?: HTMLAttributes<HTMLDivElement>
   buttonProps?: ButtonHTMLAttributes<HTMLButtonElement>
@@ -92,26 +94,42 @@ export function AnimatedDisclosure({
       <path d="m4 6 4 4 4-4" />
     </svg>
   )
+  const trigger = (
+    <button
+      type="button"
+      {...buttonProps}
+      className={[
+        buttonProps?.className,
+        stylex.props(Boolean(summaryActions) && styles.triggerGrow).className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      aria-expanded={open}
+      aria-controls={contentId}
+      onClick={() => setOpen((current) => !current)}
+    >
+      {indicatorPosition === "start" ? indicator : null}
+      <span
+        {...stylex.props(
+          styles.summaryText,
+          indicatorPosition === "end" && styles.summaryTextGrow,
+        )}
+      >
+        {summary}
+      </span>
+      {indicatorPosition === "end" ? indicator : null}
+    </button>
+  )
   return (
     <div {...containerProps}>
-      <button
-        type="button"
-        {...buttonProps}
-        aria-expanded={open}
-        aria-controls={contentId}
-        onClick={() => setOpen((current) => !current)}
-      >
-        {indicatorPosition === "start" ? indicator : null}
-        <span
-          {...stylex.props(
-            styles.summaryText,
-            indicatorPosition === "end" && styles.summaryTextGrow,
-          )}
-        >
-          {summary}
-        </span>
-        {indicatorPosition === "end" ? indicator : null}
-      </button>
+      {summaryActions ? (
+        <div {...stylex.props(styles.disclosureHeader)}>
+          {trigger}
+          {summaryActions}
+        </div>
+      ) : (
+        trigger
+      )}
       <AnimatedCollapse open={open} id={contentId} unmountOnExit={unmountOnExit}>
         {children}
       </AnimatedCollapse>
@@ -120,6 +138,8 @@ export function AnimatedDisclosure({
 }
 
 const styles = stylex.create({
+  disclosureHeader: { display: "flex", alignItems: "center", gap: "6px" },
+  triggerGrow: { flex: 1, minWidth: 0 },
   collapse: {
     display: "grid",
     gridTemplateRows: "1fr",

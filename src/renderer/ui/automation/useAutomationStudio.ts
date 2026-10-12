@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type {
-  AutomationAudioFrame,
   AutomationMode,
   AutomationSettings,
   AutomationSocketCommand,
   AutomationStatus,
   AutomationTimelineEvent,
 } from "../../../shared/automation-types"
-
-export const SYSTEM_AUDIO_DEVICE_ID = "system-loopback"
+import { useAutomationAudio } from "./useAutomationAudio"
 
 type SendAutomationCommand = (command: AutomationSocketCommand) => boolean
 
@@ -25,83 +23,9 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
         : `Request failed: ${response.status}`,
     )
   }
+  if (payload === null)
+    throw new Error("El servidor no devolvió el estado de automatización.")
   return payload as T
-}
-
-function averageRange(
-  frequencyData: Uint8Array,
-  sampleRate: number,
-  minHz: number,
-  maxHz: number,
-): number {
-  const nyquist = sampleRate / 2
-  const start = Math.max(0, Math.floor((minHz / nyquist) * frequencyData.length))
-  const end = Math.min(
-    frequencyData.length - 1,
-    Math.ceil((maxHz / nyquist) * frequencyData.length),
-  )
-  let total = 0
-  let count = 0
-  for (let index = start; index <= end; index += 1) {
-    total += frequencyData[index] / 255
-    count += 1
-  }
-  return count ? total / count : 0
-}
-
-function compactSpectrum(frequencyData: Uint8Array, sampleRate: number): number[] {
-  const nyquist = sampleRate / 2
-  const bands = 64
-  const minHz = 35
-  const maxHz = Math.min(18000, nyquist)
-  const result: number[] = []
-
-  for (let band = 0; band < bands; band += 1) {
-    const lowRatio = band / bands
-    const highRatio = (band + 1) / bands
-    const lowHz = minHz * Math.pow(maxHz / minHz, lowRatio)
-    const highHz = minHz * Math.pow(maxHz / minHz, highRatio)
-    result.push(averageRange(frequencyData, sampleRate, lowHz, highHz))
-  }
-  return result
-}
-
-function makeFrame(
-  analyser: AnalyserNode,
-  previousSpectrum: number[],
-): AutomationAudioFrame {
-  const frequencyData = new Uint8Array(analyser.frequencyBinCount)
-  const timeData = new Float32Array(analyser.fftSize)
-  analyser.getByteFrequencyData(frequencyData)
-  analyser.getFloatTimeDomainData(timeData)
-
-  let squared = 0
-  for (const sample of timeData) squared += sample * sample
-  const rms = Math.sqrt(squared / Math.max(1, timeData.length))
-  const spectrum = compactSpectrum(frequencyData, analyser.context.sampleRate)
-
-  let flux = 0
-  let weighted = 0
-  let magnitude = 0
-  for (let index = 0; index < spectrum.length; index += 1) {
-    flux += Math.max(0, spectrum[index] - (previousSpectrum[index] ?? spectrum[index]))
-    weighted += spectrum[index] * (index / Math.max(1, spectrum.length - 1))
-    magnitude += spectrum[index]
-  }
-
-  return {
-    capturedAt: Date.now(),
-    sampleRate: analyser.context.sampleRate,
-    spectrum,
-    features: {
-      rms: Math.min(1, rms * 3.5),
-      bass: averageRange(frequencyData, analyser.context.sampleRate, 35, 250),
-      mid: averageRange(frequencyData, analyser.context.sampleRate, 250, 2500),
-      high: averageRange(frequencyData, analyser.context.sampleRate, 2500, 14000),
-      flux: Math.min(1, (flux / Math.max(1, spectrum.length)) * 5),
-      centroid: magnitude > 0 ? weighted / magnitude : 0,
-    },
-  }
 }
 
 export function useAutomationStudio(
@@ -109,38 +33,37 @@ export function useAutomationStudio(
   showLiveFrames: boolean,
 ) {
   const [status, setStatus] = useState<AutomationStatus | null>(null)
-  const [audioRunning, setAudioRunning] = useState(false)
-  const [audioBusy, setAudioBusy] = useState(false)
-  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([])
-  const [selectedDeviceId, setSelectedDeviceId] = useState(
-    () =>
-      window.localStorage.getItem("sunlite-automation-audio-device") ??
-      (window.rekordboxCapture ? SYSTEM_AUDIO_DEVICE_ID : ""),
-  )
-  const [liveFrames, setLiveFrames] = useState<AutomationAudioFrame[]>([])
-  const showLiveFramesRef = useRef(showLiveFrames)
-  showLiveFramesRef.current = showLiveFrames
-  useEffect(() => {
-    if (!showLiveFrames) setLiveFrames([])
-  }, [showLiveFrames])
   const [timeline, setTimeline] = useState<AutomationTimelineEvent[]>([])
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const audio = useAutomationAudio(sendAutomationCommand, showLiveFrames, setError)
   const clearMessage = useCallback(() => setMessage(null), [])
   const [statusError, setStatusError] = useState<string | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
   const statusRequestRef = useRef<AbortController | null>(null)
   const sessionRequestRef = useRef(0)
+  const operationRef = useRef(false)
 
-  const streamRef = useRef<MediaStream | null>(null)
-  const contextRef = useRef<AudioContext | null>(null)
-  const timerRef = useRef<number | null>(null)
-  const previousSpectrumRef = useRef<number[]>([])
-  const audioRequestRef = useRef(0)
+  const beginOperation = useCallback((operation: string) => {
+    if (operationRef.current) return false
+    operationRef.current = true
+    statusRequestRef.current?.abort()
+    statusRequestRef.current = null
+    setBusy(operation)
+    setMessage(null)
+    setError(null)
+    return true
+  }, [])
+
+  const endOperation = useCallback(() => {
+    operationRef.current = false
+    setBusy(null)
+  }, [])
 
   const refreshStatus = useCallback(async () => {
-    if (statusRequestRef.current) return
+    if (statusRequestRef.current || operationRef.current) return
     const request = new AbortController()
     statusRequestRef.current = request
     let timedOut = false
@@ -183,158 +106,19 @@ export function useAutomationStudio(
     setStatusLoading(false)
   }, [])
 
-  const refreshAudioDevices = useCallback(async () => {
-    if (!navigator.mediaDevices?.enumerateDevices) return
-    try {
-      const devices = (await navigator.mediaDevices.enumerateDevices()).filter(
-        (device) => device.kind === "audioinput",
-      )
-      setAudioDevices(devices)
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "No se pudieron listar las entradas de audio",
-      )
-    }
-  }, [])
-
   useEffect(() => {
     void refreshStatus()
     const timer = window.setInterval(() => void refreshStatus(), 1000)
-    void refreshAudioDevices()
-    navigator.mediaDevices?.addEventListener?.("devicechange", refreshAudioDevices)
     return () => {
       window.clearInterval(timer)
       statusRequestRef.current?.abort()
       statusRequestRef.current = null
-      navigator.mediaDevices?.removeEventListener?.("devicechange", refreshAudioDevices)
     }
-  }, [refreshAudioDevices, refreshStatus])
-
-  useEffect(() => {
-    window.localStorage.setItem("sunlite-automation-audio-device", selectedDeviceId)
-  }, [selectedDeviceId])
-
-  const stopAudio = useCallback(() => {
-    audioRequestRef.current += 1
-    if (timerRef.current) window.clearInterval(timerRef.current)
-    timerRef.current = null
-    streamRef.current?.getTracks().forEach((track) => track.stop())
-    streamRef.current = null
-    void contextRef.current?.close().catch(() => undefined)
-    contextRef.current = null
-    previousSpectrumRef.current = []
-    setAudioRunning(false)
-    sendAutomationCommand({ type: "automation-audio-disconnected" })
-  }, [sendAutomationCommand])
-
-  const startAudio = useCallback(
-    async (deviceIdOverride?: string) => {
-      const deviceId = deviceIdOverride ?? selectedDeviceId
-      if (deviceIdOverride) setSelectedDeviceId(deviceIdOverride)
-      setAudioBusy(true)
-      setMessage(null)
-      try {
-        stopAudio()
-        const request = audioRequestRef.current
-        if (!navigator.mediaDevices) {
-          throw new Error(
-            "La captura de audio necesita abrir la app en este equipo o usar HTTPS.",
-          )
-        }
-        const systemAudio = deviceId === SYSTEM_AUDIO_DEVICE_ID
-        if (systemAudio && !window.rekordboxCapture) {
-          throw new Error(
-            "El audio del PC solo se puede capturar desde la aplicación de escritorio.",
-          )
-        }
-        const stream = systemAudio
-          ? await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
-          : await navigator.mediaDevices.getUserMedia({
-              audio: {
-                deviceId: deviceId ? { exact: deviceId } : undefined,
-                echoCancellation: false,
-                noiseSuppression: false,
-                autoGainControl: false,
-                channelCount: 2,
-              },
-            })
-        if (systemAudio) {
-          stream.getVideoTracks().forEach((track) => track.stop())
-          if (!stream.getAudioTracks().length) {
-            stream.getTracks().forEach((track) => track.stop())
-            throw new Error(
-              "Windows no entregó audio del sistema. Selecciona una entrada USB/REC OUT del mixer.",
-            )
-          }
-        }
-        if (request !== audioRequestRef.current) {
-          stream.getTracks().forEach((track) => track.stop())
-          return false
-        }
-        streamRef.current = stream
-        const context = new AudioContext({ latencyHint: "interactive" })
-        contextRef.current = context
-        await context.resume()
-        if (request !== audioRequestRef.current) return false
-        const analyser = context.createAnalyser()
-        analyser.fftSize = 2048
-        analyser.smoothingTimeConstant = 0.35
-        context.createMediaStreamSource(stream).connect(analyser)
-
-        stream.getAudioTracks().forEach((track) => {
-          track.addEventListener(
-            "ended",
-            () => {
-              if (streamRef.current !== stream) return
-              stopAudio()
-              setMessage(
-                "La entrada de audio se desconectó. Revisa el dispositivo y vuelve a activarla.",
-              )
-            },
-            { once: true },
-          )
-        })
-        setAudioRunning(true)
-        await refreshAudioDevices()
-        if (request !== audioRequestRef.current) return false
-
-        const sendFrame = () => {
-          const frame = makeFrame(analyser, previousSpectrumRef.current)
-          previousSpectrumRef.current = frame.spectrum
-          if (!sendAutomationCommand({ type: "automation-audio-frame", frame })) {
-            stopAudio()
-            setMessage("Se perdió la conexión con la app. Vuelve a iniciar el audio.")
-            return false
-          }
-          if (showLiveFramesRef.current) {
-            setLiveFrames((current) => [...current.slice(-179), frame])
-          }
-          return true
-        }
-        if (!sendFrame()) return false
-        timerRef.current = window.setInterval(() => void sendFrame(), 120)
-        return true
-      } catch (error) {
-        stopAudio()
-        setMessage(
-          error instanceof Error ? error.message : "No se pudo abrir la fuente de audio",
-        )
-        return false
-      } finally {
-        setAudioBusy(false)
-      }
-    },
-    [refreshAudioDevices, selectedDeviceId, sendAutomationCommand, stopAudio],
-  )
-
-  useEffect(() => stopAudio, [stopAudio])
+  }, [refreshStatus])
 
   const updateMode = useCallback(
     async (mode: AutomationMode) => {
-      setBusy("mode")
-      setMessage(null)
+      if (!beginOperation("mode")) return false
       try {
         applyMutationStatus(
           await requestJson<AutomationStatus>("/api/automation/mode", {
@@ -343,20 +127,20 @@ export function useAutomationStudio(
             body: JSON.stringify({ mode }),
           }),
         )
+        return true
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : "No se pudo cambiar el modo")
+        setError(error instanceof Error ? error.message : "No se pudo cambiar el modo")
         return false
       } finally {
-        setBusy(null)
+        endOperation()
       }
     },
-    [applyMutationStatus],
+    [applyMutationStatus, beginOperation, endOperation],
   )
 
   const updateSettings = useCallback(
     async (settings: AutomationSettings) => {
-      setBusy("settings")
-      setMessage(null)
+      if (!beginOperation("settings")) return false
       try {
         applyMutationStatus(
           await requestJson<AutomationStatus>("/api/automation/settings", {
@@ -368,21 +152,20 @@ export function useAutomationStudio(
         setMessage("Reglas guardadas")
         return true
       } catch (error) {
-        setMessage(
+        setError(
           error instanceof Error ? error.message : "No se pudieron guardar las reglas",
         )
         return false
       } finally {
-        setBusy(null)
+        endOperation()
       }
     },
-    [applyMutationStatus],
+    [applyMutationStatus, beginOperation, endOperation],
   )
 
   const startSession = useCallback(
     async (name: string) => {
-      setBusy("session")
-      setMessage(null)
+      if (!beginOperation("session")) return false
       try {
         applyMutationStatus(
           await requestJson<AutomationStatus>("/api/automation/session/start", {
@@ -397,20 +180,19 @@ export function useAutomationStudio(
         setMessage("Grabación de entrenamiento iniciada")
         return true
       } catch (error) {
-        setMessage(
+        setError(
           error instanceof Error ? error.message : "No se pudo iniciar la grabación",
         )
         return false
       } finally {
-        setBusy(null)
+        endOperation()
       }
     },
-    [applyMutationStatus],
+    [applyMutationStatus, beginOperation, endOperation],
   )
 
   const stopSession = useCallback(async () => {
-    setBusy("session")
-    setMessage(null)
+    if (!beginOperation("session")) return false
     try {
       const next = await requestJson<AutomationStatus>("/api/automation/session/stop", {
         method: "POST",
@@ -418,18 +200,17 @@ export function useAutomationStudio(
       applyMutationStatus(next)
       setMessage(`Sesión guardada · ${next.modelExampleCount} ejemplos entrenados`)
     } catch (error) {
-      setMessage(
+      setError(
         error instanceof Error ? error.message : "No se pudo finalizar la grabación",
       )
       return false
     } finally {
-      setBusy(null)
+      endOperation()
     }
-  }, [applyMutationStatus])
+  }, [applyMutationStatus, beginOperation, endOperation])
 
   const train = useCallback(async () => {
-    setBusy("train")
-    setMessage(null)
+    if (!beginOperation("train")) return false
     try {
       const next = await requestJson<AutomationStatus>("/api/automation/train", {
         method: "POST",
@@ -437,33 +218,33 @@ export function useAutomationStudio(
       applyMutationStatus(next)
       setMessage(`Modelo actualizado con ${next.modelExampleCount} ejemplos`)
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "No se pudo reentrenar el modelo",
-      )
+      setError(error instanceof Error ? error.message : "No se pudo reentrenar el modelo")
       return false
     } finally {
-      setBusy(null)
+      endOperation()
     }
-  }, [applyMutationStatus])
+  }, [applyMutationStatus, beginOperation, endOperation])
 
-  const loadSession = useCallback(async (id: string) => {
-    const request = ++sessionRequestRef.current
-    setBusy("timeline")
-    setMessage(null)
-    try {
-      const payload = await requestJson<{ events: AutomationTimelineEvent[] }>(
-        `/api/automation/sessions/${encodeURIComponent(id)}`,
-      )
-      if (request !== sessionRequestRef.current) return
-      setSelectedSessionId(id)
-      setTimeline(payload.events)
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo cargar la sesión")
-      return false
-    } finally {
-      setBusy(null)
-    }
-  }, [])
+  const loadSession = useCallback(
+    async (id: string) => {
+      if (!beginOperation("timeline")) return false
+      const request = ++sessionRequestRef.current
+      try {
+        const payload = await requestJson<{ events: AutomationTimelineEvent[] }>(
+          `/api/automation/sessions/${encodeURIComponent(id)}`,
+        )
+        if (request !== sessionRequestRef.current) return
+        setSelectedSessionId(id)
+        setTimeline(payload.events)
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "No se pudo cargar la sesión")
+        return false
+      } finally {
+        endOperation()
+      }
+    },
+    [beginOperation, endOperation],
+  )
 
   const showLiveTimeline = useCallback(() => {
     sessionRequestRef.current += 1
@@ -473,7 +254,7 @@ export function useAutomationStudio(
 
   const renameSession = useCallback(
     async (id: string, name: string): Promise<boolean> => {
-      setBusy(`rename-${id}`)
+      if (!beginOperation(`rename-${id}`)) return false
       try {
         applyMutationStatus(
           await requestJson<AutomationStatus>(
@@ -488,20 +269,20 @@ export function useAutomationStudio(
         setMessage("Sesión renombrada")
         return true
       } catch (error) {
-        setMessage(
+        setError(
           error instanceof Error ? error.message : "No se pudo renombrar la sesión",
         )
         return false
       } finally {
-        setBusy(null)
+        endOperation()
       }
     },
-    [applyMutationStatus],
+    [applyMutationStatus, beginOperation, endOperation],
   )
 
   const deleteSession = useCallback(
     async (id: string): Promise<boolean> => {
-      setBusy(`delete-${id}`)
+      if (!beginOperation(`delete-${id}`)) return false
       try {
         const next = await requestJson<AutomationStatus>(
           `/api/automation/sessions/${encodeURIComponent(id)}`,
@@ -517,15 +298,13 @@ export function useAutomationStudio(
         )
         return true
       } catch (error) {
-        setMessage(
-          error instanceof Error ? error.message : "No se pudo eliminar la sesión",
-        )
+        setError(error instanceof Error ? error.message : "No se pudo eliminar la sesión")
         return false
       } finally {
-        setBusy(null)
+        endOperation()
       }
     },
-    [applyMutationStatus, selectedSessionId],
+    [applyMutationStatus, selectedSessionId, beginOperation, endOperation],
   )
 
   const updateTrainingExamples = useCallback(
@@ -541,7 +320,7 @@ export function useAutomationStudio(
       successMessage: string,
     ): Promise<boolean> => {
       if (!selectedSessionId || !edits.length) return false
-      setBusy("edit-examples")
+      if (!beginOperation("edit-examples")) return false
       try {
         const payload = await requestJson<{
           status: AutomationStatus
@@ -556,21 +335,20 @@ export function useAutomationStudio(
         setMessage(successMessage)
         return true
       } catch (error) {
-        setMessage(
+        setError(
           error instanceof Error ? error.message : "No se pudieron guardar los cambios",
         )
         return false
       } finally {
-        setBusy(null)
+        endOperation()
       }
     },
-    [applyMutationStatus, selectedSessionId],
+    [applyMutationStatus, selectedSessionId, beginOperation, endOperation],
   )
 
   const excludeExample = useCallback(
     async (id: string) => {
-      setBusy(`exclude-${id}`)
-      setMessage(null)
+      if (!beginOperation(`exclude-${id}`)) return false
       try {
         const next = await requestJson<AutomationStatus>(
           `/api/automation/examples/${encodeURIComponent(id)}/exclude`,
@@ -584,20 +362,17 @@ export function useAutomationStudio(
           `Ejemplo excluido · el modelo conserva ${next.modelExampleCount} ejemplos`,
         )
       } catch (error) {
-        setMessage(
-          error instanceof Error ? error.message : "No se pudo excluir el ejemplo",
-        )
+        setError(error instanceof Error ? error.message : "No se pudo excluir el ejemplo")
         return false
       } finally {
-        setBusy(null)
+        endOperation()
       }
     },
-    [applyMutationStatus],
+    [applyMutationStatus, beginOperation, endOperation],
   )
 
   const restartBridge = useCallback(async () => {
-    setBusy("bridge")
-    setMessage(null)
+    if (!beginOperation("bridge")) return false
     try {
       applyMutationStatus(
         await requestJson<AutomationStatus>("/api/automation/prodj-link/restart", {
@@ -606,14 +381,14 @@ export function useAutomationStudio(
       )
       setMessage("Reiniciando listener PRO DJ LINK")
     } catch (error) {
-      setMessage(
+      setError(
         error instanceof Error ? error.message : "No se pudo reiniciar PRO DJ LINK",
       )
       return false
     } finally {
-      setBusy(null)
+      endOperation()
     }
-  }, [applyMutationStatus])
+  }, [applyMutationStatus, beginOperation, endOperation])
 
   return {
     status,
@@ -621,19 +396,13 @@ export function useAutomationStudio(
     statusLoading,
     refreshStatus,
     showLiveTimeline,
-    audioRunning,
-    audioBusy,
-    audioDevices,
-    selectedDeviceId,
-    setSelectedDeviceId,
-    liveFrames,
+    ...audio,
     timeline,
     selectedSessionId,
     busy,
     message,
+    error,
     clearMessage,
-    startAudio,
-    stopAudio,
     updateMode,
     updateSettings,
     startSession,
@@ -647,3 +416,4 @@ export function useAutomationStudio(
     restartBridge,
   }
 }
+export { SYSTEM_AUDIO_DEVICE_ID } from "./useAutomationAudio"

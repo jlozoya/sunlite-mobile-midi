@@ -11,11 +11,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "check": "bun run format:check && bun run typecheck",
-    "test": "bun run build:main && bun test tests/controller-input.test.ts tests/socket-connection.test.ts tests/rekordbox-capture.test.ts tests/rekordbox-region-geometry.test.ts && node --test tests/updates.test.mjs tests/release-plan.test.mjs tests/midi-router.test.mjs tests/websocket-url.test.mjs && node tests/automation-smoke.mjs && node tests/lighting-automation-regression.mjs",
+    "check": "bun run format:check && bun run typecheck && bun run check:architecture",
+    "test": "bun run build:main && bun test tests/controller-input.test.ts tests/socket-connection.test.ts tests/rekordbox-capture.test.ts tests/rekordbox-region-geometry.test.ts tests/automation-readiness.test.ts && node --test tests/updates.test.mjs tests/release-plan.test.mjs tests/midi-router.test.mjs tests/websocket-url.test.mjs tests/controller-services.test.mjs tests/router-draft.test.mjs && node tests/automation-smoke.mjs && node tests/lighting-automation-regression.mjs",
     "test:automation": "bun run build:main && node tests/automation-smoke.mjs && node tests/lighting-automation-regression.mjs",
     "test:controller": "bun test tests/controller-input.test.ts",
-    "test:router": "bun run build:main && node --test tests/midi-router.test.mjs",
+    "test:router": "bun run build:main && node --test tests/midi-router.test.mjs tests/router-draft.test.mjs",
     "test:updates": "bun run build:main && node --test tests/updates.test.mjs tests/release-plan.test.mjs",
     "test:websocket": "bun run build:main && node --test tests/websocket-url.test.mjs",
     "build:main": "tsc -p tsconfig.node.json",
@@ -30,7 +30,8 @@
     "router:run": "bun run build:main && node dist/router/cli.js run --monitor",
     "pack": "bun run build && bun run rebuild:electron && electron-builder --win --x64 --dir --publish never",
     "dist:win": "bun run build && bun run rebuild:electron && electron-builder --win nsis --x64 --publish never && node scripts/verify-release.mjs",
-    "dist:portable": "bun run build && bun run rebuild:electron && electron-builder --win portable --x64 --publish never"
+    "dist:portable": "bun run build && bun run rebuild:electron && electron-builder --win portable --x64 --publish never",
+    "check:architecture": "node scripts/check-architecture.mjs"
   },
   "dependencies": {
     "@julusian/midi": "^3.6.1",

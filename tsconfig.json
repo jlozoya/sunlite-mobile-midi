@@ -16,7 +16,9 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "allowImportingTsExtensions": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   },
   "include": [
     "src/renderer/**/*.ts",
