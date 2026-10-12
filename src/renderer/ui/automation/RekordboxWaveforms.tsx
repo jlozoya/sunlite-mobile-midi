@@ -702,6 +702,7 @@ export function RekordboxWaveforms({ enabled = true }: { enabled?: boolean }) {
 
 const styles = stylex.create({
   panel: {
+    minWidth: 0,
     marginTop: "12px",
     borderWidth: "1px",
     borderStyle: "solid",
@@ -881,6 +882,8 @@ const styles = stylex.create({
   activeButton: { backgroundColor: "rgba(34,211,238,0.3)" },
   preview: {
     position: "relative",
+    width: "100%",
+    minWidth: 0,
     touchAction: "none",
     cursor: "crosshair",
     userSelect: "none",
@@ -907,11 +910,13 @@ const styles = stylex.create({
   previewImage: {
     display: "block",
     width: "100%",
+    maxWidth: "100%",
     height: "auto",
     pointerEvents: "none",
   },
   region: {
     position: "absolute",
+    boxSizing: "border-box",
     borderWidth: "2px",
     borderStyle: "solid",
     borderColor: "#f59e0b",
@@ -940,10 +945,10 @@ const styles = stylex.create({
     padding: 0,
     zIndex: 2,
   },
-  nw: { left: "-8px", top: "-8px", cursor: "nwse-resize" },
-  ne: { right: "-8px", top: "-8px", cursor: "nesw-resize" },
-  sw: { left: "-8px", bottom: "-8px", cursor: "nesw-resize" },
-  se: { right: "-8px", bottom: "-8px", cursor: "nwse-resize" },
+  nw: { left: 0, top: 0, cursor: "nwse-resize" },
+  ne: { right: 0, top: 0, cursor: "nesw-resize" },
+  sw: { left: 0, bottom: 0, cursor: "nesw-resize" },
+  se: { right: 0, bottom: 0, cursor: "nwse-resize" },
   moveHandle: {
     position: "absolute",
     left: "50%",

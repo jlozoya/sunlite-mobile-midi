@@ -12,11 +12,25 @@ public static class RekordboxWindowApi {
     public int Left, Top, Right, Bottom;
   }
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr window);
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+  [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out RECT rect);
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
 }
 '@
 Add-Type -AssemblyName System.Drawing
+# GetWindowRect and PrintWindow must use physical pixels at every display scale.
+# Otherwise the bitmap is too small and clips the right/bottom of Rekordbox.
+try {
+  $dpiAware = [RekordboxWindowApi]::SetProcessDpiAwarenessContext([IntPtr]::new(-4))
+  # PowerShell may already have a process context fixed by its manifest.
+  if (-not $dpiAware) {
+    [void][RekordboxWindowApi]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
+  }
+} catch {
+  [void][RekordboxWindowApi]::SetProcessDPIAware()
+}
 $window = [IntPtr]::new([long]WINDOW_HANDLE)
 $output = [Console]::OpenStandardOutput()
 $jpeg = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
