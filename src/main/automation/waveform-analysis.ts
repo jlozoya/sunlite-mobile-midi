@@ -55,8 +55,8 @@ export function waveformFeatures(
   }
 
   const center = Math.round((positionMs / 1000) * WAVEFORM_SEGMENTS_PER_SECOND)
-  const start = Math.max(0, center - WAVEFORM_SEGMENTS_PER_SECOND)
-  const end = Math.min(segments.length, center + WAVEFORM_SEGMENTS_PER_SECOND * 3)
+  const start = Math.max(0, center - Math.round(WAVEFORM_SEGMENTS_PER_SECOND * 0.05))
+  const end = Math.min(segments.length, center + 1)
   const window = segments.slice(start, Math.max(start + 1, end))
   let rms = 0
   let bass = 0

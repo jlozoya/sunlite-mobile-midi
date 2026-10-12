@@ -3,7 +3,7 @@ import { useState } from "react"
 import type { AutomationSocketCommand } from "../../../shared/automation-types"
 import { Toast } from "../components/Toast"
 import { AnimatedDisclosure } from "../components/AnimatedDisclosure"
-import { ActionButton, InfoTooltip, Notice } from "../ui-kit"
+import { ActionButton, InfoTooltip, Notice, StatusBadge, Surface } from "../ui-kit"
 import { DeckWaveforms } from "./DeckWaveforms"
 import { RekordboxWaveforms } from "./RekordboxWaveforms"
 import { SYSTEM_AUDIO_DEVICE_ID, useAutomationStudio } from "./useAutomationStudio"
@@ -49,7 +49,7 @@ export function AutomationStudio({
     automation.selectedDeviceId === SYSTEM_AUDIO_DEVICE_ID ||
     (!automation.selectedDeviceId && Boolean(window.rekordboxCapture))
   const trainingDescription = status?.recording
-    ? `${formatDuration(status.activeSession?.durationMs ?? 0)} · usa los botones y sliders de Controlador`
+    ? `${status.activeSession?.name ?? "Grabando sesión"} · ${formatDuration(status.activeSession?.durationMs ?? 0)} · usa los botones y sliders de Controlador`
     : sourceReady
       ? status?.waveformConnected
         ? "Usa el Controlador; tus acciones se guardarán con la música y el beat del CDJ."
@@ -69,11 +69,16 @@ export function AutomationStudio({
           (window.rekordboxCapture ? SYSTEM_AUDIO_DEVICE_ID : "")
         if (!(await automation.startAudio(deviceId))) return
       }
-      if (
-        await automation.startSession(
-          sessionName.trim() || `Sesión ${new Date().toLocaleDateString()}`,
-        )
-      )
+      const startedAt = new Date()
+      const defaultName = `Sesión ${startedAt.toLocaleDateString()} ${startedAt.toLocaleTimeString(
+        [],
+        {
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        },
+      )}`
+      if (await automation.startSession(sessionName.trim() || defaultName))
         setSessionName("")
     } finally {
       setStartingTraining(false)
@@ -124,28 +129,21 @@ export function AutomationStudio({
       ) : null}
       <AutomationAudioSource automation={automation} disabled={controlsDisabled} />
 
-      <div
-        {...stylex.props(
-          styles.recordingBar,
-          status?.recording && styles.recordingActive,
-        )}
-      >
+      <div {...stylex.props(styles.recordingBar)}>
         <div {...stylex.props(styles.recordingCopy)}>
-          <span
-            {...stylex.props(
-              styles.recordingDot,
-              sourceReady && styles.sourceReadyDot,
-              status?.recording && styles.recordingActiveDot,
-            )}
-          />
-          <div {...stylex.props(styles.recordingText)}>
-            <strong>
-              {status?.recording
-                ? (status.activeSession?.name ?? "Grabando sesión")
-                : "2. Graba una sesión"}
-            </strong>
-            <span>{trainingDescription}</span>
+          <div {...stylex.props(styles.labelWithHelp)}>
+            <strong>2. Graba una sesión</strong>
+            <InfoTooltip
+              label="Grabar una sesión"
+              content="Al empezar, la aplicación vuelve a Manual y prepara el audio si hace falta. Usa los botones y faders de Controlador para guardar ejemplos; Finalizar y aprender guarda la sesión y entrena el modelo."
+            />
+            {status?.recording ? (
+              <StatusBadge tone="danger" dot>
+                Grabando
+              </StatusBadge>
+            ) : null}
           </div>
+          <span {...stylex.props(styles.cardDetail)}>{trainingDescription}</span>
         </div>
         <div {...stylex.props(styles.trainingControls)}>
           {status?.recording ? (
@@ -177,51 +175,57 @@ export function AutomationStudio({
         </div>
       </div>
 
-      <AnimatedDisclosure
-        summary="Opciones de entrenamiento"
-        containerProps={stylex.props(styles.setupDetails)}
-        buttonProps={stylex.props(styles.disclosureTrigger, styles.setupSummary)}
+      <Surface
+        as="article"
+        variant="subtle"
+        padding="custom"
+        {...stylex.props(styles.subPanel, styles.setupDetails)}
       >
-        <div {...stylex.props(styles.setupContent)}>
-          <label {...stylex.props(styles.setupField)}>
-            <span>Nombre de sesión (opcional)</span>
-            <input
-              {...stylex.props(styles.input)}
-              value={sessionName}
-              onChange={(event) => setSessionName(event.target.value)}
-              placeholder="Se asigna uno automáticamente"
-              maxLength={80}
-              disabled={controlsDisabled || Boolean(status?.recording)}
-            />
-          </label>
-          {status?.devices.length ? (
-            <div {...stylex.props(styles.setupCdj)}>
-              <span>
-                {status.devices.length} CDJ conectados
-                {latestBeat ? ` · ${latestBeat.bpm.toFixed(1)} BPM` : ""}
-              </span>
+        <AnimatedDisclosure
+          summary="Opciones de entrenamiento"
+          buttonProps={stylex.props(styles.disclosureTrigger, styles.setupSummary)}
+        >
+          <div {...stylex.props(styles.setupContent)}>
+            <label {...stylex.props(styles.setupField)}>
+              <span>Nombre de sesión (opcional)</span>
+              <input
+                {...stylex.props(styles.input)}
+                value={sessionName}
+                onChange={(event) => setSessionName(event.target.value)}
+                placeholder="Se asigna uno automáticamente"
+                maxLength={80}
+                disabled={controlsDisabled || Boolean(status?.recording)}
+              />
+            </label>
+            {status?.devices.length ? (
+              <div {...stylex.props(styles.setupCdj)}>
+                <span>
+                  {status.devices.length} CDJ conectados
+                  {latestBeat ? ` · ${latestBeat.bpm.toFixed(1)} BPM` : ""}
+                </span>
+                <ActionButton
+                  variant="secondary"
+                  size="small"
+                  isDisabled={controlsDisabled}
+                  onPress={() => void automation.restartBridge()}
+                >
+                  Reconectar CDJ
+                </ActionButton>
+              </div>
+            ) : null}
+            {status?.sessions.length ? (
               <ActionButton
                 variant="secondary"
                 size="small"
-                isDisabled={controlsDisabled}
-                onPress={() => void automation.restartBridge()}
+                isDisabled={controlsDisabled || Boolean(status?.recording)}
+                onPress={() => void automation.train()}
               >
-                Reconectar CDJ
+                {automation.busy === "train" ? "Entrenando…" : "Reentrenar modelo"}
               </ActionButton>
-            </div>
-          ) : null}
-          {status?.sessions.length ? (
-            <ActionButton
-              variant="secondary"
-              size="small"
-              isDisabled={controlsDisabled || Boolean(status?.recording)}
-              onPress={() => void automation.train()}
-            >
-              {automation.busy === "train" ? "Entrenando…" : "Reentrenar modelo"}
-            </ActionButton>
-          ) : null}
-        </div>
-      </AnimatedDisclosure>
+            ) : null}
+          </div>
+        </AnimatedDisclosure>
+      </Surface>
 
       <AutomationModeControls automation={automation} disabled={controlsDisabled} />
       {status?.mode === "auto" && status.manualOverrideUntil ? (

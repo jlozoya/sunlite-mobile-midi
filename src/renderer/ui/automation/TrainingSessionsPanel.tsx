@@ -1,6 +1,6 @@
 import * as stylex from "@stylexjs/stylex"
 import { useState } from "react"
-import { ActionButton, Surface } from "../ui-kit"
+import { ActionButton, ConfirmationDialog, Surface } from "../ui-kit"
 import { styles } from "./AutomationStudio.styles"
 import { formatDuration } from "./automation-format"
 import type { AutomationStudioState } from "./types"
@@ -18,6 +18,10 @@ export function TrainingSessionsPanel({
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
 
   const [sessionNameDraft, setSessionNameDraft] = useState("")
+  const [pendingSession, setPendingSession] = useState<{
+    id: string
+    name: string
+  } | null>(null)
 
   async function saveSessionName(id: string) {
     if (!sessionNameDraft.trim() || sessionControlsDisabled) return
@@ -27,16 +31,14 @@ export function TrainingSessionsPanel({
     }
   }
 
-  async function removeSession(id: string, name: string) {
-    if (
-      !window.confirm(`¿Eliminar "${name}"? Sus ejemplos también se quitarán del modelo.`)
-    ) {
-      return
-    }
-    if (await automation.deleteSession(id)) {
+  async function removeSession() {
+    if (!pendingSession || sessionControlsDisabled) return false
+    if (await automation.deleteSession(pendingSession.id)) {
       setEditingSessionId(null)
       setSessionNameDraft("")
+      return true
     }
+    return false
   }
   return (
     <Surface
@@ -132,7 +134,9 @@ export function TrainingSessionsPanel({
                       size="small"
                       {...stylex.props(styles.sessionActionButton)}
                       isDisabled={sessionControlsDisabled}
-                      onPress={() => void removeSession(session.id, session.name)}
+                      onPress={() =>
+                        setPendingSession({ id: session.id, name: session.name })
+                      }
                     >
                       Eliminar
                     </ActionButton>
@@ -148,6 +152,19 @@ export function TrainingSessionsPanel({
           </span>
         ) : null}
       </div>
+      {pendingSession ? (
+        <ConfirmationDialog
+          title="Eliminar sesión"
+          confirmLabel="Eliminar sesión"
+          isConfirmDisabled={sessionControlsDisabled}
+          error={automation.error}
+          onConfirm={removeSession}
+          onClose={() => setPendingSession(null)}
+        >
+          ¿Eliminar «<strong>{pendingSession.name}</strong>»? Sus ejemplos también se
+          quitarán del modelo. Esta acción no se puede deshacer.
+        </ConfirmationDialog>
+      ) : null}
     </Surface>
   )
 }

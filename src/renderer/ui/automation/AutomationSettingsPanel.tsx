@@ -206,6 +206,22 @@ export function AutomationSettingsPanel({
                 </div>
               </SettingsGroup>
 
+              <SettingsGroup
+                title="Faders automáticos"
+                description="Los faders evolucionan de forma continua; las notas y escenas conservan sus propios intervalos y protecciones."
+              >
+                <NumberField
+                  label="Intervalo de faders"
+                  unit="ms"
+                  min={50}
+                  max={1000}
+                  value={settings.minControllerIntervalMs ?? 100}
+                  isDuration
+                  help="Separación mínima entre actualizaciones del mismo fader. El modelo interpola valores aprendidos y suaviza los cambios."
+                  onChange={(value) => setSetting("minControllerIntervalMs", value)}
+                />
+              </SettingsGroup>
+
               <div {...stylex.props(styles.rulesFooter)}>
                 <span {...stylex.props(styles.dirtyHint)}>
                   {settingsDirty

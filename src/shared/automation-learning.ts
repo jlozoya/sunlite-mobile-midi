@@ -1,0 +1,3 @@
+export const MIN_TRAINING_EXAMPLES = 5
+export const AUDIO_FRAME_INTERVAL_MS = 50
+export const CONTEXT_RECORD_INTERVAL_MS = 100

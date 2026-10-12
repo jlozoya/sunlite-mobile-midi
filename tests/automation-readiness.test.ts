@@ -26,6 +26,16 @@ describe("Automation prerequisites", () => {
     expect(ready.modelReady).toBe(true)
     expect(ready.modeBlockReason).toContain("Inicia el audio")
   })
+  test("fewer than five examples never enables a model that cannot predict", () => {
+    expect(
+      automationReadiness(status({ modelExampleCount: 4, audioConnected: true }), true)
+        .modelReady,
+    ).toBe(false)
+    expect(
+      automationReadiness(status({ modelExampleCount: 5, audioConnected: true }), true)
+        .modeBlockReason,
+    ).toBeNull()
+  })
   test("local audio, remote audio and a playing CDJ can each activate an existing model", () => {
     for (const [overrides, local] of [
       [{}, true],

@@ -4,6 +4,7 @@ import { InfoTooltip, StatusBadge } from "../ui-kit"
 import { styles } from "./AutomationStudio.styles"
 import { automationReadiness } from "./automation-readiness"
 import type { AutomationStudioState } from "./types"
+import { ModelTrainingSummary } from "./ModelTrainingSummary"
 
 export function AutomationModeControls({
   automation,
@@ -74,6 +75,7 @@ export function AutomationModeControls({
               ? "Asistido muestra sugerencias; tú decides las acciones."
               : "Modelo listo. Prueba Asistido antes de activar Auto.")}
       </span>
+      <ModelTrainingSummary status={automation.status} />
     </div>
   )
 }

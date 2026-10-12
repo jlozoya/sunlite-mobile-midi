@@ -5,6 +5,7 @@ import type {
 } from "../../../shared/automation-types"
 import { makeFrame } from "./audio-analysis"
 import { audioErrorMessage } from "./automation-readiness"
+import { AUDIO_FRAME_INTERVAL_MS } from "../../../shared/automation-learning"
 
 export const SYSTEM_AUDIO_DEVICE_ID = "system-loopback"
 export function useAutomationAudio(
@@ -151,7 +152,10 @@ export function useAutomationAudio(
           return true
         }
         if (!sendFrame()) return false
-        timerRef.current = window.setInterval(() => void sendFrame(), 120)
+        timerRef.current = window.setInterval(
+          () => void sendFrame(),
+          AUDIO_FRAME_INTERVAL_MS,
+        )
         return true
       } catch (error) {
         stopAudio()

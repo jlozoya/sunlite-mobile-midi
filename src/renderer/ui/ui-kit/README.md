@@ -21,6 +21,8 @@ appears repeatedly in the controller, connection setup or automation studio.
 - `TextInputField`: accessible labelled text input with optional help text.
 - `InfoTooltip`: an information icon with help on hover, keyboard focus or press;
   optional persistent descriptions keep form help available to screen readers.
+- `ConfirmationDialog`: themed destructive-action confirmation with Cancel focused
+  initially, trapped focus and focus restoration; failed actions stay open for retry.
 
 Import components from `ui-kit` and design values from `tokens.stylex`. Prefer a
 kit primitive before adding a new local button, panel, alert or field style.

@@ -20,3 +20,4 @@ export type {
 export { tokens } from "./tokens.stylex"
 
 export { InfoTooltip } from "./InfoTooltip"
+export { ConfirmationDialog } from "./ConfirmationDialog"

@@ -16,6 +16,43 @@ export type AudioFeatures = {
   centroid: number
 }
 
+export type MusicalPhase = "silence" | "steady" | "build" | "drop" | "break"
+export type MusicalContext = {
+  version: 1
+  phase: MusicalPhase
+  energy: number
+  bassRatio: number
+  midRatio: number
+  highRatio: number
+  brightness: number
+  flux: number
+  energyTrend: number
+  brightnessTrend: number
+  bassChange: number
+  pulseDensity: number
+  buildStrength: number
+  dropStrength: number
+  historyBeats: number
+  phaseProgress: number
+}
+
+export type ModelValidation = {
+  heldOutSessions: number
+  testedExamples: number
+  coverage: number
+  noteAccuracy: number | null
+  controllerMeanError: number | null
+  idleTested: number
+  idleFalsePositiveRate: number | null
+}
+
+export type AutomationModelInfo = {
+  temporalExampleCount: number
+  sessionCount: number
+  validation: ModelValidation | null
+}
+export type AutomationIdleContext = { context: MusicalContext; sessionId: string }
+
 export type AutomationAudioFrame = {
   capturedAt: number
   sampleRate: number
@@ -107,6 +144,7 @@ export type AutomationSettings = {
   strobeNotes: number[]
   blockedControllers: number[]
   preferredDeck: number | null
+  minControllerIntervalMs?: number
 }
 
 export type AutomationSuggestion = {
@@ -145,12 +183,16 @@ export type AutomationStatus = {
   settings: AutomationSettings
   lastSuggestion: AutomationSuggestion | null
   manualOverrideUntil: number | null
+  modelInfo?: AutomationModelInfo
+  musicalContext?: MusicalContext | null
 }
 
 export type AutomationTimelineEvent = {
   t: number
   at: string
-  kind: "audio" | "midi" | "feedback" | "beat" | "position" | "example"
+  kind: "audio" | "midi" | "feedback" | "beat" | "position" | "example" | "context"
+  context?: MusicalContext
+  inputSource?: string
   source?: "manual" | "automatic" | "sunlite" | "freestyler"
   frame?: AutomationAudioFrame
   command?: AutomationMidiCommand
@@ -169,6 +211,8 @@ export type AutomationTrainingExample = {
   beatWithinBar: number
   bpm: number
   command: AutomationMidiCommand
+  context?: MusicalContext
+  sessionId?: string
 }
 
 export type AutomationSocketCommand =

@@ -16,11 +16,15 @@ import type {
   DjLinkWaveform,
 } from "../../shared/automation-types.js"
 import type { LightingSoftware } from "../../shared/lighting-software.js"
-import { ExamplePolicyEngine } from "./policy-engine.js"
+import { ExamplePolicyEngine, type PolicyPrediction } from "./policy-engine.js"
 import { AutomationSessionStore } from "./session-store.js"
 import type { TrainingExampleEdit } from "./session-store.js"
 import { loadSettings, normalizeSettings } from "./settings.js"
-import { clamp } from "./values.js"
+import { normalizeAudioFrame } from "./audio-frame.js"
+import { CONTEXT_RECORD_INTERVAL_MS } from "../../shared/automation-learning.js"
+import { AutomationInputContext } from "./input-context.js"
+import { AutomationSafety } from "./automation-safety.js"
+import { activeDeck, contextBeat } from "./deck-context.js"
 
 const EMPTY_BRIDGE_STATUS: DjLinkBridgeStatus = {
   available: false,
@@ -33,18 +37,6 @@ const EMPTY_BRIDGE_STATUS: DjLinkBridgeStatus = {
 
 type Broadcast = (payload: unknown) => void
 type MidiExecutor = (command: AutomationMidiCommand) => unknown
-
-function commandKey(command: AutomationMidiCommand): string {
-  if (
-    command.type === "note" ||
-    command.type === "noteon" ||
-    command.type === "noteoff"
-  ) {
-    return `${command.type}:${command.note}`
-  }
-  if (command.type === "cc") return `cc:${command.controller}:${command.value}`
-  return `program:${command.number}`
-}
 
 function commandLabel(command: AutomationMidiCommand): string {
   if (command.type === "note" || command.type === "noteon") return `nota ${command.note}`
@@ -82,9 +74,10 @@ export class AutomationEngine {
   private sessionStartedAt = 0
   private manualOverrideUntil = 0
   private lastSuggestion: AutomationSuggestion | null = null
-  private lastActionAt = 0
-  private lastActionTimes = new Map<string, number>()
-  private lastStrobeAt = 0
+  private readonly inputContext = new AutomationInputContext()
+  private readonly safety = new AutomationSafety()
+  private lastControllerPredictionAt = 0
+  private lastDeckRecordedAt = new Map<number, number>()
   private lastAudioTriggerAt = 0
   private statusBroadcastTimer: NodeJS.Timeout | null = null
 
@@ -136,6 +129,8 @@ export class AutomationEngine {
       lastSuggestion: this.lastSuggestion,
       manualOverrideUntil:
         this.manualOverrideUntil > now ? this.manualOverrideUntil : null,
+      modelInfo: this.policy.modelInfo,
+      musicalContext: this.inputContext.get(this.inputSource(), now),
     }
   }
 
@@ -175,7 +170,8 @@ export class AutomationEngine {
   }
 
   train(): AutomationStatus {
-    this.policy.train(this.store.readTrainingExamples())
+    const dataset = this.store.readTrainingDataset()
+    this.policy.train(dataset.examples, dataset.idle)
     this.queueStatusBroadcast()
     return this.getStatus()
   }
@@ -211,40 +207,43 @@ export class AutomationEngine {
 
   handleAudioFrame(frame: AutomationAudioFrame): void {
     const now = Date.now()
-    const normalized: AutomationAudioFrame = {
-      capturedAt: clamp(frame.capturedAt, now - 10000, now + 1000, now),
-      sampleRate: clamp(frame.sampleRate, 8000, 192000, 48000),
-      features: {
-        rms: clamp(frame.features?.rms, 0, 1, 0),
-        bass: clamp(frame.features?.bass, 0, 1, 0),
-        mid: clamp(frame.features?.mid, 0, 1, 0),
-        high: clamp(frame.features?.high, 0, 1, 0),
-        flux: clamp(frame.features?.flux, 0, 1, 0),
-        centroid: clamp(frame.features?.centroid, 0, 1, 0),
-      },
-      spectrum: Array.isArray(frame.spectrum)
-        ? frame.spectrum.slice(0, 96).map((value) => clamp(value, 0, 1, 0))
-        : [],
-    }
+    const normalized = normalizeAudioFrame(frame, now)
 
     this.currentFrame = normalized
     this.lastAudioAt = now
+    const contextBeat = this.getContextBeat()
+    const musical = this.inputContext.audio(
+      normalized.features,
+      now,
+      contextBeat?.bpm ?? 0,
+    )
 
-    if (this.store.getActive() && now - this.lastRecordedAudioAt >= 180) {
+    if (
+      this.store.getActive() &&
+      now - this.lastRecordedAudioAt >= CONTEXT_RECORD_INTERVAL_MS
+    ) {
       this.lastRecordedAudioAt = now
-      this.appendTimeline({ kind: "audio", frame: normalized })
+      this.appendTimeline({
+        kind: "audio",
+        frame: normalized,
+        context: musical.context ?? undefined,
+        inputSource: "audio",
+      })
     }
 
-    const contextBeat = this.getContextBeat()
     const hasRecentDeckBeat = Boolean(contextBeat && now - contextBeat.receivedAt < 2200)
+    if (this.policy.temporalReady && !this.getActiveDeck())
+      this.predictControllers(contextBeat?.bpm || this.inputContext.audioBpm)
     if (
       !hasRecentDeckBeat &&
-      normalized.features.rms > 0.025 &&
-      normalized.features.flux > 0.055 &&
-      now - this.lastAudioTriggerAt > Math.max(650, this.settings.minActionIntervalMs)
+      normalized.features.rms > (this.policy.temporalReady ? 0.01 : 0.025) &&
+      (this.policy.temporalReady
+        ? musical.rhythm.pulse || musical.context?.phase === "drop"
+        : normalized.features.flux > 0.055) &&
+      now - this.lastAudioTriggerAt > Math.max(100, this.settings.minActionIntervalMs)
     ) {
       this.lastAudioTriggerAt = now
-      this.maybePredict(0, 0, "audio")
+      this.maybePredict(0, this.inputContext.audioBpm, "audio")
     }
 
     this.queueStatusBroadcast()
@@ -253,6 +252,7 @@ export class AutomationEngine {
   handleAudioDisconnected(): void {
     this.lastAudioAt = null
     this.currentFrame = null
+    this.inputContext.clearAudio()
     this.queueStatusBroadcast()
   }
 
@@ -296,6 +296,11 @@ export class AutomationEngine {
     }
 
     if (event.type === "waveform") {
+      if (
+        this.waveforms.get(event.waveform.deviceNumber)?.trackId !==
+        event.waveform.trackId
+      )
+        this.inputContext.clearDeck(event.waveform.deviceNumber)
       this.waveforms.set(event.waveform.deviceNumber, event.waveform)
     }
 
@@ -307,6 +312,33 @@ export class AutomationEngine {
         isOnAir: event.position.isOnAir,
         isMaster: event.position.isMaster,
       })
+      const device = event.position.deviceNumber
+      const bpm = this.latestBeats.get(device)?.bpm ?? 120
+      const context = event.position.isPlaying
+        ? this.inputContext.deck(
+            device,
+            event.position.features,
+            now,
+            bpm,
+            event.position.positionMs,
+          )
+        : null
+      if (!event.position.isPlaying) this.inputContext.clearDeck(device)
+      if (this.getActiveDeck() === device) {
+        if (
+          this.store.getActive() &&
+          now - (this.lastDeckRecordedAt.get(device) ?? 0) >= CONTEXT_RECORD_INTERVAL_MS
+        ) {
+          this.lastDeckRecordedAt.set(device, now)
+          this.appendTimeline({
+            kind: "context",
+            features: event.position.features,
+            context: context ?? undefined,
+            inputSource: `deck:${device}`,
+          })
+        }
+        this.predictControllers(bpm)
+      }
       const waveform = this.waveforms.get(event.position.deviceNumber)
       if (waveform) {
         this.waveforms.set(event.position.deviceNumber, {
@@ -324,6 +356,7 @@ export class AutomationEngine {
     if (event.type === "waveform-unloaded") {
       this.waveforms.delete(event.deviceNumber)
       this.deckFeatures.delete(event.deviceNumber)
+      this.inputContext.clearDeck(event.deviceNumber)
     }
 
     this.broadcast({ event: "automation-dj-link", payload: event })
@@ -338,6 +371,7 @@ export class AutomationEngine {
   recordManualCommand(command: AutomationMidiCommand): void {
     const now = Date.now()
     this.manualOverrideUntil = now + this.settings.manualOverrideMs
+    this.safety.manual(command, now)
 
     if (this.store.getActive()) {
       this.appendTimeline({ kind: "midi", command, source: "manual" })
@@ -360,6 +394,7 @@ export class AutomationEngine {
           beatWithinBar: latestBeat?.beatWithinBar ?? 0,
           bpm: latestBeat?.bpm ?? 0,
           command: { ...command },
+          context: this.inputContext.get(this.inputSource(), now) ?? undefined,
         }
         this.appendTimeline({
           kind: "example",
@@ -368,6 +403,7 @@ export class AutomationEngine {
           bpm: example.bpm,
           command: example.command,
           example,
+          inputSource: this.inputSource(),
         })
       }
     }
@@ -381,22 +417,7 @@ export class AutomationEngine {
   }
 
   private getActiveDeck(): number | undefined {
-    const now = Date.now()
-    const candidates = [...this.deckFeatures.entries()].filter(
-      ([device, entry]) =>
-        device >= 1 &&
-        device <= 6 &&
-        entry.isPlaying &&
-        now - entry.receivedAt < 2500 &&
-        (!this.settings.preferredDeck || device === this.settings.preferredDeck),
-    )
-    candidates.sort(
-      ([leftId, left], [rightId, right]) =>
-        Number(right.isOnAir) * 4 +
-          Number(right.isMaster) * 2 -
-          (Number(left.isOnAir) * 4 + Number(left.isMaster) * 2) || leftId - rightId,
-    )
-    return candidates[0]?.[0]
+    return activeDeck(this.deckFeatures, this.settings.preferredDeck, Date.now())
   }
 
   private getAudioFeatures(): AudioFeatures | null {
@@ -406,26 +427,13 @@ export class AutomationEngine {
   }
 
   private getContextBeat() {
-    const now = Date.now()
-    const selected = this.getActiveDeck() ?? this.settings.preferredDeck
-    if (selected) {
-      const beat = this.latestBeats.get(selected)
-      return beat && now - beat.receivedAt < 2200 ? beat : undefined
-    }
-    return [...this.latestBeats.values()]
-      .filter(
-        (beat) =>
-          beat.deviceNumber >= 1 &&
-          beat.deviceNumber <= 6 &&
-          now - beat.receivedAt < 2200 &&
-          this.deckFeatures.get(beat.deviceNumber)?.isPlaying !== false,
-      )
-      .sort(
-        (a, b) =>
-          Number(Boolean(this.waveforms.get(b.deviceNumber)?.isMaster)) -
-            Number(Boolean(this.waveforms.get(a.deviceNumber)?.isMaster)) ||
-          a.deviceNumber - b.deviceNumber,
-      )[0]
+    return contextBeat(
+      this.deckFeatures,
+      this.latestBeats,
+      this.waveforms,
+      this.settings.preferredDeck,
+      Date.now(),
+    )
   }
 
   private maybePredict(
@@ -435,7 +443,8 @@ export class AutomationEngine {
     deviceNumber?: number,
   ): void {
     if (this.mode === "manual") return
-    if (trigger === "pro-dj-link" && beatWithinBar !== 1) return
+    if (!this.policy.temporalReady && trigger === "pro-dj-link" && beatWithinBar !== 1)
+      return
     if (trigger === "pro-dj-link" && deviceNumber && deviceNumber > 6) return
     if (
       trigger === "pro-dj-link" &&
@@ -453,11 +462,49 @@ export class AutomationEngine {
         : this.getAudioFeatures()
     if (!features) return
 
-    const prediction = this.policy.predict(features, beatWithinBar, bpm)
+    const prediction = this.policy.predict(
+      features,
+      beatWithinBar,
+      bpm,
+      this.inputContext.get(this.inputSource(), Date.now()),
+    )
     if (!prediction) return
+    if (
+      prediction.temporal &&
+      trigger === "pro-dj-link" &&
+      prediction.beatWithinBar &&
+      beatWithinBar !== prediction.beatWithinBar
+    )
+      return
+    this.applyPrediction(prediction, trigger)
+  }
 
+  private inputSource() {
+    const deck = this.getActiveDeck()
+    return deck === undefined ? "audio" : `deck:${deck}`
+  }
+
+  private predictControllers(bpm: number) {
     const now = Date.now()
-    let blockedReason = this.getSafetyBlock(prediction.command, now)
+    if (
+      this.mode === "manual" ||
+      now - this.lastControllerPredictionAt <
+        (this.settings.minControllerIntervalMs ?? 100)
+    )
+      return
+    this.lastControllerPredictionAt = now
+    for (const prediction of this.policy.predictControllers(
+      this.inputContext.get(this.inputSource(), now),
+      bpm,
+    )) {
+      const command = this.safety.smooth(prediction.command, now)
+      this.applyPrediction({ ...prediction, command }, "fader")
+    }
+  }
+
+  private applyPrediction(prediction: PolicyPrediction, trigger: string) {
+    const now = Date.now()
+    let blockedReason = this.safety.block(prediction.command, now, this.settings)
     if (prediction.confidence < this.settings.confidenceThreshold) {
       blockedReason = `confianza ${Math.round(prediction.confidence * 100)}% menor al umbral`
     }
@@ -470,19 +517,7 @@ export class AutomationEngine {
       try {
         this.executeMidi(prediction.command)
         executed = true
-        const key = commandKey(prediction.command)
-        this.lastActionAt = now
-        this.lastActionTimes.set(key, now)
-        for (const [action, at] of this.lastActionTimes) {
-          if (now - at >= this.settings.repeatActionCooldownMs)
-            this.lastActionTimes.delete(action)
-        }
-        if (
-          (prediction.command.type === "note" || prediction.command.type === "noteon") &&
-          this.settings.strobeNotes.includes(prediction.command.note)
-        ) {
-          this.lastStrobeAt = now
-        }
+        this.safety.executed(prediction.command, now, this.settings)
         if (this.store.getActive()) {
           this.appendTimeline({
             kind: "midi",
@@ -498,7 +533,7 @@ export class AutomationEngine {
     const suggestion: AutomationSuggestion = {
       command: prediction.command,
       confidence: prediction.confidence,
-      reason: `${commandLabel(prediction.command)} · ${prediction.neighborCount} ejemplos similares · ${trigger}`,
+      reason: `${commandLabel(prediction.command)} · ${prediction.neighborCount} ejemplos ${prediction.temporal ? "de contexto musical" : "similares"} · ${trigger}`,
       createdAt: now,
       executed,
       blockedReason,
@@ -514,39 +549,6 @@ export class AutomationEngine {
     return entry?.isPlaying && Date.now() - entry.receivedAt < 2500
       ? entry.features
       : null
-  }
-
-  private getSafetyBlock(command: AutomationMidiCommand, now: number): string | null {
-    if (now - this.lastActionAt < this.settings.minActionIntervalMs) {
-      return "intervalo mínimo entre acciones"
-    }
-
-    const key = commandKey(command)
-    if (
-      this.lastActionTimes.has(key) &&
-      now - this.lastActionTimes.get(key)! < this.settings.repeatActionCooldownMs
-    ) {
-      return "acción repetida demasiado pronto"
-    }
-
-    if (command.type === "note" || command.type === "noteon") {
-      if (this.settings.blockedNotes.includes(command.note)) return "nota protegida"
-      if (
-        this.settings.strobeNotes.includes(command.note) &&
-        now - this.lastStrobeAt < this.settings.strobeCooldownMs
-      ) {
-        return "strobe en cooldown"
-      }
-    }
-
-    if (
-      command.type === "cc" &&
-      this.settings.blockedControllers.includes(command.controller)
-    ) {
-      return "control continuo protegido"
-    }
-
-    return null
   }
 
   private appendTimeline(event: Omit<AutomationTimelineEvent, "t" | "at">): void {

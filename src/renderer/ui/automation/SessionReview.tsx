@@ -1,7 +1,7 @@
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useId, useState } from "react"
 import { AnimatedCollapse } from "../components/AnimatedDisclosure"
-import { ActionButton } from "../ui-kit"
+import { ActionButton, ConfirmationDialog } from "../ui-kit"
 import { SliderCurveEditor } from "./SliderCurveEditor"
 import { SpectrogramTimeline } from "./SpectrogramTimeline"
 import { detectSliderGestures } from "./slider-curves"
@@ -41,6 +41,11 @@ export function SessionReview({
   const [editingSliderGestureId, setEditingSliderGestureId] = useState<string | null>(
     null,
   )
+  const [pendingGesture, setPendingGesture] = useState<{
+    controller: number
+    pointIds: string[]
+    sessionId: string | null
+  } | null>(null)
 
   const selectedSession = status?.sessions.find(
     (session) => session.id === automation.selectedSessionId,
@@ -70,17 +75,17 @@ export function SessionReview({
     (gesture) => gesture.id === editingSliderGestureId,
   )
 
-  async function removeSliderGesture(controller: number, pointIds: string[]) {
+  async function removeSliderGesture() {
     if (
-      !window.confirm(
-        `¿Eliminar el movimiento completo del slider CC ${controller}? Se quitarán ${pointIds.length} puntos del modelo.`,
-      )
-    ) {
-      return
-    }
-    await automation.updateTrainingExamples(
-      pointIds.map((id) => ({ id, delete: true })),
-      `Movimiento CC ${controller} eliminado`,
+      !pendingGesture ||
+      controlsDisabled ||
+      status?.recording ||
+      pendingGesture.sessionId !== automation.selectedSessionId
+    )
+      return false
+    return automation.updateTrainingExamples(
+      pendingGesture.pointIds.map((id) => ({ id, delete: true })),
+      `Movimiento CC ${pendingGesture.controller} eliminado`,
     )
   }
   return (
@@ -119,13 +124,26 @@ export function SessionReview({
               <ActionButton
                 variant="secondary"
                 size="small"
+                aria-label="Cerrar revisión y volver al directo"
                 isDisabled={Boolean(automation.busy)}
                 onPress={() => {
                   setEditingSliderGestureId(null)
                   automation.showLiveTimeline()
                 }}
               >
-                Volver al directo
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path d="m6 6 12 12M18 6 6 18" />
+                </svg>
               </ActionButton>
             ) : null}
           </div>
@@ -184,10 +202,11 @@ export function SessionReview({
                         {...stylex.props(styles.curveButton)}
                         isDisabled={controlsDisabled}
                         onPress={() =>
-                          void removeSliderGesture(
-                            gesture.controller,
-                            gesture.points.map((point) => point.id),
-                          )
+                          setPendingGesture({
+                            controller: gesture.controller,
+                            pointIds: gesture.points.map((point) => point.id),
+                            sessionId: automation.selectedSessionId,
+                          })
                         }
                       >
                         Eliminar
@@ -248,6 +267,21 @@ export function SessionReview({
             )
           }
         />
+      ) : null}
+      {pendingGesture ? (
+        <ConfirmationDialog
+          title="Eliminar movimiento del slider"
+          confirmLabel="Eliminar movimiento"
+          isConfirmDisabled={controlsDisabled || Boolean(status?.recording)}
+          error={automation.error}
+          onConfirm={removeSliderGesture}
+          onClose={() => setPendingGesture(null)}
+        >
+          Se eliminará el movimiento completo del slider{" "}
+          <strong>CC {pendingGesture.controller}</strong> y sus{" "}
+          {pendingGesture.pointIds.length} puntos del modelo. Esta acción no se puede
+          deshacer.
+        </ConfirmationDialog>
       ) : null}
     </>
   )

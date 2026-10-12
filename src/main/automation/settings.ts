@@ -6,6 +6,7 @@ const DEFAULT_SETTINGS: AutomationSettings = {
   confidenceThreshold: 0.62,
   manualOverrideMs: 8000,
   minActionIntervalMs: 900,
+  minControllerIntervalMs: 100,
   repeatActionCooldownMs: 4000,
   strobeCooldownMs: 5000,
   blockedNotes: [36, 37],
@@ -44,6 +45,14 @@ function normalizeSettings(value: unknown): AutomationSettings {
     ),
     minActionIntervalMs: Math.round(
       clamp(source.minActionIntervalMs, 250, 30000, DEFAULT_SETTINGS.minActionIntervalMs),
+    ),
+    minControllerIntervalMs: Math.round(
+      clamp(
+        source.minControllerIntervalMs,
+        50,
+        1000,
+        DEFAULT_SETTINGS.minControllerIntervalMs!,
+      ),
     ),
     repeatActionCooldownMs: Math.round(
       clamp(

@@ -3,12 +3,21 @@ import type {
   AudioFeatures,
   AutomationMidiCommand,
   AutomationTrainingExample,
+  AutomationIdleContext,
+  AutomationModelInfo,
+  MusicalContext,
 } from "../../shared/automation-types.js"
+import { MIN_TRAINING_EXAMPLES } from "../../shared/automation-learning.js"
+import { isMusicalContext } from "../../shared/musical-context.js"
+import { predictTemporal, validateTemporalModel } from "./temporal-policy.js"
+import { selectTrainingExamples } from "./training-selection.js"
 
 type StoredModel = {
-  version: 1
+  version: 1 | 2
   trainedAt: string
   examples: AutomationTrainingExample[]
+  idle?: AutomationIdleContext[]
+  info?: AutomationModelInfo
 }
 
 export type PolicyPrediction = {
@@ -16,6 +25,8 @@ export type PolicyPrediction = {
   confidence: number
   neighborCount: number
   distance: number
+  beatWithinBar?: number
+  temporal?: boolean
 }
 
 function isMidiValue(value: unknown): value is number {
@@ -135,6 +146,12 @@ export class ExamplePolicyEngine {
   private readonly modelPath: string
   private examples: AutomationTrainingExample[] = []
   private vectors: number[][] = []
+  private idle: AutomationIdleContext[] = []
+  private info: AutomationModelInfo = {
+    temporalExampleCount: 0,
+    sessionCount: 0,
+    validation: null,
+  }
 
   constructor(modelPath: string) {
     this.modelPath = modelPath
@@ -145,18 +162,48 @@ export class ExamplePolicyEngine {
     return this.examples.length
   }
 
-  train(examples: AutomationTrainingExample[]): number {
-    const validExamples = examples.filter(isValidExample).slice(-8000)
+  get modelInfo() {
+    return this.info
+  }
+  get temporalReady() {
+    return this.info.temporalExampleCount >= MIN_TRAINING_EXAMPLES
+  }
+
+  train(
+    examples: AutomationTrainingExample[],
+    idle: AutomationIdleContext[] = [],
+  ): number {
+    const validExamples = selectTrainingExamples(examples.filter(isValidExample))
+    const validIdle = idle
+      .filter(
+        (item) => isMusicalContext(item.context) && typeof item.sessionId === "string",
+      )
+      .slice(-2000)
+    const info: AutomationModelInfo = {
+      temporalExampleCount: validExamples.filter((example) =>
+        isMusicalContext(example.context),
+      ).length,
+      sessionCount: new Set(
+        validExamples
+          .filter((example) => example.sessionId)
+          .map((example) => example.sessionId),
+      ).size,
+      validation: validateTemporalModel(validExamples, validIdle),
+    }
 
     const model: StoredModel = {
-      version: 1,
+      version: 2,
       trainedAt: new Date().toISOString(),
       examples: validExamples,
+      idle: validIdle,
+      info,
     }
     const temporaryPath = this.modelPath + ".tmp"
     fs.writeFileSync(temporaryPath, JSON.stringify(model), "utf8")
     fs.renameSync(temporaryPath, this.modelPath)
     this.examples = validExamples
+    this.idle = validIdle
+    this.info = info
     this.cacheVectors()
     return this.examples.length
   }
@@ -165,8 +212,13 @@ export class ExamplePolicyEngine {
     features: AudioFeatures,
     beatWithinBar: number,
     bpm: number,
+    context?: MusicalContext | null,
   ): PolicyPrediction | null {
-    if (this.examples.length < 5) return null
+    if (this.examples.length < MIN_TRAINING_EXAMPLES) return null
+    if (this.temporalReady)
+      return context
+        ? predictTemporal(this.examples, context, beatWithinBar, bpm, this.idle)
+        : null
 
     const target = featureVector(features, beatWithinBar, bpm)
     const neighbors = this.examples
@@ -227,6 +279,21 @@ export class ExamplePolicyEngine {
     }
   }
 
+  predictControllers(context: MusicalContext | null, bpm: number): PolicyPrediction[] {
+    if (!this.temporalReady || !context) return []
+    const controllers = new Set(
+      this.examples
+        .filter((example) => example.command.type === "cc")
+        .map((example) =>
+          example.command.type === "cc" ? example.command.controller : -1,
+        ),
+    )
+    return [...controllers].flatMap((controller) => {
+      const prediction = predictTemporal(this.examples, context, 0, bpm, [], controller)
+      return prediction ? [prediction] : []
+    })
+  }
+
   private cacheVectors(): void {
     this.vectors = this.examples.map((example) =>
       featureVector(example.features, example.beatWithinBar, example.bpm),
@@ -236,9 +303,24 @@ export class ExamplePolicyEngine {
   private load(): void {
     try {
       const stored = JSON.parse(fs.readFileSync(this.modelPath, "utf8")) as StoredModel
-      if (stored.version === 1 && Array.isArray(stored.examples)) {
+      if (
+        (stored.version === 1 || stored.version === 2) &&
+        Array.isArray(stored.examples)
+      ) {
         this.examples = stored.examples.filter(isValidExample).slice(-8000)
         this.cacheVectors()
+        this.idle = (stored.idle ?? []).filter((item) => isMusicalContext(item.context))
+        this.info = {
+          temporalExampleCount: this.examples.filter((example) =>
+            isMusicalContext(example.context),
+          ).length,
+          sessionCount: new Set(
+            this.examples
+              .filter((example) => example.sessionId)
+              .map((example) => example.sessionId),
+          ).size,
+          validation: stored.info?.validation ?? null,
+        }
       }
     } catch {
       this.examples = []

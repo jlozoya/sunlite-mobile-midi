@@ -6,6 +6,7 @@ import type {
   AutomationTimelineEvent,
   AutomationTrainingExample,
 } from "../../shared/automation-types.js"
+import { buildTrainingDataset } from "./training-dataset.js"
 
 type StoredSessionMetadata = AutomationSessionSummary
 
@@ -71,6 +72,7 @@ export class AutomationSessionStore {
   private readonly exclusionsPath: string
   private active: StoredSessionMetadata | null = null
   private activeStartedAtMs = 0
+  private appendedEvents = 0
 
   constructor(root: string) {
     this.root = root
@@ -87,6 +89,7 @@ export class AutomationSessionStore {
       .slice(2, 8)}`
 
     this.activeStartedAtMs = now.getTime()
+    this.appendedEvents = 0
     this.active = {
       id,
       name: sanitizeName(name),
@@ -117,11 +120,7 @@ export class AutomationSessionStore {
     if (event.kind === "example") this.active.trainingExampleCount += 1
     this.active.durationMs = Math.max(0, Date.now() - this.activeStartedAtMs)
 
-    const totalEvents =
-      this.active.audioFrameCount +
-      this.active.midiEventCount +
-      this.active.trainingExampleCount
-    if (totalEvents % 20 === 0) this.saveActiveMetadata()
+    if (++this.appendedEvents % 20 === 0) this.saveActiveMetadata()
   }
 
   stop(): AutomationSessionSummary | null {
@@ -210,10 +209,12 @@ export class AutomationSessionStore {
     if (allEvents.length <= limit) return allEvents
 
     const important = allEvents.filter(
-      (event) => event.kind !== "audio" && event.kind !== "position",
+      (event) =>
+        event.kind !== "audio" && event.kind !== "position" && event.kind !== "context",
     )
     const background = allEvents.filter(
-      (event) => event.kind === "audio" || event.kind === "position",
+      (event) =>
+        event.kind === "audio" || event.kind === "position" || event.kind === "context",
     )
     const remaining = Math.max(1, limit - important.length)
     const stride = Math.max(1, Math.ceil(background.length / remaining))
@@ -272,8 +273,18 @@ export class AutomationSessionStore {
       return distance <= 500 ? midiIndex : -1
     }
 
+    const contextEvents = timeline.filter(
+      (event) =>
+        (event.kind === "audio" || event.kind === "context") &&
+        event.t <= sessionDuration,
+    )
+    const musicalContextAt = (t: number) =>
+      contextEvents.filter((event) => event.t <= t).at(-1)?.context
     const contextAt = (t: number, excluded?: AutomationTimelineEvent) =>
-      nearestEvent(audioEvents, t)?.frame?.features ??
+      nearestEvent(
+        audioEvents.filter((event) => event.t <= t),
+        t,
+      )?.frame?.features ??
       nearestEvent(
         exampleEvents.filter(
           (candidate) => candidate !== excluded && !deletedEvents.has(candidate),
@@ -322,6 +333,7 @@ export class AutomationSessionStore {
         beatWithinBar: event.beatWithinBar,
         bpm: event.bpm,
         command,
+        context: musicalContextAt(t),
       }
 
       if (midiIndex >= 0) {
@@ -358,6 +370,7 @@ export class AutomationSessionStore {
         beatWithinBar: beat?.beatWithinBar ?? 0,
         bpm: beat?.bpm ?? 0,
         command,
+        context: musicalContextAt(t),
       }
       timeline.push(
         { t, at, kind: "midi", source: "manual", command },
@@ -403,33 +416,21 @@ export class AutomationSessionStore {
   }
 
   readTrainingExamples(): AutomationTrainingExample[] {
-    const examples: AutomationTrainingExample[] = []
+    return this.readTrainingDataset().examples
+  }
+
+  readTrainingDataset() {
     const excluded = new Set(
       readJsonFile<string[]>(this.exclusionsPath)?.filter(
         (item): item is string => typeof item === "string",
       ) ?? [],
     )
 
-    for (const session of this.list()) {
-      const filePath = this.eventsPath(session.id)
-      if (!fs.existsSync(filePath)) continue
-
-      const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/)
-      for (const line of lines) {
-        if (!line || !line.includes('"kind":"example"')) continue
-        try {
-          const event = JSON.parse(line) as AutomationTimelineEvent & {
-            example?: AutomationTrainingExample
-          }
-          if (event.example && !excluded.has(event.example.id))
-            examples.push(event.example)
-        } catch {
-          // Ignore malformed or interrupted lines and continue loading the dataset.
-        }
-      }
-    }
-
-    return examples
+    return buildTrainingDataset(
+      this.list(),
+      (id) => this.readTimeline(id, Number.MAX_SAFE_INTEGER),
+      excluded,
+    )
   }
 
   excludeTrainingExample(id: string): void {

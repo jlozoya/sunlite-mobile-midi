@@ -1,4 +1,5 @@
 import type { AutomationStatus } from "../../../shared/automation-types"
+import { MIN_TRAINING_EXAMPLES } from "../../../shared/automation-learning"
 
 export function automationReadiness(
   status: AutomationStatus | null,
@@ -7,13 +8,13 @@ export function automationReadiness(
   const sourceReady = Boolean(
     audioRunning || status?.audioConnected || status?.waveformConnected,
   )
-  const modelReady = Boolean(status && status.modelExampleCount > 0)
+  const modelReady = Boolean(status && status.modelExampleCount >= MIN_TRAINING_EXAMPLES)
   const modeBlockReason = !status
     ? "Cargando el estado de automatización."
     : status.recording
       ? "Finaliza la grabación para probar el modelo."
       : !modelReady
-        ? "Graba una sesión usando el Controlador y finalízala para entrenar el modelo."
+        ? `Graba una sesión usando el Controlador y finalízala para entrenar el modelo. Necesita al menos ${MIN_TRAINING_EXAMPLES} ejemplos válidos.`
         : !sourceReady
           ? "Inicia el audio o conecta un CDJ que esté reproduciendo música."
           : null

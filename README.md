@@ -331,7 +331,7 @@ To obtain detailed player state and waveform data, the application announces its
 - Notes `36` and `37` retain the legacy Blackout/Full On protections; confirm their functions in your show.
 - Note `42` is treated as strobe and receives an additional cooldown.
 - Manual MIDI input suspends automatic output temporarily.
-- PRO DJ LINK decisions are quantized to the first beat of a bar.
+- Temporal note/scene decisions follow the beat within the bar demonstrated during training when CDJ beat data is available. Legacy models retain first-beat quantization. Audio-only timing estimates the pulse; it does not claim to identify the bar's first beat.
 - Automatic output requires a trained model, a live CDJ waveform or mixer audio, and the configured confidence threshold.
 - Contexts that are too different from the recorded training examples remain below the automatic confidence threshold, even when the nearest examples agree on an action.
 - Sessions and the model are stored in `automation/` inside the active software profile.
@@ -339,6 +339,40 @@ To obtain detailed player state and waveform data, the application announces its
 - Stale audio, stopped decks and MIDI button releases do not create training examples.
 - Invalid examples are filtered when loading or training; model replacement uses a temporary file. Confidence also requires support from multiple nearby examples.
 - Repeat cooldown applies to each action, including when other actions occur between repetitions.
+- Faders have a separate update interval (100 ms by default) and bounded smoothing; protected CCs and manual override still apply. Notes and strobes keep their own cooldowns. The app learns MIDI mappings from demonstrations without assuming which note or CC controls strobe intensity in Sunlite/FreeStyler.
+
+### Temporal imitation learning
+
+New training examples include causal, tempo-relative musical context: relative energy,
+band balance, energy/brightness trends, bass changes, pulse activity and progression
+through a rising, falling or stable-energy phase. Song name, track ID and absolute
+playback position are excluded from prediction. A similar build on another track can
+therefore select demonstrated scene notes or gradually interpolate demonstrated CC
+values instead of replaying a saved song timeline. Phase names are heuristic audio
+descriptions, not guaranteed recognition or advance knowledge of every drop.
+
+Audio analysis is sent every 50 ms and recorded at most every 100 ms. CDJ waveform
+features use only current/past segments. Context resets after source loss, pause,
+track replacement or a seek; temporal models wait for fresh history before acting.
+Idle contexts are collected from stretches with no demonstrated actions and can
+veto unfamiliar discrete decisions. Increasing canvas resolution does not change
+the model, and original WAV/MP3 audio is still not saved.
+
+Models use version 2 and retain compatibility with version 1 models and sessions.
+Re-training can derive context from older recorded audio where enough history exists;
+new CDJ-only sessions also store context traces. The 8000-example budget is balanced
+across up to 64 recent recording sessions so one dense fader session does not replace
+all other music. At least five valid examples are needed, and each inferred action
+needs support from similar demonstrations.
+
+Record different songs in separate sessions, including quiet passages, builds,
+transitions and drops, and repeat the choices you want generalized. The UI reports
+temporal-example/session counts and, with multiple sessions, leave-session-out
+coverage, note accuracy, CC error and unwanted discrete predictions on idle contexts.
+These reference scores use a 62% confidence threshold and test only recorded sessions;
+they are not a certification for arbitrary music. Repeated recordings of the same
+song in different sessions are not an independent song test. Verify Asistido on music
+outside the training set before relying on Auto for unattended output.
 
 ### Training quality
 
