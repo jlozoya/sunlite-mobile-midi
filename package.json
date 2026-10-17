@@ -1,6 +1,6 @@
 {
   "name": "sunlite-mobile-midi",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "private": true,
   "description": "Installable and update-ready mobile MIDI controller for Sunlite Suite 2.",
   "author": "jlozoya",
