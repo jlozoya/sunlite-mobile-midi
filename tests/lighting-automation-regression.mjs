@@ -61,7 +61,7 @@ const examples = Array.from({ length: 6 }, (_, i) => ({
 try {
   assert.equal(isLightingSoftware("freestyler"), true)
   assert.equal(isLightingSoftware("unknown"), false)
-  assert.deepEqual(noteRelease("freestyler", 127), { type: "noteon", velocity: 0 })
+  assert.deepEqual(noteRelease("freestyler", 21), { type: "noteoff", velocity: 21 })
   assert.deepEqual(noteRelease("sunlite", 64), { type: "noteoff", velocity: 64 })
 
   const policyPath = path.join(root, "model.json")

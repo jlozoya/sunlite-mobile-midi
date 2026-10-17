@@ -61,9 +61,21 @@ In FreeStyler, open **Setup → FreeStyler Setup → External Control → MIDI C
 Select **Sunlite Mobile In** as input and optionally **Sunlite Mobile Out** as output.
 Start MIDI, enable Learn, select a function's Note IN field, operate its control in
 this app and save the assignment. Map faders to the corresponding continuous functions.
-The FreeStyler profile sends Note On with velocity zero for button release, matching
-its default Key Up setting; Sunlite retains Note Off. If you changed FreeStyler's Key Up,
-restore that default. For automation, use Page independent mappings so a page change
+The app sends Note On when pressed and Note Off when released, like the physical APC.
+Enable **Options → Controller 1: NoteOn - NoteOff** for the app in the first input
+(Controller 2 if it is in the second). Right-click an app button to edit its MIDI note
+to match the existing FreeStyler Note IN assignment. Keep press/release values at
+127/0 to match the APC; FreeStyler's on/off columns configure LED feedback. The displayed N number
+is the transmitted note; the pad label is only a name.
+When Learn alternates between accepting the APC and the app, merge both into the
+same FreeStyler input. In the MIDI router, route the APC hardware input to the virtual
+output **Sunlite Mobile In**; optionally route virtual input **Sunlite Mobile Out**
+back to the APC hardware output for LEDs. In FreeStyler, start **Sunlite Mobile In**
+and stop the separate APC input. Learn the function once from this shared input,
+then test the app and the APC without relearning between them. Keep the router
+running: its configuration is saved, but after restarting the app (including a dev
+backend restart), click **Arrancar router** again.
+Use Page independent mappings so a page change
 cannot silently change the learned command's meaning. Feedback requires explicit
 configuration in FreeStyler; opening the return port alone does not confirm feedback.
 

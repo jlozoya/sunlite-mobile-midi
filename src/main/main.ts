@@ -89,8 +89,8 @@ const midiController = createMidiControllerService({
   feedbackStore,
 })
 const { closeMidiConnection, handleCommand } = midiController
-function refreshMidiConnection() {
-  const status = midiController.refreshMidiConnection()
+function refreshMidiConnection(force = false) {
+  const status = midiController.refreshMidiConnection(force)
   if (serverStatus)
     serverStatus = { ...serverStatus, ...status, ...midiBridge.getStatus() }
   return serverStatus

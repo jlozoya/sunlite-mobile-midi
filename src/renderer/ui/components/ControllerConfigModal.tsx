@@ -53,11 +53,10 @@ export function ControllerConfigModal({
         ...customization,
         pads: {
           ...customization.pads,
-          [String(control.note)]: normalizeStandardButtonCustomization(
-            current,
-            buttonDraft.label,
-            control.note,
-          ),
+          [String(control.note)]: normalizeStandardButtonCustomization({
+            ...current,
+            ...buttonDraft,
+          }),
         },
       }
     } else if (control.kind === "scene" && buttonDraft) {
@@ -66,11 +65,10 @@ export function ControllerConfigModal({
         ...customization,
         sceneButtons: {
           ...customization.sceneButtons,
-          [String(control.note)]: normalizeStandardButtonCustomization(
-            current,
-            buttonDraft.label,
-            control.note,
-          ),
+          [String(control.note)]: normalizeStandardButtonCustomization({
+            ...current,
+            ...buttonDraft,
+          }),
         },
       }
     } else if (control.kind === "fader" && faderDraft) {
@@ -139,7 +137,7 @@ export function ControllerConfigModal({
                   description={`${model.name} · Canal MIDI ${midiChannel} · ${
                     control.kind === "fader"
                       ? `CC ${control.controller}`
-                      : `Nota ${control.note}`
+                      : `Nota ${buttonDraft?.midiNumber ?? control.note}`
                   }`}
                 />
                 <ActionButton
@@ -163,12 +161,35 @@ export function ControllerConfigModal({
                     inputProps={{ autoFocus: true }}
                   />
 
+                  {(
+                    [
+                      ["midiNumber", "Nota MIDI", 0],
+                      ["onValue", "Valor al pulsar (on)", 1],
+                      ["offValue", "Valor al soltar (off)", 0],
+                    ] as const
+                  ).map(([field, label, min]) => (
+                    <TextInputField
+                      key={field}
+                      label={label}
+                      value={String(buttonDraft[field])}
+                      onChange={(value) => {
+                        const number = Number(value)
+                        if (Number.isInteger(number) && number >= min && number <= 127) {
+                          setButtonDraft({ ...buttonDraft, [field]: number })
+                        }
+                      }}
+                      isReadOnly={isSaving}
+                      inputProps={{ type: "number", min, max: 127, step: 1 }}
+                    />
+                  ))}
                   <Notice tone="info" layout="stack" {...stylex.props(styles.helpBox)}>
-                    <strong>Asignación estándar de {model.name}</strong>
+                    <strong>Coincidir con FreeStyler o Sunlite</strong>
                     <span>
-                      Este botón conserva su nota MIDI. Su color y estado encendido o
-                      apagado dependen de la respuesta MIDI de tu software de iluminación.
-                      Configura Sunlite o FreeStyler para enviar esa respuesta a{" "}
+                      Copia la nota de Note IN. Para imitar el APC, usa 127 al pulsar y 0
+                      al soltar. Los valores on/off de FreeStyler configuran el retorno de
+                      los LED; no necesitas copiarlos aquí. Activa NoteOn - NoteOff para
+                      esta entrada y aprende la función como Page independent. Para
+                      recibir el color y estado del botón, envía el retorno a{" "}
                       <strong>Sunlite Mobile Out</strong>.
                     </span>
                   </Notice>
@@ -283,16 +304,10 @@ function getEditableControlTarget(
 
 function normalizeStandardButtonCustomization(
   current: ButtonCustomization,
-  label: string,
-  note: number,
 ): ButtonCustomization {
   return {
     ...current,
-    label,
     messageType: "note",
-    midiNumber: note,
-    onValue: 127,
-    offValue: 0,
     mode: "momentary",
     offDelayMs: 0,
     initialActive: false,

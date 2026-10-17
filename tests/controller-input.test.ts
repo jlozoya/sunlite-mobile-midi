@@ -3,6 +3,13 @@ import { createElement, type KeyboardEvent, type PointerEvent } from "react"
 import { renderToString } from "react-dom/server"
 import type { PressEvent } from "react-aria-components"
 import {
+  sendStandardButtonNoteOn,
+  sendStandardButtonNoteOff,
+} from "../src/renderer/ui/controller/midiCommands"
+import { mergeControllerCustomization } from "../src/shared/controller-config"
+import { noteRelease } from "../src/shared/lighting-software"
+import type { MidiCommand } from "../src/renderer/ui/types"
+import {
   useMidiButtonPress,
   type MidiButtonPressHandlers,
 } from "../src/renderer/ui/hooks/useMidiButtonPress"
@@ -50,6 +57,33 @@ function key(key: string, repeat = false) {
 }
 
 describe("MIDI button interaction", () => {
+  test("saved FreeStyler mapping overrides the model note and preserves press/release values", () => {
+    const saved = mergeControllerCustomization({
+      pads: { "56": { label: "Cuelist 1", midiNumber: 24, onValue: 48, offValue: 21 } },
+    })
+    const restored = mergeControllerCustomization(JSON.parse(JSON.stringify(saved)))
+    const config = restored.pads["56"]
+    const messages: MidiCommand[] = []
+    const send = (command: MidiCommand) => messages.push(command)
+    sendStandardButtonNoteOn(56, send, config)
+    sendStandardButtonNoteOff(56, send, config)
+    expect(messages).toEqual([
+      { type: "noteon", note: 24, velocity: 48 },
+      { type: "noteoff", note: 24, velocity: 21 },
+    ])
+    expect(noteRelease("freestyler", 21)).toEqual({ type: "noteoff", velocity: 21 })
+  })
+
+  test("unconfigured buttons retain the APC model notes and standard values", () => {
+    const messages: MidiCommand[] = []
+    sendStandardButtonNoteOn(56, (command) => messages.push(command))
+    sendStandardButtonNoteOff(56, (command) => messages.push(command))
+    expect(messages).toEqual([
+      { type: "noteon", note: 56, velocity: 127 },
+      { type: "noteoff", note: 56, velocity: 0 },
+    ])
+  })
+
   test("a desktop press releases once even when release triggers lost capture", () => {
     const { handlers, messages, pointer, capturedPointers } = createPressHarness()
     handlers.onPointerDown(pointer())

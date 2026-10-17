@@ -44,8 +44,8 @@ export function PadButton({
   const pressHandlers = useMidiButtonPress({
     isMobileView,
     isDisabled,
-    onPressStart: () => sendStandardButtonNoteOn(pad.note, sendCommand),
-    onPressEnd: () => sendStandardButtonNoteOff(pad.note, sendCommand),
+    onPressStart: () => sendStandardButtonNoteOn(pad.note, sendCommand, config),
+    onPressEnd: () => sendStandardButtonNoteOff(pad.note, sendCommand, config),
   })
 
   return (
@@ -55,7 +55,7 @@ export function PadButton({
       data-led-behavior={feedbackBehavior.behavior}
       {...pressHandlers}
       isDisabled={isDisabled}
-      aria-label={`${label}, nota ${pad.note}, ${isLit ? "iluminado" : "apagado"}`}
+      aria-label={`${label}, nota ${config?.midiNumber ?? pad.note}, ${isLit ? "iluminado" : "apagado"}`}
       aria-description={isMobileView ? undefined : "Clic derecho para editar"}
       onContextMenu={(event) => {
         if (isMobileView) return
@@ -69,7 +69,7 @@ export function PadButton({
         aria-hidden="true"
       />
       <span {...stylex.props(styles.padLabel)}>{label}</span>
-      <small {...stylex.props(styles.padMeta)}>N {pad.note}</small>
+      <small {...stylex.props(styles.padMeta)}>N {config?.midiNumber ?? pad.note}</small>
     </Button>
   )
 }

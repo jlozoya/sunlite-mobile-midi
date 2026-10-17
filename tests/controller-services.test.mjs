@@ -16,6 +16,58 @@ import {
   listenWithPortFallback,
 } from "../dist/main/server/network.js"
 import { WebSocket, WebSocketServer } from "ws"
+import { createMidiControllerService } from "../dist/main/midi/controller-service.js"
+
+test("status refresh preserves native MIDI handles and held notes; explicit refresh reconnects", () => {
+  const instances = []
+  let outputs = ["Sunlite Mobile In"]
+  class Port {
+    closed = false
+    messages = []
+    constructor(name) {
+      this.name = name
+      instances.push(this)
+    }
+    on() {}
+    send(type, payload) {
+      assert.equal(this.closed, false, "must not send a release to a closed handle")
+      this.messages.push({ type, ...payload })
+    }
+    close() {
+      this.closed = true
+    }
+  }
+  const controller = createMidiControllerService({
+    broadcastToAll() {},
+    recordFeedback() {},
+    getLightingSoftware: () => "freestyler",
+    feedbackStore: { cloneMidiFeedbackState: () => ({}), updateMidiFeedbackState() {} },
+    midiBackend: {
+      getOutputs: () => outputs,
+      getInputs: () => ["Sunlite Mobile Out"],
+      Output: Port,
+      Input: Port,
+    },
+  })
+  controller.refreshMidiConnection()
+  const first = controller.getConnection()
+  controller.handleCommand({ type: "noteon", note: 24, velocity: 127 })
+  for (let poll = 0; poll < 5; poll++) controller.refreshMidiConnection()
+  assert.equal(controller.getConnection(), first)
+  assert.equal(instances.length, 2)
+  controller.handleCommand({ type: "noteoff", note: 24, velocity: 0 })
+  assert.deepEqual(first.output.messages, [
+    { type: "noteon", note: 24, velocity: 127, channel: 0 },
+    { type: "noteoff", note: 24, velocity: 0, channel: 0 },
+  ])
+  controller.refreshMidiConnection(true)
+  assert.equal(first.output.closed, true)
+  assert.equal(first.input.closed, true)
+  assert.notEqual(controller.getConnection(), first)
+  outputs = []
+  assert.equal(controller.refreshMidiConnection().midiReady, false)
+  assert.equal(controller.getConnection(), null)
+})
 
 function temporaryDirectory(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sunlite-services-"))

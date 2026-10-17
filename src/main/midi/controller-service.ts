@@ -19,11 +19,13 @@ export function createMidiControllerService({
   recordFeedback,
   getLightingSoftware,
   feedbackStore,
+  midiBackend = easymidi,
 }: {
   broadcastToAll: (payload: unknown) => void
   recordFeedback: (command: AutomationMidiCommand) => void
   getLightingSoftware: () => LightingSoftware
   feedbackStore: ReturnType<typeof createMidiFeedbackStore>
+  midiBackend?: typeof easymidi
 }) {
   const { cloneMidiFeedbackState, updateMidiFeedbackState } = feedbackStore
   const broadcastMidiFeedbackState = () =>
@@ -81,7 +83,7 @@ export function createMidiControllerService({
 
   function getAvailableMidiOutputs(): string[] {
     try {
-      return easymidi.getOutputs()
+      return midiBackend.getOutputs()
     } catch {
       return []
     }
@@ -89,7 +91,7 @@ export function createMidiControllerService({
 
   function getAvailableMidiInputs(): string[] {
     try {
-      return easymidi.getInputs()
+      return midiBackend.getInputs()
     } catch {
       return []
     }
@@ -246,18 +248,32 @@ export function createMidiControllerService({
     return true
   }
 
-  function refreshMidiConnection() {
+  function refreshMidiConnection(force = false) {
     const outputName = findMidiOutputName(MIDI_OUTPUT_NAME)
     const inputNameCandidate = findMidiInputName(MIDI_INPUT_NAME)
     const availableMidiOutputs = getAvailableMidiOutputs()
     const availableMidiInputs = getAvailableMidiInputs()
+
+    // Status polling and new web clients must not close healthy native MIDI handles.
+    // A held note still needs its original output for the eventual release.
+    const expectedInputName =
+      inputNameCandidate !== outputName ? inputNameCandidate : null
+    if (
+      !force &&
+      midiConnection &&
+      midiConnection.outputName === outputName &&
+      midiConnection.inputName === expectedInputName &&
+      !feedbackDisabledReason
+    ) {
+      return getStatus(availableMidiOutputs, availableMidiInputs)
+    }
 
     closeMidiConnection()
     resetMidiLoopGuard()
     updateFeedbackStatus(null)
 
     if (outputName) {
-      const output = new easymidi.Output(outputName)
+      const output = new midiBackend.Output(outputName)
       let inputName =
         inputNameCandidate && inputNameCandidate !== outputName
           ? inputNameCandidate
@@ -270,7 +286,7 @@ export function createMidiControllerService({
         inputName = null
       }
 
-      const input = inputName ? new easymidi.Input(inputName) : null
+      const input = inputName ? new midiBackend.Input(inputName) : null
 
       if (input) {
         input.on("noteon", (message) => {

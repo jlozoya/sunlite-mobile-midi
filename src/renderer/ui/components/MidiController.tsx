@@ -66,7 +66,7 @@ export function MidiController({
           <div {...stylex.props(styles.padMatrix)} style={padGridStyle}>
             {model.padGrid.map((pad) => {
               const config = customization.pads[String(pad.note)]
-              const feedbackState = padStates[pad.note]
+              const feedbackState = padStates[config?.midiNumber ?? pad.note]
               const feedbackColor = getFeedbackColor(feedbackState?.velocity)
               const feedbackBehavior = getFeedbackBehavior(feedbackState?.behaviorChannel)
 
@@ -228,7 +228,7 @@ function MappedSceneButton({
   onEdit,
 }: MappedSceneButtonProps) {
   const config = customization.sceneButtons[String(button.note)]
-  const feedbackState = padStates[button.note]
+  const feedbackState = padStates[config?.midiNumber ?? button.note]
   const feedbackColor = getFeedbackColor(feedbackState?.velocity)
   const feedbackBehavior = getFeedbackBehavior(feedbackState?.behaviorChannel)
 

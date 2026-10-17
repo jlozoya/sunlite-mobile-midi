@@ -44,8 +44,8 @@ export function SceneButton({
   const pressHandlers = useMidiButtonPress({
     isMobileView,
     isDisabled,
-    onPressStart: () => sendStandardButtonNoteOn(button.note, sendCommand),
-    onPressEnd: () => sendStandardButtonNoteOff(button.note, sendCommand),
+    onPressStart: () => sendStandardButtonNoteOn(button.note, sendCommand, config),
+    onPressEnd: () => sendStandardButtonNoteOff(button.note, sendCommand, config),
   })
 
   return (
@@ -55,7 +55,7 @@ export function SceneButton({
       data-led-behavior={feedbackBehavior.behavior}
       {...pressHandlers}
       isDisabled={isDisabled}
-      aria-label={`${label}, nota ${button.note}, ${isLit ? "iluminado" : "apagado"}`}
+      aria-label={`${label}, nota ${config?.midiNumber ?? button.note}, ${isLit ? "iluminado" : "apagado"}`}
       aria-description={isMobileView ? undefined : "Clic derecho para editar"}
       onContextMenu={(event) => {
         if (isMobileView) return
@@ -69,7 +69,9 @@ export function SceneButton({
         aria-hidden="true"
       />
       <span {...stylex.props(styles.sceneLabel)}>{label}</span>
-      <small {...stylex.props(styles.sceneMeta)}>N {button.note}</small>
+      <small {...stylex.props(styles.sceneMeta)}>
+        N {config?.midiNumber ?? button.note}
+      </small>
     </Button>
   )
 }

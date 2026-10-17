@@ -25,7 +25,7 @@ export function registerControllerRoutes(
     getLightingSoftware: () => LightingSoftware
     isRecording: () => boolean
     switchLightingSoftware: (software: LightingSoftware) => void
-    refreshMidiConnection: () => ServerStatus | null
+    refreshMidiConnection: (force?: boolean) => ServerStatus | null
     controllerStore: ReturnType<typeof createControllerStore>
     feedbackStore: ReturnType<typeof createMidiFeedbackStore>
     midiBridge: ReturnType<typeof createMidiBridgeService>
@@ -71,7 +71,7 @@ export function registerControllerRoutes(
   })
 
   appServer.post("/api/midi/refresh", (_request, response) => {
-    response.json(refreshMidiConnection())
+    response.json(refreshMidiConnection(true))
   })
 
   appServer.post("/api/loopmidi/install", async (_request, response) => {

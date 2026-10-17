@@ -54,8 +54,14 @@ export function ConnectionPanel({
                 {status?.expectedMidiOutputName ?? "Sunlite Mobile In"} como entrada y{" "}
                 {status?.expectedMidiInputName ?? "Sunlite Mobile Out"} como salida
                 opcional. Activa Start y Learn, selecciona Note IN de la función, pulsa el
-                control en esta app y guarda con Save. Usa Key Up como Note On con valor
-                0. Para automatización, asigna las funciones como Page independent.
+                control en esta app y guarda con Save. En Options, activa Controller 1:
+                NoteOn - NoteOff si la app está en la primera entrada. Para usar un mapeo
+                existente, edita el botón de la app y copia la nota de Note IN. Para usar
+                el APC y la app con la misma asignación, dirige el APC mediante el router
+                a Sunlite Mobile In y detén su entrada directa en FreeStyler. Mantén el
+                router en marcha; después de reiniciar la app, pulsa Arrancar router.
+                Aprende la función una sola vez desde esa entrada compartida y guarda con
+                Save. Usa Page independent para evitar depender de la página MIDI activa.
               </span>
             ) : (
               <span>
@@ -148,8 +154,8 @@ export function ConnectionPanel({
               <div {...stylex.props(styles.setupStepCopy)}>
                 <strong>Puente MIDI listo</strong>
                 <span>
-                  {softwareLabel} puede recibir comandos por{" "}
-                  <strong>{status.midiOutputName}</strong>.{" "}
+                  La app envía comandos por <strong>{status.midiOutputName}</strong>.{" "}
+                  Comprueba su recepción en el monitor MIDI de {softwareLabel}.{" "}
                   {status.feedbackReady ? (
                     <>
                       El retorno por <strong>{status.midiInputName}</strong> está
