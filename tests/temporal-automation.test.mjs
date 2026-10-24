@@ -12,6 +12,145 @@ import { buildTrainingDataset } from "../dist/main/automation/training-dataset.j
 import { waveformFeatures } from "../dist/main/automation/waveform-analysis.js"
 import { selectTrainingExamples } from "../dist/main/automation/training-selection.js"
 import { AutomationInputContext } from "../dist/main/automation/input-context.js"
+import { recordRoutedCommands } from "../dist/main/automation/router-training.js"
+
+test("hardware MIDI trains from Ethernet waveforms without microphone and deduplicates fan-out", () =>
+  withRoot((root) => {
+    const engine = new AutomationEngine(
+      root,
+      () => {},
+      () => {},
+    )
+    const config = {
+      ports: [
+        { id: "pads", role: "input", kind: "hardware" },
+        { id: "feedback", role: "input", kind: "virtual" },
+      ],
+    }
+    const features = {
+      rms: 0.6,
+      bass: 0.8,
+      mid: 0.4,
+      high: 0.2,
+      flux: 0.15,
+      centroid: 0.3,
+    }
+    try {
+      const started = engine.startSession("CDJ + physical pads")
+      engine.handleDjLinkEvent({
+        type: "waveform-position",
+        position: {
+          deviceNumber: 1,
+          positionMs: 10000,
+          pitchPercent: 0,
+          isPlaying: true,
+          isOnAir: true,
+          isMaster: true,
+          features,
+          receivedAt: Date.now(),
+        },
+      })
+      const record = (command) => engine.recordManualCommand(command)
+      const deliver = (bytes) =>
+        recordRoutedCommands(config, "pads", [{ bytes }, { bytes }], record)
+      deliver([0x93, 52, 110])
+      deliver([0x93, 52, 0])
+      deliver([0xb3, 7, 96])
+      deliver([0xc3, 4])
+      recordRoutedCommands(config, "feedback", [{ bytes: [0x90, 99, 127] }], record)
+      deliver([0xf8])
+      deliver([0x90, 60])
+      deliver([0x90, 60, 255])
+      assert.equal(engine.getStatus().audioConnected, false)
+      assert.equal(engine.getStatus().analysisInput.source, "deck:1")
+      assert.equal(engine.getStatus().activeSession.trainingExampleCount, 3)
+      const status = engine.stopSession()
+      assert.equal(status.modelExampleCount, 3)
+      const events = engine.readTimeline(started.activeSession.id)
+      assert.deepEqual(
+        events
+          .filter((event) => event.kind === "example")
+          .map((event) => event.example.command),
+        [
+          { type: "noteon", note: 52, velocity: 110 },
+          { type: "cc", controller: 7, value: 96 },
+          { type: "program", number: 4 },
+        ],
+      )
+      assert.ok(
+        events
+          .filter((event) => event.kind === "example")
+          .every(
+            (event) =>
+              event.inputSource === "deck:1" && event.features.rms === features.rms,
+          ),
+      )
+    } finally {
+      engine.dispose()
+    }
+  }))
+
+test("active CDJ analysis takes priority over microphone recording and prediction", () =>
+  withRoot((root) => {
+    const engine = new AutomationEngine(
+      root,
+      () => {},
+      () => {},
+    )
+    const deck = { rms: 0.6, bass: 0.8, mid: 0.4, high: 0.2, flux: 0.15, centroid: 0.3 }
+    const microphone = {
+      rms: 0.9,
+      bass: 0.1,
+      mid: 0.9,
+      high: 0.9,
+      flux: 0.9,
+      centroid: 0.9,
+    }
+    try {
+      const session = engine.startSession("Deck priority").activeSession
+      engine.handleDjLinkEvent({
+        type: "waveform-position",
+        position: {
+          deviceNumber: 2,
+          positionMs: 1000,
+          pitchPercent: 0,
+          isPlaying: true,
+          isOnAir: true,
+          isMaster: true,
+          features: deck,
+          receivedAt: Date.now(),
+        },
+      })
+      const triggers = []
+      engine.maybePredict = (...args) => triggers.push(args)
+      engine.handleAudioFrame({
+        capturedAt: Date.now(),
+        sampleRate: 48000,
+        features: microphone,
+        spectrum: [1],
+      })
+      engine.recordManualCommand({ type: "noteon", note: 50, velocity: 127 })
+      assert.equal(
+        triggers.length,
+        0,
+        "microphone must not trigger actions while a deck is active even without beat packets",
+      )
+      assert.equal(engine.getStatus().analysisInput.source, "deck:2")
+      assert.deepEqual(engine.getStatus().analysisInput.features, deck)
+      const events = engine.readTimeline(session.id)
+      assert.equal(events.filter((event) => event.kind === "audio").length, 0)
+      assert.equal(
+        events.find((event) => event.kind === "example").features.rms,
+        deck.rms,
+      )
+      engine.handleDjLinkEvent({ type: "waveform-unloaded", deviceNumber: 2 })
+      assert.equal(engine.getStatus().analysisInput.source, "audio")
+      engine.handleAudioDisconnected()
+      assert.equal(engine.getStatus().analysisInput, null)
+    } finally {
+      engine.dispose()
+    }
+  }))
 
 function withRoot(run) {
   const parent = fs.realpathSync(os.tmpdir())

@@ -26,17 +26,22 @@ export function AutomationAudioSource({
           <InfoTooltip
             label="Fuente de audio"
             content="Inicia el audio para comprobar la fuente o usar un modelo ya entrenado. No hace falta grabar otra sesión. Un CDJ reproduciendo música también puede aportar la señal para automatizar."
-            detail="El audio del PC se captura desde la app de escritorio; las entradas USB o del mixer se eligen en esta lista."
+            detail="Por Ethernet se analizan el waveform y los beats del CDJ con prioridad sobre el micrófono. Para analizar el audio real de la mezcla, conecta USB o REC OUT del mixer."
           />
         </div>
         <StatusBadge tone={sourceReady ? "success" : "neutral"} dot>
           {automation.status?.waveformConnected
-            ? "CDJ listo"
+            ? `CDJ ${automation.status.analysisInput?.source.split(":")[1] ?? ""} · Ethernet`
             : automation.audioRunning || automation.status?.audioConnected
               ? "Audio activo"
               : "Sin señal"}
         </StatusBadge>
       </div>
+      <span {...stylex.props(styles.cardDetail)} role="status">
+        {automation.status?.waveformConnected
+          ? "Análisis activo desde PRO DJ LINK: energía y bandas estimadas del waveform, posición y beats. No necesita micrófono."
+          : "Sin análisis CDJ activo. La entrada seleccionada captura audio del PC, USB o micrófono; Ethernet no entrega la mezcla de salida del mixer."}
+      </span>
       <div {...stylex.props(styles.sourceControls)}>
         <select
           id={id}

@@ -108,9 +108,10 @@ export class AutomationEngine {
     const devices = [...this.devices.values()]
       .filter((device) => now - device.lastSeenAt < 10000)
       .sort((a, b) => a.deviceNumber - b.deviceNumber)
-    const waveformConnected = [...this.deckFeatures.values()].some(
-      (entry) => entry.isPlaying && now - entry.receivedAt < 2500,
-    )
+    const deck = this.getActiveDeck()
+    const waveformConnected = deck !== undefined
+    const deckInput = deck === undefined ? undefined : this.deckFeatures.get(deck)
+    const audioFeatures = this.getAudioFeatures()
 
     return {
       mode: this.mode,
@@ -120,6 +121,19 @@ export class AutomationEngine {
       modelExampleCount: this.policy.exampleCount,
       audioConnected: this.lastAudioAt !== null && now - this.lastAudioAt < 2500,
       waveformConnected,
+      analysisInput: deckInput
+        ? {
+            source: `deck:${deck}`,
+            features: { ...deckInput.features },
+            receivedAt: deckInput.receivedAt,
+          }
+        : audioFeatures
+          ? {
+              source: "audio",
+              features: { ...audioFeatures },
+              receivedAt: this.lastAudioAt!,
+            }
+          : null,
       lastAudioAt: this.lastAudioAt,
       devices,
       latestBeats: Object.fromEntries(this.latestBeats),
@@ -220,6 +234,7 @@ export class AutomationEngine {
 
     if (
       this.store.getActive() &&
+      this.getActiveDeck() === undefined &&
       now - this.lastRecordedAudioAt >= CONTEXT_RECORD_INTERVAL_MS
     ) {
       this.lastRecordedAudioAt = now
@@ -235,6 +250,7 @@ export class AutomationEngine {
     if (this.policy.temporalReady && !this.getActiveDeck())
       this.predictControllers(contextBeat?.bpm || this.inputContext.audioBpm)
     if (
+      this.getActiveDeck() === undefined &&
       !hasRecentDeckBeat &&
       normalized.features.rms > (this.policy.temporalReady ? 0.01 : 0.025) &&
       (this.policy.temporalReady

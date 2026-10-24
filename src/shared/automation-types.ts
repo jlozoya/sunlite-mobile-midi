@@ -175,6 +175,11 @@ export type AutomationStatus = {
   modelExampleCount: number
   audioConnected: boolean
   waveformConnected: boolean
+  analysisInput?: {
+    source: string
+    features: AudioFeatures
+    receivedAt: number
+  } | null
   lastAudioAt: number | null
   devices: DjLinkDevice[]
   latestBeats: Record<number, DjLinkBeat>

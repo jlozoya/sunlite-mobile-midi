@@ -49,10 +49,10 @@ export function AutomationStudio({
     automation.selectedDeviceId === SYSTEM_AUDIO_DEVICE_ID ||
     (!automation.selectedDeviceId && Boolean(window.rekordboxCapture))
   const trainingDescription = status?.recording
-    ? `${status.activeSession?.name ?? "Grabando sesión"} · ${formatDuration(status.activeSession?.durationMs ?? 0)} · usa los botones y sliders de Controlador`
+    ? `${status.activeSession?.name ?? "Grabando sesión"} · ${formatDuration(status.activeSession?.durationMs ?? 0)} · ${status.activeSession?.trainingExampleCount ?? 0} ejemplos · usa los botones y sliders de Controlador o el MIDI físico conectado al router`
     : sourceReady
       ? status?.waveformConnected
-        ? "Usa el Controlador; tus acciones se guardarán con la música y el beat del CDJ."
+        ? "Usa el Controlador o el MIDI físico conectado al router; tus acciones se guardarán con el análisis del waveform y el beat del CDJ."
         : "Usa el Controlador; tus acciones se guardarán con el audio que está sonando."
       : usesPcAudio
         ? "Al empezar se capturará el audio de este PC; después usa los controles de luces para enseñarle."

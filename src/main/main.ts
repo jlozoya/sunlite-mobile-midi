@@ -150,6 +150,7 @@ async function startControllerServer(): Promise<ServerStatus> {
   routerService = new RouterService(
     path.join(electronApp.getPath("userData"), "midi-router.config.json"),
     (payload) => broadcastToAll(payload),
+    (command) => automationEngine?.recordManualCommand(command),
   )
 
   const projectRoot = path.resolve(mainDirectory, "../..")

@@ -53,6 +53,7 @@ export function SessionReview({
 
   const showSpectrogram = Boolean(
     status?.audioConnected ||
+    status?.waveformConnected ||
     automation.liveFrames.length > 0 ||
     automation.timeline.length > 0 ||
     automation.selectedSessionId,
@@ -118,7 +119,9 @@ export function SessionReview({
             <strong>
               {automation.selectedSessionId
                 ? `Sesión: ${selectedSession?.name ?? "guardada"}`
-                : "Audio en vivo"}
+                : status?.waveformConnected
+                  ? "Análisis CDJ por Ethernet"
+                  : "Audio en vivo"}
             </strong>
             {automation.selectedSessionId ? (
               <ActionButton
@@ -155,6 +158,7 @@ export function SessionReview({
           <SpectrogramTimeline
             key={automation.selectedSessionId ?? "live"}
             liveFrames={automation.selectedSessionId ? [] : automation.liveFrames}
+            analysisInput={automation.selectedSessionId ? null : status?.analysisInput}
             timeline={automation.timeline}
             editable={Boolean(automation.selectedSessionId)}
             busy={controlsDisabled}

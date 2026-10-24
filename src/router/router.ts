@@ -130,14 +130,17 @@ export class MidiRouter extends EventEmitter {
       return
     }
 
+    const delivered = []
     for (const message of routed) {
       if (this.hub.send(message.destination, message.bytes)) {
+        delivered.push(message)
         this.stats.sent += 1
         this.emitMonitor("out", message.destination, message.routeId, message.bytes)
       } else {
         this.stats.undelivered += 1
       }
     }
+    if (delivered.length) this.emit("routed", portId, delivered)
   }
 
   /**

@@ -40,6 +40,42 @@ function configWith(routes, ports) {
   return { version: 1, ports, routes }
 }
 
+test("router reports only delivered transformed gestures for hardware training", async () => {
+  const { MidiRouter } = await import("../dist/router/router.js")
+  const { recordRoutedCommands } =
+    await import("../dist/main/automation/router-training.js")
+  const config = configWith(
+    [
+      createRoute({
+        id: "a",
+        source: "pads",
+        destination: "out-a",
+        transforms: { ...defaultRouteTransforms(), transpose: 12 },
+      }),
+      createRoute({
+        id: "b",
+        source: "pads",
+        destination: "out-b",
+        transforms: { ...defaultRouteTransforms(), transpose: 12 },
+      }),
+    ],
+    [port("pads", "input", "hardware"), port("out-a", "output"), port("out-b", "output")],
+  )
+  const router = new MidiRouter(config)
+  const commands = []
+  router.on("routed", (source, messages) =>
+    recordRoutedCommands(config, source, messages, (command) => commands.push(command)),
+  )
+  router.hub.send = () => true
+  router.handleIncoming("pads", [0x90, 48, 100])
+  assert.deepEqual(commands, [{ type: "noteon", note: 60, velocity: 100 }])
+  router.hub.send = () => false
+  router.handleIncoming("pads", [0x90, 50, 100])
+  assert.equal(commands.length, 1, "undelivered actions cannot teach the model")
+  router.handleIncoming("unknown", [0x90, 50, 100])
+  assert.equal(commands.length, 1, "unrouted actions cannot teach the model")
+})
+
 test("message helpers read channels and note forms", () => {
   assert.equal(getChannel([0x93, 60, 100]), 4)
   assert.equal(getChannel([0xf8]), null)

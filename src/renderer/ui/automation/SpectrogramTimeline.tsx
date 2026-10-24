@@ -3,10 +3,12 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import type {
   AutomationAudioFrame,
   AutomationTimelineEvent,
+  AutomationStatus,
 } from "../../../shared/automation-types"
 
 type Props = {
   liveFrames: AutomationAudioFrame[]
+  analysisInput?: AutomationStatus["analysisInput"]
   timeline: AutomationTimelineEvent[]
   editable?: boolean
   busy?: boolean
@@ -32,6 +34,7 @@ function formatTime(milliseconds: number): string {
 
 export function SpectrogramTimeline({
   liveFrames,
+  analysisInput,
   timeline,
   editable = false,
   busy = false,
@@ -43,6 +46,22 @@ export function SpectrogramTimeline({
   const [drag, setDrag] = useState<DragState | null>(null)
   const [pendingMoves, setPendingMoves] = useState<Record<string, number>>({})
   const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [deckColumns, setDeckColumns] = useState<{ t: number; spectrum: number[] }[]>([])
+  useEffect(() => {
+    if (!analysisInput?.source.startsWith("deck:")) {
+      setDeckColumns([])
+      return
+    }
+    const { bass, mid, high } = analysisInput.features
+    setDeckColumns((columns) =>
+      columns.at(-1)?.t === analysisInput.receivedAt
+        ? columns
+        : [
+            ...columns.slice(-179),
+            { t: analysisInput.receivedAt, spectrum: [bass, mid, high] },
+          ],
+    )
+  }, [analysisInput])
   const duration = useMemo(
     () => Math.max(1, ...timeline.map((event) => event.t)),
     [timeline],
@@ -94,16 +113,24 @@ export function SpectrogramTimeline({
     context.fillStyle = "#070a12"
     context.fillRect(0, 0, width, height)
 
-    const recordedFrames = timeline
-      .filter((event) => event.kind === "audio" && event.frame)
-      .map((event) => ({ t: event.t, frame: event.frame as AutomationAudioFrame }))
+    const recordedFrames = timeline.flatMap((event) => {
+      if (event.kind === "context" && event.features) {
+        const { bass, mid, high } = event.features
+        return [{ t: event.t, spectrum: [bass, mid, high] }]
+      }
+      return event.kind === "audio" && event.frame
+        ? [{ t: event.t, spectrum: event.frame.spectrum }]
+        : []
+    })
     const frames = recordedFrames.length
       ? recordedFrames
-      : liveFrames.map((frame, index) => ({ t: index, frame }))
+      : analysisInput?.source.startsWith("deck:")
+        ? deckColumns
+        : liveFrames.map((frame, index) => ({ t: index, spectrum: frame.spectrum }))
 
     if (frames.length) {
       for (let column = 0; column < frames.length; column += 1) {
-        const spectrum = frames[column].frame.spectrum
+        const spectrum = frames[column].spectrum
         const nextT = frames[column + 1]?.t ?? duration
         const x = recordedFrames.length
           ? (frames[column].t / duration) * width
@@ -215,6 +242,8 @@ export function SpectrogramTimeline({
     examples,
     hoveredId,
     liveFrames,
+    deckColumns,
+    analysisInput,
     pendingMoves,
     timeline,
     zoom,
@@ -261,6 +290,12 @@ export function SpectrogramTimeline({
 
   return (
     <div>
+      {analysisInput?.source.startsWith("deck:") ||
+      timeline.some((event) => event.kind === "context") ? (
+        <p>
+          Bandas estimadas del waveform del CDJ: graves abajo, medios y agudos arriba.
+        </p>
+      ) : null}
       <div {...stylex.props(styles.toolbar)}>
         <span>
           {editable

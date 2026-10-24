@@ -17,6 +17,8 @@ import {
 import { listInputDevices, listOutputDevices } from "../router/devices.js"
 import { isReservedMidiPort } from "../shared/router-setup.js"
 import { MidiRouter } from "../router/router.js"
+import type { AutomationMidiCommand } from "../shared/automation-types.js"
+import { recordRoutedCommands } from "./automation/router-training.js"
 import type {
   RouterConfig,
   RouterMonitorEvent,
@@ -43,6 +45,9 @@ export class RouterService {
   constructor(
     private readonly configPath: string,
     private readonly broadcast: (payload: unknown) => void,
+    private readonly recordManualCommand: (
+      command: AutomationMidiCommand,
+    ) => void = () => {},
   ) {
     this.config = this.readConfig()
   }
@@ -149,6 +154,9 @@ export class RouterService {
       this.broadcast({ event: "router-overload", message })
     })
     router.on("monitor", (event: RouterMonitorEvent) => this.queueMonitor(event))
+    router.on("routed", (source: string, messages: { bytes: number[] }[]) => {
+      recordRoutedCommands(this.config, source, messages, this.recordManualCommand)
+    })
 
     const { provisioning } = await router.start()
     this.provisioning = { ok: provisioning.ok, message: provisioning.message }
