@@ -42,14 +42,12 @@ function smoothPath(
 
 export function SliderCurveEditor({ gesture, busy, onClose, onSave }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null)
-  const [points, setPoints] = useState(() =>
-    gesture.points.map((point) => ({ ...point })),
-  )
+  const [points, setPoints] = useState(() => averageSliderCurve(gesture.points))
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [deletedIds, setDeletedIds] = useState<string[]>([])
 
   useEffect(() => {
-    setPoints(gesture.points.map((point) => ({ ...point })))
+    setPoints(averageSliderCurve(gesture.points))
     setDeletedIds([])
   }, [gesture.id])
 
@@ -127,7 +125,8 @@ export function SliderCurveEditor({ gesture, busy, onClose, onSave }: Props) {
             <h3 {...stylex.props(styles.title)}>CC {gesture.controller}</h3>
             <p {...stylex.props(styles.description)}>
               Arrastra para editar · doble clic para agregar · clic derecho para eliminar.
-              El promedio suave reduce el ruido de los mensajes MIDI intermedios.
+              Se muestra un suavizado ligero que conserva el inicio y el final. Pulsa
+              Guardar curva para aplicarlo al entrenamiento.
             </p>
           </div>
           <ActionButton variant="ghost" size="small" onPress={onClose}>

@@ -60,24 +60,27 @@ export function detectSliderGestures(
 
 export function averageSliderCurve(points: SliderCurvePoint[]): SliderCurvePoint[] {
   if (points.length < 3) return points.map((point) => ({ ...point }))
+  // Smooth in time, so dense hardware CC bursts do not change the filter's width.
+  const radiusMs = 80
   let smoothed = points.map((point) => ({ ...point }))
-  for (let pass = 0; pass < 4; pass += 1) {
+  for (let pass = 0; pass < 2; pass += 1) {
     smoothed = smoothed.map((point, index, current) => {
-      const start = Math.max(0, index - 2)
-      const end = Math.min(current.length - 1, index + 2)
+      // Keep the intended initial and final fader levels intact.
+      if (index === 0 || index === current.length - 1) return { ...point }
       let weightedValue = 0
       let totalWeight = 0
-      for (let neighbor = start; neighbor <= end; neighbor += 1) {
-        const distance = Math.abs(neighbor - index)
-        const weight = distance === 0 ? 4 : distance === 1 ? 2 : 1
-        weightedValue += current[neighbor].value * weight
+      for (const neighbor of current) {
+        const distance = Math.abs(neighbor.t - point.t)
+        if (distance >= radiusMs) continue
+        const weight = 1 - distance / radiusMs
+        weightedValue += neighbor.value * weight
         totalWeight += weight
       }
       return {
         ...point,
-        value: Math.max(0, Math.min(127, Math.round(weightedValue / totalWeight))),
+        value: Math.max(0, Math.min(127, weightedValue / totalWeight)),
       }
     })
   }
-  return smoothed
+  return smoothed.map((point) => ({ ...point, value: Math.round(point.value) }))
 }
