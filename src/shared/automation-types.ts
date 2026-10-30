@@ -59,6 +59,7 @@ export type AutomationModelInfo = {
   sessionCount: number
   validation: ModelValidation | null
   sliderGestureCount?: number
+  supportedSequenceCount?: number
   rejectedSliderGestureCount?: number
   controllersAwaitingSupport?: number[]
 }
@@ -224,6 +225,7 @@ export type AutomationTimelineEvent = {
 }
 
 export type AutomationTrainingExample = {
+  inputSource?: string
   id: string
   createdAt: number
   features: AudioFeatures

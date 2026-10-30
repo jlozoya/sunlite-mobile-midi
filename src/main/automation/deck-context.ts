@@ -4,12 +4,20 @@ import type {
   DjLinkWaveform,
 } from "../../shared/automation-types.js"
 
-type DeckState = {
+export type DeckState = {
   features: AudioFeatures
   receivedAt: number
   isPlaying: boolean
   isOnAir: boolean
   isMaster: boolean
+}
+
+export function freshDeckFeatures(
+  decks: ReadonlyMap<number, DeckState>,
+  device?: number,
+) {
+  const entry = device === undefined ? undefined : decks.get(device)
+  return entry?.isPlaying && Date.now() - entry.receivedAt < 2500 ? entry.features : null
 }
 
 export function activeDeck(

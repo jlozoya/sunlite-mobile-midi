@@ -422,6 +422,23 @@ outside the training set before relying on Auto for unattended output.
 
 ### Training quality
 
+Repeated combinations are also learned as short action sequences. Each phrase spans
+at most eight beats; a pause longer than two beats starts another phrase. Notes,
+program changes and CC movements retain their relative order and timing, including
+simultaneous controls. Playback follows the current tempo and still applies protected
+notes/controllers and the configured action intervals. It requires two similar
+demonstrations in comparable musical contexts, either in separate sessions or more
+than five seconds apart within one session. Dense samples from one slider pass do
+not provide repeated evidence.
+
+A selected sequence takes priority over independent predictions during that phrase.
+Equally plausible conflicting phrases abstain; manual input, stale input, source
+changes and loss of musical context interrupt playback. The UI reports supported
+sequence demonstrations separately. Existing validation scores still evaluate
+individual actions and curves, not whole sequences. Re-train saved sessions to
+derive sequences; twenty minutes of unrelated actions alone do not guarantee a
+repeatable sequence or generalization to different music.
+
 The local model learns examples of your choices; it does not generate a lighting show
 from fixture definitions or understand every song. Record representative quiet,
 build-up and energetic passages and repeat useful scene choices in several contexts.
@@ -437,7 +454,12 @@ The live audio graph is hidden by default. Use **Ver detalles de audio** when ne
 saved session opens its review timeline automatically. Only the active waveform source
 is shown: Rekordbox on this PC or a connected CDJ.
 
-Select a saved session to display its spectrogram, beats and MIDI actions. Incorrect actions can be excluded from the model, and the model is immediately rebuilt without those examples.
+Select a saved session to review its actions on separate control tracks. Cyan curves
+show slider movements and purple markers show discrete actions on a shared time axis.
+Browse in 10-second, 30-second or one-minute sections, or view the whole session.
+Select an action to move its start time, edit its curve or delete it with confirmation;
+moving a slider preserves the spacing of all its samples. The model is rebuilt after
+saved edits. Audio analysis is available separately under the reference details.
 
 ## Development
 

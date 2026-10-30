@@ -24,10 +24,11 @@ import { normalizeAudioFrame } from "./audio-frame.js"
 import { CONTEXT_RECORD_INTERVAL_MS } from "../../shared/automation-learning.js"
 import { AutomationInputContext } from "./input-context.js"
 import { AutomationSafety } from "./automation-safety.js"
-import { activeDeck, contextBeat } from "./deck-context.js"
+import * as decks from "./deck-context.js"
 import { SliderPlayback } from "./slider-playback.js"
 import { EMPTY_BRIDGE_STATUS, commandLabel } from "./values.js"
 import { predictTriggeredActions } from "./automation-predictions.js"
+import { SequencePlayback } from "./sequence-playback.js"
 
 type Broadcast = (payload: unknown) => void
 type MidiExecutor = (command: AutomationMidiCommand) => unknown
@@ -45,16 +46,7 @@ export class AutomationEngine {
   private devices = new Map<number, DjLinkDevice>()
   private latestBeats = new Map<number, Extract<DjLinkEvent, { type: "beat" }>["beat"]>()
   private waveforms = new Map<number, DjLinkWaveform>()
-  private deckFeatures = new Map<
-    number,
-    {
-      features: AudioFeatures
-      receivedAt: number
-      isPlaying: boolean
-      isOnAir: boolean
-      isMaster: boolean
-    }
-  >()
+  private deckFeatures = new Map<number, decks.DeckState>()
   private currentFrame: AutomationAudioFrame | null = null
   private lastAudioAt: number | null = null
   private lastRecordedAudioAt = 0
@@ -65,6 +57,7 @@ export class AutomationEngine {
   private readonly safety = new AutomationSafety()
   private lastControllerPredictionAt = 0
   private readonly sliderPlayback = new SliderPlayback()
+  private readonly sequencePlayback = new SequencePlayback()
   private lastDeckRecordedAt = new Map<number, number>()
   private lastAudioTriggerAt = 0
   private statusBroadcastTimer: NodeJS.Timeout | null = null
@@ -86,6 +79,7 @@ export class AutomationEngine {
   }
 
   dispose(): void {
+    this.sequencePlayback.reset()
     this.mode = "manual"
     this.sliderPlayback.clear()
     if (this.statusBroadcastTimer) clearTimeout(this.statusBroadcastTimer)
@@ -138,6 +132,7 @@ export class AutomationEngine {
   }
 
   setMode(mode: unknown): AutomationStatus {
+    this.sequencePlayback.reset()
     if (mode !== "manual" && mode !== "assist" && mode !== "auto") {
       throw new Error("Invalid automation mode")
     }
@@ -175,6 +170,7 @@ export class AutomationEngine {
   }
 
   train(): AutomationStatus {
+    this.sequencePlayback.reset()
     this.sliderPlayback.reset()
     const dataset = this.store.readTrainingDataset()
     this.policy.train(dataset.examples, dataset.idle)
@@ -257,6 +253,7 @@ export class AutomationEngine {
   }
 
   handleAudioDisconnected(): void {
+    if (this.inputSource() === "audio") this.sequencePlayback.reset()
     if (this.inputSource() === "audio") this.sliderPlayback.clear()
     this.lastAudioAt = null
     this.currentFrame = null
@@ -377,6 +374,7 @@ export class AutomationEngine {
   }
 
   recordManualCommand(command: AutomationMidiCommand): void {
+    this.sequencePlayback.reset()
     this.sliderPlayback.clear()
     const now = Date.now()
     this.manualOverrideUntil = now + this.settings.manualOverrideMs
@@ -391,7 +389,8 @@ export class AutomationEngine {
       ) {
         const latestBeat = this.getContextBeat()
         const features =
-          this.getDeckFeatures(this.getActiveDeck()) ?? this.getAudioFeatures()
+          decks.freshDeckFeatures(this.deckFeatures, this.getActiveDeck()) ??
+          this.getAudioFeatures()
         if (!features) {
           this.queueStatusBroadcast()
           return
@@ -426,7 +425,7 @@ export class AutomationEngine {
   }
 
   private getActiveDeck(): number | undefined {
-    return activeDeck(this.deckFeatures, this.settings.preferredDeck, Date.now())
+    return decks.activeDeck(this.deckFeatures, this.settings.preferredDeck, Date.now())
   }
 
   private getAudioFeatures(): AudioFeatures | null {
@@ -436,7 +435,7 @@ export class AutomationEngine {
   }
 
   private getContextBeat() {
-    return contextBeat(
+    return decks.contextBeat(
       this.deckFeatures,
       this.latestBeats,
       this.waveforms,
@@ -451,7 +450,7 @@ export class AutomationEngine {
     trigger: "audio" | "pro-dj-link",
     deviceNumber?: number,
   ): void {
-    if (this.mode === "manual") return
+    if (this.mode === "manual" || this.sequencePlayback.ownsActions) return
     if (!this.policy.temporalReady && trigger === "pro-dj-link" && beatWithinBar !== 1)
       return
     if (trigger === "pro-dj-link" && deviceNumber && deviceNumber > 6) return
@@ -467,7 +466,8 @@ export class AutomationEngine {
       return
     const features =
       trigger === "pro-dj-link"
-        ? (this.getDeckFeatures(deviceNumber) ?? this.getAudioFeatures())
+        ? (decks.freshDeckFeatures(this.deckFeatures, deviceNumber) ??
+          this.getAudioFeatures())
         : this.getAudioFeatures()
     if (!features) return
 
@@ -502,6 +502,25 @@ export class AutomationEngine {
     this.lastControllerPredictionAt = now
     const source = this.inputSource()
     const context = this.inputContext.get(source, now)
+    if (this.policy.sequences.length) {
+      const beat = this.getContextBeat()
+      this.sequencePlayback.tick(
+        now,
+        source,
+        context,
+        beat?.bpm || this.inputContext.audioBpm,
+        beat?.beatWithinBar ?? 0,
+        this.mode,
+        this.settings,
+        this.manualOverrideUntil,
+        this.policy.sequences,
+        (prediction, trigger) => this.applyPrediction(prediction, trigger),
+      )
+      if (this.sequencePlayback.ownsActions) {
+        this.sliderPlayback.clear()
+        return
+      }
+    }
     this.sliderPlayback.observeContext(source, context, this.settings.confidenceThreshold)
     if (!context || context.phase === "silence") {
       this.sliderPlayback.clear()
@@ -561,14 +580,6 @@ export class AutomationEngine {
     this.broadcast({ event: "automation-suggestion", suggestion })
     this.queueStatusBroadcast()
     return transportOk
-  }
-
-  private getDeckFeatures(deviceNumber?: number): AudioFeatures | null {
-    if (deviceNumber === undefined) return null
-    const entry = this.deckFeatures.get(deviceNumber)
-    return entry?.isPlaying && Date.now() - entry.receivedAt < 2500
-      ? entry.features
-      : null
   }
 
   private appendTimeline(event: Omit<AutomationTimelineEvent, "t" | "at">): void {

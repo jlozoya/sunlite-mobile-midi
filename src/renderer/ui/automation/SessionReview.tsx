@@ -1,12 +1,12 @@
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useId, useState } from "react"
 import { AnimatedCollapse } from "../components/AnimatedDisclosure"
-import { ActionButton, ConfirmationDialog } from "../ui-kit"
+import { ActionButton } from "../ui-kit"
 import { SliderCurveEditor } from "./SliderCurveEditor"
 import { SpectrogramTimeline } from "./SpectrogramTimeline"
+import { TrainingSequenceEditor } from "./TrainingSequenceEditor"
 import { detectSliderGestures } from "./slider-curves"
 import { styles } from "./AutomationStudio.styles"
-import { formatDuration, formatCommand } from "./automation-format"
 import type { AutomationStudioState } from "./types"
 
 export function SessionReview({
@@ -22,7 +22,11 @@ export function SessionReview({
 }) {
   const status = automation.status
   const analysisPanelId = useId()
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [detailsOpen, setDetailsOpen] = useState(false)
   useEffect(() => {
+    setEditingId(null)
+    setDetailsOpen(false)
     if (!automation.selectedSessionId) return
     let frame = 0
     function focusWhenVisible() {
@@ -38,60 +42,25 @@ export function SessionReview({
     return () => cancelAnimationFrame(frame)
   }, [automation.selectedSessionId])
 
-  const [editingSliderGestureId, setEditingSliderGestureId] = useState<string | null>(
-    null,
+  const session = status?.sessions.find(
+    (item) => item.id === automation.selectedSessionId,
   )
-  const [pendingGesture, setPendingGesture] = useState<{
-    controller: number
-    pointIds: string[]
-    sessionId: string | null
-  } | null>(null)
-
-  const selectedSession = status?.sessions.find(
-    (session) => session.id === automation.selectedSessionId,
+  const saved = Boolean(automation.selectedSessionId)
+  const disabled = controlsDisabled || Boolean(status?.recording) || !saved
+  const gesture = detectSliderGestures(automation.timeline).find(
+    (item) => item.id === editingId,
   )
-
-  const showSpectrogram = Boolean(
+  const show = Boolean(
     status?.audioConnected ||
     status?.waveformConnected ||
-    automation.liveFrames.length > 0 ||
-    automation.timeline.length > 0 ||
-    automation.selectedSessionId,
+    automation.liveFrames.length ||
+    automation.timeline.length ||
+    saved,
   )
 
-  const sliderGestures = detectSliderGestures(automation.timeline)
-
-  const groupedSliderExamples = new Set(
-    sliderGestures.flatMap((gesture) => gesture.points.map((point) => point.id)),
-  )
-
-  const standaloneExamples = automation.timeline.filter(
-    (event) =>
-      event.kind === "example" &&
-      event.example &&
-      !groupedSliderExamples.has(event.example.id),
-  )
-
-  const editingSliderGesture = sliderGestures.find(
-    (gesture) => gesture.id === editingSliderGestureId,
-  )
-
-  async function removeSliderGesture() {
-    if (
-      !pendingGesture ||
-      controlsDisabled ||
-      status?.recording ||
-      pendingGesture.sessionId !== automation.selectedSessionId
-    )
-      return false
-    return automation.updateTrainingExamples(
-      pendingGesture.pointIds.map((id) => ({ id, delete: true })),
-      `Movimiento CC ${pendingGesture.controller} eliminado`,
-    )
-  }
   return (
     <>
-      {showSpectrogram && !automation.selectedSessionId ? (
+      {show && !saved ? (
         <div {...stylex.props(styles.analysisToggle)}>
           <button
             type="button"
@@ -104,10 +73,9 @@ export function SessionReview({
           </button>
         </div>
       ) : null}
-
       <AnimatedCollapse
         id={analysisPanelId}
-        open={Boolean(showSpectrogram && (analysisOpen || automation.selectedSessionId))}
+        open={Boolean(show && (analysisOpen || saved))}
         unmountOnExit
       >
         <div
@@ -117,144 +85,76 @@ export function SessionReview({
         >
           <div {...stylex.props(styles.timelineHeading)}>
             <strong>
-              {automation.selectedSessionId
-                ? `Sesión: ${selectedSession?.name ?? "guardada"}`
+              {saved
+                ? `Revisar entrenamiento · ${session?.name ?? "Sesión guardada"}`
                 : status?.waveformConnected
                   ? "Análisis CDJ por Ethernet"
                   : "Audio en vivo"}
             </strong>
-            {automation.selectedSessionId ? (
+            {saved ? (
               <ActionButton
                 variant="secondary"
                 size="small"
-                aria-label="Cerrar revisión y volver al directo"
                 isDisabled={Boolean(automation.busy)}
-                onPress={() => {
-                  setEditingSliderGestureId(null)
-                  automation.showLiveTimeline()
-                }}
+                onPress={() => automation.showLiveTimeline()}
               >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  aria-hidden="true"
-                  focusable="false"
-                >
-                  <path d="m6 6 12 12M18 6 6 18" />
-                </svg>
+                Volver al directo
               </ActionButton>
             ) : null}
           </div>
-          {automation.selectedSessionId ? (
-            <p {...stylex.props(styles.cardDetail)}>
-              Arrastra los marcadores para ajustar tus acciones en la sesión.
-            </p>
-          ) : null}
-          <SpectrogramTimeline
-            key={automation.selectedSessionId ?? "live"}
-            liveFrames={automation.selectedSessionId ? [] : automation.liveFrames}
-            analysisInput={automation.selectedSessionId ? null : status?.analysisInput}
-            timeline={automation.timeline}
-            editable={Boolean(automation.selectedSessionId)}
-            busy={controlsDisabled}
-            onMoveExample={(id, t) =>
-              automation.updateTrainingExamples(
-                [{ id, t }],
-                `Acción movida a ${formatDuration(t)}`,
-              )
-            }
-          />
+          {saved ? (
+            <>
+              {status?.recording ? (
+                <p {...stylex.props(styles.cardDetail)}>
+                  Finaliza la grabación para editar las acciones de esta sesión.
+                </p>
+              ) : null}
+              <TrainingSequenceEditor
+                key={automation.selectedSessionId}
+                timeline={automation.timeline}
+                duration={session?.durationMs ?? 0}
+                disabled={disabled}
+                error={automation.error}
+                onEditCurve={(item) => setEditingId(item.id)}
+                onUpdate={(edits, message) =>
+                  automation.updateTrainingExamples(edits, message)
+                }
+              />
+              <details
+                open={detailsOpen}
+                onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
+              >
+                <summary {...stylex.props(styles.analysisButton)}>
+                  Análisis de audio de referencia
+                </summary>
+                <p {...stylex.props(styles.cardDetail)}>
+                  Estas bandas describen la música. Las curvas y pulsaciones que enseñaste
+                  están en las pistas de arriba.
+                </p>
+                {detailsOpen ? (
+                  <SpectrogramTimeline
+                    timeline={automation.timeline}
+                    liveFrames={[]}
+                    editable={false}
+                  />
+                ) : null}
+              </details>
+            </>
+          ) : (
+            <SpectrogramTimeline
+              liveFrames={automation.liveFrames}
+              analysisInput={status?.analysisInput}
+              timeline={automation.timeline}
+              editable={false}
+            />
+          )}
         </div>
-
-        {automation.timeline.some((event) => event.kind === "example") ? (
-          <div {...stylex.props(styles.exampleEditor)}>
-            <div {...stylex.props(styles.cardHeading)}>
-              <strong>Ajustar ejemplos de la sesión</strong>
-              <span {...stylex.props(styles.cardDetail)}>
-                Arrastra acciones en la línea de tiempo o edita los sliders como curvas
-              </span>
-            </div>
-            {sliderGestures.length ? (
-              <div {...stylex.props(styles.sliderGestureList)}>
-                {sliderGestures.map((gesture) => (
-                  <div key={gesture.id} {...stylex.props(styles.sliderGestureRow)}>
-                    <div {...stylex.props(styles.sliderGestureCopy)}>
-                      <strong>Slider CC {gesture.controller}</strong>
-                      <span {...stylex.props(styles.cardDetail)}>
-                        {gesture.points.length} mensajes · {formatDuration(gesture.start)}
-                        –{formatDuration(gesture.end)}
-                      </span>
-                    </div>
-                    <div {...stylex.props(styles.sliderGestureActions)}>
-                      <ActionButton
-                        variant="secondary"
-                        size="small"
-                        {...stylex.props(styles.curveButton)}
-                        isDisabled={controlsDisabled || Boolean(status?.recording)}
-                        onPress={() => setEditingSliderGestureId(gesture.id)}
-                      >
-                        Editar curva
-                      </ActionButton>
-                      <ActionButton
-                        variant="danger"
-                        size="small"
-                        {...stylex.props(styles.curveButton)}
-                        isDisabled={controlsDisabled}
-                        onPress={() =>
-                          setPendingGesture({
-                            controller: gesture.controller,
-                            pointIds: gesture.points.map((point) => point.id),
-                            sessionId: automation.selectedSessionId,
-                          })
-                        }
-                      >
-                        Eliminar
-                      </ActionButton>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            <div {...stylex.props(styles.exampleList)}>
-              {standaloneExamples
-                .slice(-12)
-                .reverse()
-                .map((event) => (
-                  <div key={event.example?.id} {...stylex.props(styles.exampleRow)}>
-                    <span>{formatDuration(event.t)}</span>
-                    <strong>{formatCommand(event.command)}</strong>
-                    <small>
-                      beat {event.beatWithinBar || "—"} · {event.bpm?.toFixed(1) || "—"}{" "}
-                      BPM
-                    </small>
-                    <ActionButton
-                      variant="danger"
-                      size="small"
-                      {...stylex.props(styles.excludeButton)}
-                      isDisabled={controlsDisabled}
-                      onPress={() =>
-                        event.example && void automation.excludeExample(event.example.id)
-                      }
-                    >
-                      Excluir
-                    </ActionButton>
-                  </div>
-                ))}
-            </div>
-          </div>
-        ) : null}
       </AnimatedCollapse>
-
-      {editingSliderGesture ? (
+      {gesture && saved ? (
         <SliderCurveEditor
-          gesture={editingSliderGesture}
-          busy={controlsDisabled}
-          onClose={() => setEditingSliderGestureId(null)}
+          gesture={gesture}
+          busy={disabled}
+          onClose={() => setEditingId(null)}
           onSave={({ points, deletedIds }) =>
             automation.updateTrainingExamples(
               [
@@ -263,29 +163,14 @@ export function SessionReview({
                   t: point.t,
                   value: point.value,
                   create: Boolean(point.isNew),
-                  controller: point.isNew ? editingSliderGesture.controller : undefined,
+                  controller: point.isNew ? gesture.controller : undefined,
                 })),
                 ...deletedIds.map((id) => ({ id, delete: true })),
               ],
-              `Curva CC ${editingSliderGesture.controller} actualizada`,
+              `Curva CC ${gesture.controller} actualizada`,
             )
           }
         />
-      ) : null}
-      {pendingGesture ? (
-        <ConfirmationDialog
-          title="Eliminar movimiento del slider"
-          confirmLabel="Eliminar movimiento"
-          isConfirmDisabled={controlsDisabled || Boolean(status?.recording)}
-          error={automation.error}
-          onConfirm={removeSliderGesture}
-          onClose={() => setPendingGesture(null)}
-        >
-          Se eliminará el movimiento completo del slider{" "}
-          <strong>CC {pendingGesture.controller}</strong> y sus{" "}
-          {pendingGesture.pointIds.length} puntos del modelo. Esta acción no se puede
-          deshacer.
-        </ConfirmationDialog>
       ) : null}
     </>
   )

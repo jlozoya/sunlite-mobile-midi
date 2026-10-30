@@ -35,6 +35,11 @@ export function ModelTrainingSummary({ status }: { status: AutomationStatus | nu
         />
       </div>
       <span {...stylex.props(styles.cardDetail)}>
+        {info.supportedSequenceCount
+          ? `${info.supportedSequenceCount} demostraciones de secuencias con apoyo repetido. Se conserva el orden y la simultaneidad; las cifras de validación siguientes evalúan acciones individuales, no secuencias completas.`
+          : "Sin secuencias repetidas reconocidas. Demuestra combinaciones cortas varias veces con música parecida para aprender su orden y simultaneidad."}
+      </span>
+      <span {...stylex.props(styles.cardDetail)}>
         {info.temporalExampleCount < MIN_TRAINING_EXAMPLES
           ? "Graba nuevas acciones con la música sonando para aprender contexto temporal. Las sesiones anteriores se conservan."
           : validation

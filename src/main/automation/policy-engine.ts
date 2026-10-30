@@ -13,6 +13,7 @@ import { MIN_TRAINING_EXAMPLES } from "../../shared/automation-learning.js"
 import { isMusicalContext } from "../../shared/musical-context.js"
 import { predictTemporal, validateTemporalModel } from "./temporal-policy.js"
 import { selectTrainingExamples } from "./training-selection.js"
+import { learnActionSequences, supportedActionSequences } from "./action-sequences.js"
 import {
   learnSliderGestures,
   selectSupportedSliderGestures,
@@ -158,6 +159,7 @@ export class ExamplePolicyEngine {
   private readonly modelPath: string
   private examples: AutomationTrainingExample[] = []
   private sliderGestures = learnSliderGestures([])
+  private actionSequences = supportedActionSequences(learnActionSequences([]))
   private noteGroups: AutomationNoteGroup[]
   private confidenceThreshold: number
   private controllerIntervalMs: number
@@ -211,7 +213,7 @@ export class ExamplePolicyEngine {
   }
 
   get modelInfo() {
-    return this.info
+    return { ...this.info, supportedSequenceCount: this.actionSequences.length }
   }
   get temporalReady() {
     return this.info.temporalExampleCount >= MIN_TRAINING_EXAMPLES
@@ -415,6 +417,11 @@ export class ExamplePolicyEngine {
 
   private cacheGestures(): void {
     this.sliderGestures = learnSliderGestures(this.examples)
+    this.actionSequences = supportedActionSequences(learnActionSequences(this.examples))
+  }
+
+  get sequences() {
+    return this.actionSequences
   }
 
   private waitingControllers(

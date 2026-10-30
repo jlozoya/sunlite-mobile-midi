@@ -60,6 +60,7 @@ export function buildTrainingDataset(
           : null
       examples.push({
         ...event.example,
+        inputSource: source,
         sessionId: session.id,
         context: context ?? undefined,
       })

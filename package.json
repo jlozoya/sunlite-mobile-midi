@@ -1,6 +1,6 @@
 {
   "name": "sunlite-mobile-midi",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "private": true,
   "description": "Installable and update-ready mobile MIDI controller for Sunlite Suite 2.",
   "author": "jlozoya",
@@ -12,8 +12,8 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
     "check": "bun run format:check && bun run typecheck && bun run check:architecture",
-    "test": "bun run build:main && bun test tests/controller-input.test.ts tests/socket-connection.test.ts tests/rekordbox-capture.test.ts tests/rekordbox-region-geometry.test.ts tests/automation-readiness.test.ts && node --test tests/updates.test.mjs tests/release-plan.test.mjs tests/midi-router.test.mjs tests/websocket-url.test.mjs tests/controller-services.test.mjs tests/router-draft.test.mjs tests/temporal-automation.test.mjs tests/automation-note-groups.test.mjs tests/note-validation.test.mjs tests/training-router.test.mjs tests/slider-gesture-learning.test.mjs tests/slider-support.test.mjs tests/slider-fallback.test.mjs tests/slider-playback-rearm.test.mjs tests/slider-validation.test.mjs && node tests/automation-smoke.mjs && node tests/lighting-automation-regression.mjs",
-    "test:automation": "bun run build:main && node --test tests/temporal-automation.test.mjs tests/controller-services.test.mjs tests/automation-note-groups.test.mjs tests/note-validation.test.mjs tests/training-router.test.mjs tests/slider-gesture-learning.test.mjs tests/slider-support.test.mjs tests/slider-fallback.test.mjs tests/slider-playback-rearm.test.mjs tests/slider-validation.test.mjs && node tests/automation-smoke.mjs && node tests/lighting-automation-regression.mjs",
+    "test": "bun run build:main && bun test tests/controller-input.test.ts tests/training-review.test.ts tests/socket-connection.test.ts tests/rekordbox-capture.test.ts tests/rekordbox-region-geometry.test.ts tests/automation-readiness.test.ts && node --test tests/updates.test.mjs tests/release-plan.test.mjs tests/midi-router.test.mjs tests/websocket-url.test.mjs tests/controller-services.test.mjs tests/router-draft.test.mjs tests/action-sequences.test.mjs tests/temporal-automation.test.mjs tests/automation-note-groups.test.mjs tests/note-validation.test.mjs tests/training-router.test.mjs tests/slider-gesture-learning.test.mjs tests/slider-support.test.mjs tests/slider-fallback.test.mjs tests/slider-playback-rearm.test.mjs tests/slider-validation.test.mjs && node tests/automation-smoke.mjs && node tests/lighting-automation-regression.mjs",
+    "test:automation": "bun run build:main && node --test tests/temporal-automation.test.mjs tests/action-sequences.test.mjs tests/controller-services.test.mjs tests/automation-note-groups.test.mjs tests/note-validation.test.mjs tests/training-router.test.mjs tests/slider-gesture-learning.test.mjs tests/slider-support.test.mjs tests/slider-fallback.test.mjs tests/slider-playback-rearm.test.mjs tests/slider-validation.test.mjs && node tests/automation-smoke.mjs && node tests/lighting-automation-regression.mjs",
     "test:controller": "bun test tests/controller-input.test.ts",
     "test:router": "bun run build:main && node --test tests/midi-router.test.mjs tests/router-draft.test.mjs",
     "test:updates": "bun run build:main && node --test tests/updates.test.mjs tests/release-plan.test.mjs",
