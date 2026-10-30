@@ -3,34 +3,19 @@ import type {
   AutomationTrainingExample,
   MusicalContext,
   ModelValidation,
+  AutomationNoteGroup,
 } from "../../shared/automation-types.js"
 import { isMusicalContext } from "../../shared/musical-context.js"
 import type { PolicyPrediction } from "./policy-engine.js"
+import {
+  groupNoteExamples,
+  actionGroupKey,
+} from "../../shared/automation-action-groups.js"
+import { validateSliderGestures } from "./slider-validation.js"
+import { MIN_TRAINING_EXAMPLES } from "../../shared/automation-learning.js"
 
-const contextFields: Array<[keyof MusicalContext, number]> = [
-  ["energy", 2],
-  ["bassRatio", 1],
-  ["midRatio", 0.5],
-  ["highRatio", 1],
-  ["flux", 0.5],
-  ["energyTrend", 3],
-  ["brightnessTrend", 1.5],
-  ["bassChange", 2],
-  ["pulseDensity", 1],
-  ["buildStrength", 2],
-  ["dropStrength", 2],
-  ["phaseProgress", 2],
-]
-
-export function temporalDistance(a: MusicalContext, b: MusicalContext): number {
-  let sum = 0,
-    weights = 0
-  for (const [field, weight] of contextFields) {
-    sum += Math.pow(Number(a[field]) - Number(b[field]), 2) * weight
-    weights += weight
-  }
-  return Math.sqrt(sum / weights) + (a.phase === b.phase ? 0 : 0.35)
-}
+import { temporalDistance } from "./musical-distance.js"
+export { temporalDistance } from "./musical-distance.js"
 
 function key(example: AutomationTrainingExample) {
   const command = example.command
@@ -145,10 +130,27 @@ export function predictTemporal(
   }
 }
 
+export function predictTemporalActions(
+  examples: AutomationTrainingExample[],
+  context: MusicalContext,
+  beat: number,
+  bpm: number,
+  idle: AutomationIdleContext[] = [],
+  noteGroups?: AutomationNoteGroup[],
+): PolicyPrediction[] {
+  return [...groupNoteExamples(examples, noteGroups).values()].flatMap((group) => {
+    const prediction = predictTemporal(group, context, beat, bpm, idle)
+    return prediction ? [prediction] : []
+  })
+}
+
 /** Leave entire recording sessions out: adjacent frames from one song cannot leak into its test fold. */
 export function validateTemporalModel(
   examples: AutomationTrainingExample[],
   idle: AutomationIdleContext[],
+  noteGroups?: AutomationNoteGroup[],
+  confidenceThreshold = 0.62,
+  controllerIntervalMs = 100,
 ): ModelValidation | null {
   const temporal = examples.filter(
     (example) => isMusicalContext(example.context) && example.sessionId,
@@ -159,56 +161,71 @@ export function validateTemporalModel(
     predicted = 0,
     notes = 0,
     correct = 0,
-    controllers = 0,
-    controllerError = 0,
     idleTested = 0,
     idleFired = 0
   const heldOut = sessions.slice(-5)
   for (const sessionId of heldOut) {
     const training = temporal.filter((example) => example.sessionId !== sessionId)
+    const foldReady = training.length >= MIN_TRAINING_EXAMPLES
     const held = temporal.filter((example) => example.sessionId === sessionId)
-    const stride = Math.max(1, Math.ceil(held.length / 30))
-    for (const example of held.filter((_, index) => index % stride === 0)) {
+    const sampledNotes = [...groupNoteExamples(held, noteGroups).values()].flatMap(
+      (group) => {
+        const stride = Math.max(1, Math.ceil(group.length / 30))
+        return group.filter((_, index) => index % stride === 0)
+      },
+    )
+    for (const example of sampledNotes) {
       tested++
-      const controller = example.command.type === "cc" ? example.command.controller : null
-      const prediction = predictTemporal(
-        training,
-        example.context!,
-        example.beatWithinBar,
-        example.bpm,
-        idle.filter((item) => item.sessionId !== sessionId),
-        controller,
+      const predictions = foldReady
+        ? predictTemporalActions(
+            training,
+            example.context!,
+            example.beatWithinBar,
+            example.bpm,
+            idle.filter((item) => item.sessionId !== sessionId),
+            noteGroups,
+          )
+        : []
+      const prediction = predictions.find(
+        (prediction) =>
+          actionGroupKey(prediction.command, noteGroups) ===
+          actionGroupKey(example.command, noteGroups),
       )
-      if (example.command.type !== "cc") notes++
-      if (!prediction || prediction.confidence < 0.62) continue
+      notes++
+      if (!prediction || prediction.confidence < confidenceThreshold) continue
       predicted++
-      if (example.command.type === "cc" && prediction.command.type === "cc") {
-        controllers++
-        controllerError += Math.abs(example.command.value - prediction.command.value)
-      } else if (key(example) === key({ ...example, command: prediction.command }))
-        correct++
+      if (key(example) === key({ ...example, command: prediction.command })) correct++
     }
     const heldIdle = idle.filter((item) => item.sessionId === sessionId)
     const idleStride = Math.max(1, Math.ceil(heldIdle.length / 20))
     for (const item of heldIdle.filter((_, index) => index % idleStride === 0)) {
       idleTested++
-      const prediction = predictTemporal(
-        training,
-        item.context,
-        0,
-        0,
-        idle.filter((entry) => entry.sessionId !== sessionId),
-      )
-      if (prediction && prediction.confidence >= 0.62) idleFired++
+      const predictions = foldReady
+        ? predictTemporalActions(
+            training,
+            item.context,
+            0,
+            0,
+            idle.filter((entry) => entry.sessionId !== sessionId),
+            noteGroups,
+          )
+        : []
+      if (predictions.some((prediction) => prediction.confidence >= confidenceThreshold))
+        idleFired++
     }
   }
+  const curves = validateSliderGestures(examples, {
+    confidenceThreshold,
+    controllerIntervalMs,
+  })
   return {
     heldOutSessions: heldOut.length,
     testedExamples: tested,
     coverage: tested ? predicted / tested : 0,
     noteAccuracy: notes ? correct / notes : null,
-    controllerMeanError: controllers ? controllerError / controllers : null,
+    controllerMeanError: curves?.meanValueError ?? null,
     idleTested,
     idleFalsePositiveRate: idleTested ? idleFired / idleTested : null,
+    sliderGestures: curves,
   }
 }

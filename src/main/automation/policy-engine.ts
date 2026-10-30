@@ -6,12 +6,23 @@ import type {
   AutomationIdleContext,
   AutomationModelInfo,
   MusicalContext,
+  AutomationNoteGroup,
+  AutomationSettings,
 } from "../../shared/automation-types.js"
 import { MIN_TRAINING_EXAMPLES } from "../../shared/automation-learning.js"
 import { isMusicalContext } from "../../shared/musical-context.js"
 import { predictTemporal, validateTemporalModel } from "./temporal-policy.js"
 import { selectTrainingExamples } from "./training-selection.js"
-import { learnSliderGestures, selectSliderGestures } from "./slider-gestures.js"
+import {
+  learnSliderGestures,
+  selectSupportedSliderGestures,
+  getUnsupportedSliderControllers,
+  analyzeSliderGestures,
+} from "./slider-gestures.js"
+import {
+  groupNoteExamples,
+  normalizeNoteGroups,
+} from "../../shared/automation-action-groups.js"
 
 type StoredModel = {
   version: 1 | 2
@@ -147,7 +158,9 @@ export class ExamplePolicyEngine {
   private readonly modelPath: string
   private examples: AutomationTrainingExample[] = []
   private sliderGestures = learnSliderGestures([])
-  private vectors: number[][] = []
+  private noteGroups: AutomationNoteGroup[]
+  private confidenceThreshold: number
+  private controllerIntervalMs: number
   private idle: AutomationIdleContext[] = []
   private info: AutomationModelInfo = {
     temporalExampleCount: 0,
@@ -155,9 +168,42 @@ export class ExamplePolicyEngine {
     validation: null,
   }
 
-  constructor(modelPath: string) {
+  constructor(
+    modelPath: string,
+    settings?: Pick<
+      AutomationSettings,
+      "noteGroups" | "confidenceThreshold" | "minControllerIntervalMs"
+    >,
+  ) {
     this.modelPath = modelPath
+    this.noteGroups = normalizeNoteGroups(settings?.noteGroups)
+    this.confidenceThreshold = settings?.confidenceThreshold ?? 0.62
+    this.controllerIntervalMs = settings?.minControllerIntervalMs ?? 100
     this.load()
+  }
+
+  setDecisionSettings(settings: AutomationSettings) {
+    const groups = normalizeNoteGroups(settings.noteGroups)
+    if (
+      JSON.stringify(groups) === JSON.stringify(this.noteGroups) &&
+      settings.confidenceThreshold === this.confidenceThreshold &&
+      (settings.minControllerIntervalMs ?? 100) === this.controllerIntervalMs
+    )
+      return
+    this.noteGroups = groups
+    this.confidenceThreshold = settings.confidenceThreshold
+    this.controllerIntervalMs = settings.minControllerIntervalMs ?? 100
+    this.info.validation = this.validate(this.examples, this.idle)
+  }
+
+  private validate(examples: AutomationTrainingExample[], idle: AutomationIdleContext[]) {
+    return validateTemporalModel(
+      examples,
+      idle,
+      this.noteGroups,
+      this.confidenceThreshold,
+      this.controllerIntervalMs,
+    )
   }
 
   get exampleCount(): number {
@@ -181,6 +227,7 @@ export class ExamplePolicyEngine {
         (item) => isMusicalContext(item.context) && typeof item.sessionId === "string",
       )
       .slice(-2000)
+    const learned = analyzeSliderGestures(validExamples)
     const info: AutomationModelInfo = {
       temporalExampleCount: validExamples.filter((example) =>
         isMusicalContext(example.context),
@@ -190,7 +237,13 @@ export class ExamplePolicyEngine {
           .filter((example) => example.sessionId)
           .map((example) => example.sessionId),
       ).size,
-      validation: validateTemporalModel(validExamples, validIdle),
+      validation: this.validate(validExamples, validIdle),
+      sliderGestureCount: learned.gestures.length,
+      rejectedSliderGestureCount: learned.rejectedNoMusicalContext,
+      controllersAwaitingSupport: this.waitingControllers(
+        validExamples,
+        learned.gestures,
+      ),
     }
 
     const model: StoredModel = {
@@ -206,7 +259,7 @@ export class ExamplePolicyEngine {
     this.examples = validExamples
     this.idle = validIdle
     this.info = info
-    this.cacheVectors()
+    this.cacheGestures()
     return this.examples.length
   }
 
@@ -216,20 +269,58 @@ export class ExamplePolicyEngine {
     bpm: number,
     context?: MusicalContext | null,
   ): PolicyPrediction | null {
+    return this.predictExamples(this.examples, features, beatWithinBar, bpm, context)
+  }
+
+  predictActions(
+    features: AudioFeatures,
+    beat: number,
+    bpm: number,
+    context?: MusicalContext | null,
+  ) {
+    if (this.examples.length < MIN_TRAINING_EXAMPLES) return []
+    const groups = groupNoteExamples(this.examples, this.noteGroups)
+    // Keep scalar CC playback for older feature-only recordings, which have no
+    // temporal context from which a complete curve could be selected.
+    if (!this.temporalReady) {
+      for (const example of this.examples) {
+        if (example.command.type !== "cc") continue
+        const key = `cc:${example.command.controller}`
+        const group = groups.get(key) ?? []
+        group.push(example)
+        groups.set(key, group)
+      }
+    }
+    return [...groups.values()].flatMap((examples) => {
+      const prediction = this.predictExamples(examples, features, beat, bpm, context)
+      return prediction ? [prediction] : []
+    })
+  }
+
+  private predictExamples(
+    examples: AutomationTrainingExample[],
+    features: AudioFeatures,
+    beatWithinBar: number,
+    bpm: number,
+    context?: MusicalContext | null,
+  ): PolicyPrediction | null {
     if (this.examples.length < MIN_TRAINING_EXAMPLES) return null
     if (this.temporalReady)
       return context
-        ? predictTemporal(this.examples, context, beatWithinBar, bpm, this.idle)
+        ? predictTemporal(examples, context, beatWithinBar, bpm, this.idle)
         : null
 
     const target = featureVector(features, beatWithinBar, bpm)
-    const neighbors = this.examples
-      .map((example, index) => ({
+    const neighbors = examples
+      .map((example) => ({
         example,
-        distance: distance(target, this.vectors[index]),
+        distance: distance(
+          target,
+          featureVector(example.features, example.beatWithinBar, example.bpm),
+        ),
       }))
       .sort((a, b) => a.distance - b.distance)
-      .slice(0, Math.min(9, this.examples.length))
+      .slice(0, Math.min(9, examples.length))
 
     const votes = new Map<
       string,
@@ -283,22 +374,38 @@ export class ExamplePolicyEngine {
 
   predictControllers(context: MusicalContext | null, bpm: number): PolicyPrediction[] {
     if (!this.temporalReady || !context) return []
+    // A rejected all-silence gesture must not reappear through the scalar fallback.
+    const candidates = this.examples.filter(
+      (example) =>
+        isMusicalContext(example.context) && example.context.phase !== "silence",
+    )
     const controllers = new Set(
-      this.examples
+      candidates
         .filter((example) => example.command.type === "cc")
         .map((example) =>
           example.command.type === "cc" ? example.command.controller : -1,
         ),
     )
     return [...controllers].flatMap((controller) => {
-      const prediction = predictTemporal(this.examples, context, 0, bpm, [], controller)
+      const sessions = new Set(
+        candidates
+          .filter(
+            (example) =>
+              example.command.type === "cc" &&
+              example.command.controller === controller &&
+              example.sessionId,
+          )
+          .map((example) => example.sessionId),
+      )
+      if (sessions.size < 2) return []
+      const prediction = predictTemporal(candidates, context, 0, bpm, [], controller)
       return prediction ? [prediction] : []
     })
   }
 
   predictSliderGestures(context: MusicalContext | null) {
     return this.temporalReady && context
-      ? selectSliderGestures(this.sliderGestures, context)
+      ? selectSupportedSliderGestures(this.sliderGestures, context)
       : []
   }
 
@@ -306,11 +413,26 @@ export class ExamplePolicyEngine {
     return this.sliderGestures.some((gesture) => gesture.controller === controller)
   }
 
-  private cacheVectors(): void {
+  private cacheGestures(): void {
     this.sliderGestures = learnSliderGestures(this.examples)
-    this.vectors = this.examples.map((example) =>
-      featureVector(example.features, example.beatWithinBar, example.bpm),
+  }
+
+  private waitingControllers(
+    examples: AutomationTrainingExample[],
+    gestures = learnSliderGestures(examples),
+  ) {
+    const unsupported = new Set(getUnsupportedSliderControllers(gestures))
+    const supported = new Set(
+      gestures
+        .map((gesture) => gesture.controller)
+        .filter((controller) => !unsupported.has(controller)),
     )
+    const controllers = new Set(
+      examples.flatMap((example) =>
+        example.command.type === "cc" ? [example.command.controller] : [],
+      ),
+    )
+    return [...controllers].filter((controller) => !supported.has(controller))
   }
 
   private load(): void {
@@ -321,7 +443,7 @@ export class ExamplePolicyEngine {
         Array.isArray(stored.examples)
       ) {
         this.examples = stored.examples.filter(isValidExample).slice(-8000)
-        this.cacheVectors()
+        this.cacheGestures()
         this.idle = (stored.idle ?? []).filter((item) => isMusicalContext(item.context))
         this.info = {
           temporalExampleCount: this.examples.filter((example) =>
@@ -332,7 +454,14 @@ export class ExamplePolicyEngine {
               .filter((example) => example.sessionId)
               .map((example) => example.sessionId),
           ).size,
-          validation: stored.info?.validation ?? null,
+          validation: this.validate(this.examples, this.idle),
+          sliderGestureCount: this.sliderGestures.length,
+          rejectedSliderGestureCount: analyzeSliderGestures(this.examples)
+            .rejectedNoMusicalContext,
+          controllersAwaitingSupport: this.waitingControllers(
+            this.examples,
+            this.sliderGestures,
+          ),
         }
       }
     } catch {

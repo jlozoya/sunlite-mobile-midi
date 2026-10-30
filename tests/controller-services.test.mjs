@@ -32,7 +32,8 @@ test("training waits for an available saved hardware router, skips unavailable s
   const state = {
     running: false,
     errors: [],
-    devices: { inputs: ["APC mini"], outputs: [] },
+    devices: { inputs: ["APC mini"], outputs: ["Router Salida 1"] },
+    ports: [],
     config: {
       ports: [
         {
@@ -42,8 +43,15 @@ test("training waits for an available saved hardware router, skips unavailable s
           deviceName: "APC",
           match: "contains",
         },
+        {
+          id: "lights",
+          role: "output",
+          kind: "virtual",
+          deviceName: "Router Salida 1",
+          match: "exact",
+        },
       ],
-      routes: [{ enabled: true, source: "physical" }],
+      routes: [{ enabled: true, source: "physical", destination: "lights" }],
     },
   }
   let starts = 0,
@@ -68,6 +76,11 @@ test("training waits for an available saved hardware router, skips unavailable s
           async () => {
             starts++
             await startup
+            state.running = true
+            state.ports = [
+              { id: "physical", connected: true, error: null },
+              { id: "lights", connected: true, error: null },
+            ]
           },
         ),
     }),
@@ -80,9 +93,9 @@ test("training waits for an available saved hardware router, skips unavailable s
   assert.equal((await pending).body.recording, true)
   for (const variant of [
     { ...state, running: true },
-    { ...state, errors: ["Invalid route"] },
-    { ...state, devices: { inputs: [], outputs: [] } },
-    { ...state, config: { ports: [], routes: [] } },
+    { ...state, running: false, errors: ["Invalid route"] },
+    { ...state, running: false, devices: { inputs: [], outputs: [] } },
+    { ...state, running: false, config: { ports: [], routes: [] } },
   ])
     await prepareTrainingRouter(
       () => variant,
@@ -90,6 +103,8 @@ test("training waits for an available saved hardware router, skips unavailable s
         throw Error("must not start")
       },
     )
+  state.running = false
+  state.ports = []
   const failedRequest = await serve(t, (app) =>
     registerAutomationRoutes(app, {
       getEngine: () => ({

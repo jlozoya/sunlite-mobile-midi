@@ -6,6 +6,7 @@ import { ActionButton, InfoTooltip, Surface } from "../ui-kit"
 import { styles } from "./AutomationStudio.styles"
 import { SettingsGroup, NumberField, MidiListField } from "./AutomationSettingsFields"
 import type { AutomationStudioState } from "./types"
+import { normalizeNoteGroups } from "../../../shared/automation-action-groups"
 
 export function AutomationSettingsPanel({
   automation,
@@ -96,7 +97,7 @@ export function AutomationSettingsPanel({
                   max={30000}
                   value={settings.minActionIntervalMs}
                   isDuration
-                  help="Tiempo que debe pasar entre dos acciones automáticas cualesquiera."
+                  help="Tiempo entre acciones del mismo grupo. Una escena y los colores de láseres y LED pueden actuar juntos."
                   onChange={(value) => setSetting("minActionIntervalMs", value)}
                 />
                 <NumberField
@@ -106,9 +107,39 @@ export function AutomationSettingsPanel({
                   max={120000}
                   value={settings.repeatActionCooldownMs}
                   isDuration
-                  help="Igual que el anterior, pero solo para repetir la misma nota o CC."
+                  help="Espera antes de repetir la misma nota o una curva completa de fader."
                   onChange={(value) => setSetting("repeatActionCooldownMs", value)}
                 />
+              </SettingsGroup>
+
+              <SettingsGroup
+                title="Grupos de notas independientes"
+                description="Dentro de cada grupo se elige una nota. Los grupos pueden actuar juntos; las notas sin asignar comparten el grupo Otros. Estos valores iniciales corresponden al mapeo de escenas y colores de este setup."
+              >
+                {normalizeNoteGroups(settings.noteGroups).map((group) => (
+                  <MidiListField
+                    key={group.id}
+                    label={group.name}
+                    kind="notas"
+                    values={group.notes}
+                    help="Notas que compiten dentro de este grupo. Al asignar una nota aquí, se quita de otro grupo si ya estaba asignada."
+                    onChange={(notes) =>
+                      setSetting(
+                        "noteGroups",
+                        normalizeNoteGroups(settings.noteGroups).map((other) =>
+                          other.id === group.id
+                            ? { ...other, notes }
+                            : {
+                                ...other,
+                                notes: other.notes.filter(
+                                  (note) => !notes.includes(note),
+                                ),
+                              },
+                        ),
+                      )
+                    }
+                  />
+                ))}
               </SettingsGroup>
 
               <SettingsGroup
@@ -217,7 +248,7 @@ export function AutomationSettingsPanel({
                   max={1000}
                   value={settings.minControllerIntervalMs ?? 100}
                   isDuration
-                  help="Separación mínima entre actualizaciones del mismo fader. El modelo interpola valores aprendidos y suaviza los cambios."
+                  help="Separación mínima entre actualizaciones del mismo fader. Las curvas conservan su recorrido y duración; movimientos muy rápidos pueden perder detalles entre actualizaciones."
                   onChange={(value) => setSetting("minControllerIntervalMs", value)}
                 />
               </SettingsGroup>

@@ -27,6 +27,7 @@ import { AutomationSafety } from "./automation-safety.js"
 import { activeDeck, contextBeat } from "./deck-context.js"
 import { SliderPlayback } from "./slider-playback.js"
 import { EMPTY_BRIDGE_STATUS, commandLabel } from "./values.js"
+import { predictTriggeredActions } from "./automation-predictions.js"
 
 type Broadcast = (payload: unknown) => void
 type MidiExecutor = (command: AutomationMidiCommand) => unknown
@@ -79,7 +80,7 @@ export class AutomationEngine {
     this.settingsPath = path.join(root, "settings.json")
     this.settings = loadSettings(this.settingsPath)
     this.store = new AutomationSessionStore(path.join(root, "sessions"))
-    this.policy = new ExamplePolicyEngine(path.join(root, "model.json"))
+    this.policy = new ExamplePolicyEngine(path.join(root, "model.json"), this.settings)
     this.broadcast = broadcast
     this.executeMidi = executeMidi
   }
@@ -152,6 +153,7 @@ export class AutomationEngine {
       ...this.settings,
       ...(value && typeof value === "object" ? value : {}),
     })
+    this.policy.setDecisionSettings(this.settings)
     fs.writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2), "utf8")
     this.queueStatusBroadcast()
     return this.getStatus()
@@ -237,8 +239,7 @@ export class AutomationEngine {
     }
 
     const hasRecentDeckBeat = Boolean(contextBeat && now - contextBeat.receivedAt < 2200)
-    if (this.policy.temporalReady && !this.getActiveDeck())
-      this.predictControllers(contextBeat?.bpm || this.inputContext.audioBpm)
+    if (this.policy.temporalReady && !this.getActiveDeck()) this.predictControllers()
     if (
       this.getActiveDeck() === undefined &&
       !hasRecentDeckBeat &&
@@ -344,7 +345,7 @@ export class AutomationEngine {
             inputSource: `deck:${device}`,
           })
         }
-        this.predictControllers(bpm)
+        this.predictControllers()
       }
       const waveform = this.waveforms.get(event.position.deviceNumber)
       if (waveform) {
@@ -470,21 +471,16 @@ export class AutomationEngine {
         : this.getAudioFeatures()
     if (!features) return
 
-    const prediction = this.policy.predict(
+    for (const prediction of predictTriggeredActions(
+      this.policy,
       features,
       beatWithinBar,
       bpm,
       this.inputContext.get(this.inputSource(), Date.now()),
-    )
-    if (!prediction) return
-    if (
-      prediction.temporal &&
-      trigger === "pro-dj-link" &&
-      prediction.beatWithinBar &&
-      beatWithinBar !== prediction.beatWithinBar
-    )
-      return
-    this.applyPrediction(prediction, trigger)
+      trigger,
+    )) {
+      this.applyPrediction(prediction, trigger)
+    }
   }
 
   private inputSource() {
@@ -492,7 +488,7 @@ export class AutomationEngine {
     return deck === undefined ? "audio" : `deck:${deck}`
   }
 
-  private predictControllers(bpm: number) {
+  private predictControllers() {
     const now = Date.now()
     if (now - this.lastControllerPredictionAt > 2500) this.sliderPlayback.clear()
     if (this.mode !== "auto" || now < this.manualOverrideUntil)
@@ -506,20 +502,10 @@ export class AutomationEngine {
     this.lastControllerPredictionAt = now
     const source = this.inputSource()
     const context = this.inputContext.get(source, now)
+    this.sliderPlayback.observeContext(source, context, this.settings.confidenceThreshold)
     if (!context || context.phase === "silence") {
       this.sliderPlayback.clear()
       return
-    }
-    // Older recordings with isolated CC values have no continuous curve to replay.
-    for (const prediction of this.policy.predictControllers(context, bpm)) {
-      if (
-        prediction.command.type === "cc" &&
-        !this.policy.hasSliderGesture(prediction.command.controller)
-      )
-        this.applyPrediction(
-          { ...prediction, command: this.safety.smooth(prediction.command, now) },
-          "fader",
-        )
     }
     this.sliderPlayback.tick(
       now,
@@ -535,6 +521,7 @@ export class AutomationEngine {
 
   private applyPrediction(prediction: PolicyPrediction, trigger: string) {
     const now = Date.now()
+    let transportOk = true
     let blockedReason = this.safety.block(prediction.command, now, this.settings)
     if (prediction.confidence < this.settings.confidenceThreshold) {
       blockedReason = `confianza ${Math.round(prediction.confidence * 100)}% menor al umbral`
@@ -557,6 +544,7 @@ export class AutomationEngine {
           })
         }
       } catch (error) {
+        transportOk = false
         blockedReason = error instanceof Error ? error.message : "no se pudo enviar MIDI"
       }
     }
@@ -572,6 +560,7 @@ export class AutomationEngine {
     this.lastSuggestion = suggestion
     this.broadcast({ event: "automation-suggestion", suggestion })
     this.queueStatusBroadcast()
+    return transportOk
   }
 
   private getDeckFeatures(deviceNumber?: number): AudioFeatures | null {

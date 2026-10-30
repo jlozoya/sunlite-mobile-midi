@@ -2,6 +2,7 @@ import type {
   AutomationMidiCommand,
   AutomationSettings,
 } from "../../shared/automation-types.js"
+import { actionGroupKey } from "../../shared/automation-action-groups.js"
 
 function key(command: AutomationMidiCommand) {
   return command.type === "cc"
@@ -12,7 +13,7 @@ function key(command: AutomationMidiCommand) {
 }
 
 export class AutomationSafety {
-  private lastActionAt = 0
+  private lastGroupActions = new Map<string, number>()
   private lastActionTimes = new Map<string, number>()
   private lastStrobeAt = 0
   private controllers = new Map<number, { at: number; value: number }>()
@@ -29,7 +30,12 @@ export class AutomationSafety {
       if (last && last.value === command.value) return "fader sin cambios"
       if (last && now - last.at < (settings.minControllerIntervalMs ?? 100))
         return "intervalo mínimo del fader"
-    } else if (now - this.lastActionAt < settings.minActionIntervalMs)
+    } else if (
+      now -
+        (this.lastGroupActions.get(actionGroupKey(command, settings.noteGroups)) ??
+          -Infinity) <
+      settings.minActionIntervalMs
+    )
       return "intervalo mínimo entre acciones"
     const at = this.lastActionTimes.get(key(command))
     if (
@@ -52,7 +58,7 @@ export class AutomationSafety {
   executed(command: AutomationMidiCommand, now: number, settings: AutomationSettings) {
     if (command.type === "cc")
       this.controllers.set(command.controller, { at: now, value: command.value })
-    else this.lastActionAt = now
+    else this.lastGroupActions.set(actionGroupKey(command, settings.noteGroups), now)
     this.lastActionTimes.set(key(command), now)
     for (const [action, at] of this.lastActionTimes)
       if (now - at >= settings.repeatActionCooldownMs) this.lastActionTimes.delete(action)

@@ -76,7 +76,9 @@ then test the app and the APC without relearning between them. Keep the router
 running: its configuration is saved. **Empezar entrenamiento** starts the router
 automatically when its saved configuration is valid and the routed hardware inputs
 are available. Recording waits for startup to finish; a startup failure is shown
-before recording begins. You can also use **Arrancar router** manually.
+before recording begins. The app checks the routed hardware inputs and their destinations,
+including an already running router, and waits for its port reconnection attempt before
+reporting a busy or disconnected route. You can also use **Arrancar router** manually.
 Use Page independent mappings so a page change
 cannot silently change the learned command's meaning. Feedback requires explicit
 configuration in FreeStyler; opening the return port alone does not confirm feedback.
@@ -86,6 +88,36 @@ Reference: [FreeStyler MIDI interface documentation](https://www.freestylersuppo
 ### MIDI driver distribution
 
 Private development builds currently use loopMIDI as the Windows MIDI 1.0 bridge. The loopMIDI author's published terms prohibit redistribution without prior written consent. A public or commercial installer must therefore use the licensed virtualMIDI redistributable MSI, supplied under a license from its author, or a separately developed and Microsoft-signed MIDI driver. The provisioning code is isolated so that either driver package can be inserted without changing the controller or automation engine.
+
+## Independent automation actions and curve validation
+
+Automation rules include editable note groups. The initial groups match this show's
+mapping: scenes N32–N63, laser colors N16/N17/N18/N24/N25/N26, LED/strobe colors
+N19/N20/N21/N27/N28/N29, and effects N6/N7. Each group chooses its own learned
+action and has its own minimum interval. Unassigned notes share an Other group;
+program changes are separate. Notes protected by the rules remain blocked, and
+the strobe cooldown is still shared across all configured strobe notes.
+These are independent decisions, rather than a learned choreography between buttons
+and faders. MIDI note numbers and CC numbers remain separate controls.
+
+Slider learning preserves the complete movement and its timing, selecting its first
+usable musical context even if earlier points were marked as silence. Movements
+with no musical context are excluded and counted in the learning summary. Nothing
+is automatically selected while the current music context is silence.
+Automatic curves require similar, significant movements (at least 5 MIDI values
+of range) demonstrated in at least two separate recording sessions. A dense stream
+from one fader pass does not count as independent support. Controls needing more
+demonstrations appear in the summary. A completed curve stays latched while its
+musical context remains similar; the cooldown alone does not loop it repeatedly.
+
+Validation leaves entire sessions out of training. Notes are evaluated within their
+groups. Sliders are evaluated by selecting and emitting complete curves at the
+configured fader interval, reporting coverage, trajectory error and duration error.
+The final emitted value is observed for at least one interval. This includes missed
+peaks between MIDI updates; manual overrides and disconnections are tested separately.
+Validation is recalculated from saved examples when loading an older model or
+changing the note groups, confidence threshold or fader interval. Isolated legacy
+CC values are not presented as validated continuous curves.
 
 ## MIDI routing
 

@@ -44,12 +44,23 @@ export type ModelValidation = {
   controllerMeanError: number | null
   idleTested: number
   idleFalsePositiveRate: number | null
+  sliderGestures?: {
+    heldOutSessions: number
+    testedGestures: number
+    predictedGestures: number
+    coverage: number
+    meanValueError: number | null
+    meanDurationErrorMs: number | null
+  } | null
 }
 
 export type AutomationModelInfo = {
   temporalExampleCount: number
   sessionCount: number
   validation: ModelValidation | null
+  sliderGestureCount?: number
+  rejectedSliderGestureCount?: number
+  controllersAwaitingSupport?: number[]
 }
 export type AutomationIdleContext = { context: MusicalContext; sessionId: string }
 
@@ -134,6 +145,8 @@ export type DjLinkBridgeStatus = {
   lastEventAt: number | null
 }
 
+export type AutomationNoteGroup = { id: string; name: string; notes: number[] }
+
 export type AutomationSettings = {
   confidenceThreshold: number
   manualOverrideMs: number
@@ -145,6 +158,7 @@ export type AutomationSettings = {
   blockedControllers: number[]
   preferredDeck: number | null
   minControllerIntervalMs?: number
+  noteGroups?: AutomationNoteGroup[]
 }
 
 export type AutomationSuggestion = {

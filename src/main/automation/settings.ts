@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import type { AutomationSettings } from "../../shared/automation-types.js"
 import { clamp } from "./values.js"
+import { normalizeNoteGroups } from "../../shared/automation-action-groups.js"
 
 const DEFAULT_SETTINGS: AutomationSettings = {
   confidenceThreshold: 0.62,
@@ -24,7 +25,7 @@ function loadSettings(filePath: string): AutomationSettings {
   try {
     return normalizeSettings(JSON.parse(fs.readFileSync(filePath, "utf8")))
   } catch {
-    return { ...DEFAULT_SETTINGS }
+    return normalizeSettings({})
   }
 }
 
@@ -75,6 +76,7 @@ function normalizeSettings(value: unknown): AutomationSettings {
       Number.isInteger(preferredDeck) && preferredDeck >= 1 && preferredDeck <= 6
         ? preferredDeck
         : null,
+    noteGroups: normalizeNoteGroups(source.noteGroups),
   }
 }
 export { loadSettings, normalizeSettings }

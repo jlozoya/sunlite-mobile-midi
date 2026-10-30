@@ -47,7 +47,15 @@ test("dense slider curves preserve endpoints, reversals and timing through autom
     )
     const data = path.join(root, "automation")
     fs.mkdirSync(data)
-    new ExamplePolicyEngine(path.join(data, "model.json")).train(examples)
+    new ExamplePolicyEngine(path.join(data, "model.json")).train([
+      ...examples,
+      ...examples.map((example) => ({
+        ...example,
+        id: `repeat-${example.id}`,
+        sessionId: "second-curve-session",
+        createdAt: example.createdAt + 10000,
+      })),
+    ])
     const commands = []
     const engine = new AutomationEngine(
       root,
@@ -404,7 +412,12 @@ test("held-out timbre, loudness and tempo transfer the build's controller progre
     assert.equal(copy.modelInfo.temporalExampleCount, demonstrations().length)
     assert.ok(copy.modelInfo.validation.testedExamples > 0)
     assert.equal(copy.modelInfo.validation.heldOutSessions, 3)
-    assert.ok(copy.modelInfo.validation.controllerMeanError < 20)
+    assert.equal(
+      copy.modelInfo.validation.controllerMeanError,
+      null,
+      "isolated legacy CC examples are not validated as complete curves",
+    )
+    assert.equal(copy.modelInfo.validation.sliderGestures.testedGestures, 0)
   }))
 
 test("the model refuses a musical phase it has not learned", () =>
@@ -588,7 +601,27 @@ test("the engine gradually drives a learned fader on a new musical build and sto
   withRoot((root) => {
     const data = path.join(root, "automation")
     fs.mkdirSync(data)
-    new ExamplePolicyEngine(path.join(data, "model.json")).train(demonstrations())
+    const curves = [110, 120, 130].flatMap((bpm, session) => {
+      const sample = contextAt(song(bpm, 0.7 + session * 0.1, session), 18)
+      return Array.from({ length: 21 }, (_, index) => ({
+        id: `continuous-${session}-${index}`,
+        sessionId: `curve-song-${session}`,
+        createdAt: session * 100000 + index * 100,
+        features: sample.features,
+        context: sample.context,
+        bpm,
+        beatWithinBar: 0,
+        command: {
+          type: "cc",
+          controller: 48,
+          value: Math.round(40 + (index * 87) / 20),
+        },
+      }))
+    })
+    new ExamplePolicyEngine(path.join(data, "model.json")).train([
+      ...demonstrations(),
+      ...curves,
+    ])
     const commands = [],
       engine = new AutomationEngine(
         root,
