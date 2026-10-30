@@ -71,14 +71,23 @@ export function createMidiControllerService({
   let lastMidiLoopGuardWarningAt = 0
 
   function queueMidiFeedbackStateBroadcast() {
-    if (midiFeedbackBroadcastTimer) {
-      clearTimeout(midiFeedbackBroadcastTimer)
-    }
+    if (midiFeedbackBroadcastTimer) return
 
     midiFeedbackBroadcastTimer = setTimeout(() => {
       midiFeedbackBroadcastTimer = null
       broadcastMidiFeedbackState()
     }, 35)
+  }
+
+  // Hardware was already delivered by the router: mirror its position without
+  // sending it again or treating the movement as lighting-software feedback.
+  function observeControllerCommand(command: AutomationMidiCommand) {
+    if (command.type !== "cc") return
+    updateMidiFeedbackState("cc", {
+      controller: clampMidiValue(command.controller),
+      value: clampMidiValue(command.value),
+    })
+    queueMidiFeedbackStateBroadcast()
   }
 
   function getAvailableMidiOutputs(): string[] {
@@ -381,6 +390,7 @@ export function createMidiControllerService({
       const controller = clampMidiValue(payload.controller)
       const value = clampMidiValue(payload.value)
       midiConnection.midi.sendControlChange(controller, value)
+      observeControllerCommand({ type: "cc", controller, value })
 
       return { ok: true, type: "cc", controller, value }
     }
@@ -415,6 +425,7 @@ export function createMidiControllerService({
     refreshMidiConnection,
     closeMidiConnection,
     handleCommand,
+    observeControllerCommand,
     getStatus,
     getConnection: () => midiConnection,
   }

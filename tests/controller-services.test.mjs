@@ -17,6 +17,70 @@ import {
 } from "../dist/main/server/network.js"
 import { WebSocket, WebSocketServer } from "ws"
 import { createMidiControllerService } from "../dist/main/midi/controller-service.js"
+import { recordRoutedCommands } from "../dist/main/automation/router-training.js"
+
+test("routed hardware sliders update UI snapshots during a continuous drag without resending MIDI", async (t) => {
+  const root = temporaryDirectory(t)
+  const feedbackStore = createMidiFeedbackStore(() => root)
+  const broadcasts = [],
+    sent = [],
+    recorded = []
+  class Port {
+    on() {}
+    close() {}
+    send(type, payload) {
+      sent.push({ type, ...payload })
+    }
+  }
+  const controller = createMidiControllerService({
+    broadcastToAll: (payload) => broadcasts.push(payload),
+    recordFeedback: (command) => recorded.push(command),
+    getLightingSoftware: () => "sunlite",
+    feedbackStore,
+    midiBackend: {
+      getOutputs: () => ["Sunlite Mobile In"],
+      getInputs: () => [],
+      Output: Port,
+      Input: Port,
+    },
+  })
+  const config = {
+    ports: [
+      { id: "physical", role: "input", kind: "hardware" },
+      { id: "return", role: "input", kind: "virtual" },
+    ],
+  }
+  const deliver = (source, value) =>
+    recordRoutedCommands(
+      config,
+      source,
+      [{ bytes: [0xb0, 55, value] }, { bytes: [0xb0, 55, value] }],
+      (command) => controller.observeControllerCommand(command),
+    )
+  deliver("physical", 1)
+  assert.equal(feedbackStore.cloneMidiFeedbackState().ccValues[55], 1)
+  deliver("return", 127)
+  assert.equal(feedbackStore.cloneMidiFeedbackState().ccValues[55], 1)
+  const drag = setInterval(() => deliver("physical", 80), 5)
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 130))
+    assert.ok(broadcasts.length >= 2, "publish while hardware is still moving")
+  } finally {
+    clearInterval(drag)
+  }
+  deliver("physical", 127)
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  assert.equal(broadcasts.at(-1).event, "midi-feedback-state")
+  assert.equal(broadcasts.at(-1).state.ccValues[55], 127)
+  assert.deepEqual(sent, [], "mirroring hardware must not duplicate routed MIDI")
+  assert.deepEqual(recorded, [], "hardware must not be recorded as software feedback")
+  controller.refreshMidiConnection()
+  controller.handleCommand({ type: "cc", controller: 56, value: 96 })
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  assert.equal(sent.length, 1)
+  assert.equal(broadcasts.at(-1).state.ccValues[56], 96)
+  controller.closeMidiConnection()
+})
 
 test("status refresh preserves native MIDI handles and held notes; explicit refresh reconnects", () => {
   const instances = []
