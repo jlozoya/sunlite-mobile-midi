@@ -1,9 +1,11 @@
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useRef } from "react"
 import type { DjLinkWaveform } from "../../../shared/automation-types"
+import { LoadingIndicator } from "./LiveDeckCanvas"
 
 type Props = {
   waveforms: DjLinkWaveform[]
+  connectedDecks: number[]
 }
 
 function formatTime(milliseconds: number): string {
@@ -86,10 +88,8 @@ function WaveformCanvas({ waveform }: { waveform: DjLinkWaveform }) {
   )
 }
 
-export function DeckWaveforms({ waveforms }: Props) {
-  const ordered = [...waveforms].sort(
-    (left, right) => left.deviceNumber - right.deviceNumber,
-  )
+export function DeckWaveforms({ waveforms, connectedDecks }: Props) {
+  const ordered = [...new Set(connectedDecks)].sort((left, right) => left - right)
 
   return (
     <section {...stylex.props(styles.panel)}>
@@ -105,32 +105,49 @@ export function DeckWaveforms({ waveforms }: Props) {
 
       {ordered.length ? (
         <div {...stylex.props(styles.grid)}>
-          {ordered.map((waveform) => (
-            <article
-              key={`${waveform.deviceNumber}:${waveform.trackId}`}
-              {...stylex.props(styles.deck, waveform.isOnAir && styles.deckActive)}
-            >
-              <div {...stylex.props(styles.deckHeading)}>
-                <div {...stylex.props(styles.titleGroup)}>
-                  <strong>Deck {waveform.deviceNumber}</strong>
-                  <span {...stylex.props(styles.title)}>{waveform.title}</span>
+          {ordered.map((deviceNumber) => {
+            const waveform = waveforms.find(
+              (entry) => entry.deviceNumber === deviceNumber && entry.heights.length > 0,
+            )
+            if (!waveform)
+              return (
+                <article key={deviceNumber} {...stylex.props(styles.deck)}>
+                  <div {...stylex.props(styles.deckHeading)}>
+                    <strong>Deck {deviceNumber}</strong>
+                  </div>
+                  <div {...stylex.props(styles.empty)}>
+                    <LoadingIndicator label="Cargando waveform…" />
+                    <span>Si aún no has cargado una pista, cárgala en el CDJ.</span>
+                  </div>
+                </article>
+              )
+            return (
+              <article
+                key={`${waveform.deviceNumber}:${waveform.trackId}`}
+                {...stylex.props(styles.deck, waveform.isOnAir && styles.deckActive)}
+              >
+                <div {...stylex.props(styles.deckHeading)}>
+                  <div {...stylex.props(styles.titleGroup)}>
+                    <strong>Deck {waveform.deviceNumber}</strong>
+                    <span {...stylex.props(styles.title)}>{waveform.title}</span>
+                  </div>
+                  <div {...stylex.props(styles.badges)}>
+                    {waveform.isOnAir ? (
+                      <span {...stylex.props(styles.onAirBadge)}>ON AIR</span>
+                    ) : null}
+                    {waveform.isMaster ? (
+                      <span {...stylex.props(styles.masterBadge)}>MASTER</span>
+                    ) : null}
+                  </div>
                 </div>
-                <div {...stylex.props(styles.badges)}>
-                  {waveform.isOnAir ? (
-                    <span {...stylex.props(styles.onAirBadge)}>ON AIR</span>
-                  ) : null}
-                  {waveform.isMaster ? (
-                    <span {...stylex.props(styles.masterBadge)}>MASTER</span>
-                  ) : null}
+                <WaveformCanvas waveform={waveform} />
+                <div {...stylex.props(styles.timeRow)}>
+                  <span>{formatTime(waveform.positionMs)}</span>
+                  <span>{formatTime(waveform.durationSeconds * 1000)}</span>
                 </div>
-              </div>
-              <WaveformCanvas waveform={waveform} />
-              <div {...stylex.props(styles.timeRow)}>
-                <span>{formatTime(waveform.positionMs)}</span>
-                <span>{formatTime(waveform.durationSeconds * 1000)}</span>
-              </div>
-            </article>
-          ))}
+              </article>
+            )
+          })}
         </div>
       ) : (
         <div {...stylex.props(styles.empty)}>

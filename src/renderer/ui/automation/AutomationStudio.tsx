@@ -264,7 +264,7 @@ export function AutomationStudio({
       ) : null}
 
       {status?.devices.length ? (
-        <DeckWaveforms waveforms={waveforms} />
+        <DeckWaveforms waveforms={waveforms} connectedDecks={[...connectedDecks]} />
       ) : (
         <RekordboxWaveforms enabled={captureVisible} />
       )}

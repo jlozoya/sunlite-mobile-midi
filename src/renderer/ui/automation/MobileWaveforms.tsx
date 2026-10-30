@@ -82,6 +82,7 @@ export function MobileWaveforms() {
   if (connectedDecks.size)
     return (
       <DeckWaveforms
+        connectedDecks={[...connectedDecks]}
         waveforms={Object.values(status?.waveforms ?? {}).filter((waveform) =>
           connectedDecks.has(waveform.deviceNumber),
         )}
