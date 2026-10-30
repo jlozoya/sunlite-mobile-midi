@@ -25,25 +25,11 @@ import { CONTEXT_RECORD_INTERVAL_MS } from "../../shared/automation-learning.js"
 import { AutomationInputContext } from "./input-context.js"
 import { AutomationSafety } from "./automation-safety.js"
 import { activeDeck, contextBeat } from "./deck-context.js"
-
-const EMPTY_BRIDGE_STATUS: DjLinkBridgeStatus = {
-  available: false,
-  running: false,
-  connected: false,
-  message: "PRO DJ LINK bridge is not started",
-  executablePath: null,
-  lastEventAt: null,
-}
+import { SliderPlayback } from "./slider-playback.js"
+import { EMPTY_BRIDGE_STATUS, commandLabel } from "./values.js"
 
 type Broadcast = (payload: unknown) => void
 type MidiExecutor = (command: AutomationMidiCommand) => unknown
-
-function commandLabel(command: AutomationMidiCommand): string {
-  if (command.type === "note" || command.type === "noteon") return `nota ${command.note}`
-  if (command.type === "cc") return `CC ${command.controller} = ${command.value}`
-  if (command.type === "program") return `programa ${command.number}`
-  return `fin de nota ${command.note}`
-}
 
 export class AutomationEngine {
   private readonly settingsPath: string
@@ -77,6 +63,7 @@ export class AutomationEngine {
   private readonly inputContext = new AutomationInputContext()
   private readonly safety = new AutomationSafety()
   private lastControllerPredictionAt = 0
+  private readonly sliderPlayback = new SliderPlayback()
   private lastDeckRecordedAt = new Map<number, number>()
   private lastAudioTriggerAt = 0
   private statusBroadcastTimer: NodeJS.Timeout | null = null
@@ -99,6 +86,7 @@ export class AutomationEngine {
 
   dispose(): void {
     this.mode = "manual"
+    this.sliderPlayback.clear()
     if (this.statusBroadcastTimer) clearTimeout(this.statusBroadcastTimer)
     this.statusBroadcastTimer = null
   }
@@ -153,6 +141,7 @@ export class AutomationEngine {
       throw new Error("Invalid automation mode")
     }
     this.mode = mode
+    this.sliderPlayback.reset()
     if (mode === "manual") this.lastSuggestion = null
     this.queueStatusBroadcast()
     return this.getStatus()
@@ -184,6 +173,7 @@ export class AutomationEngine {
   }
 
   train(): AutomationStatus {
+    this.sliderPlayback.reset()
     const dataset = this.store.readTrainingDataset()
     this.policy.train(dataset.examples, dataset.idle)
     this.queueStatusBroadcast()
@@ -266,6 +256,7 @@ export class AutomationEngine {
   }
 
   handleAudioDisconnected(): void {
+    if (this.inputSource() === "audio") this.sliderPlayback.clear()
     this.lastAudioAt = null
     this.currentFrame = null
     this.inputContext.clearAudio()
@@ -385,6 +376,7 @@ export class AutomationEngine {
   }
 
   recordManualCommand(command: AutomationMidiCommand): void {
+    this.sliderPlayback.clear()
     const now = Date.now()
     this.manualOverrideUntil = now + this.settings.manualOverrideMs
     this.safety.manual(command, now)
@@ -502,6 +494,9 @@ export class AutomationEngine {
 
   private predictControllers(bpm: number) {
     const now = Date.now()
+    if (now - this.lastControllerPredictionAt > 2500) this.sliderPlayback.clear()
+    if (this.mode !== "auto" || now < this.manualOverrideUntil)
+      this.sliderPlayback.clear()
     if (
       this.mode === "manual" ||
       now - this.lastControllerPredictionAt <
@@ -509,13 +504,33 @@ export class AutomationEngine {
     )
       return
     this.lastControllerPredictionAt = now
-    for (const prediction of this.policy.predictControllers(
-      this.inputContext.get(this.inputSource(), now),
-      bpm,
-    )) {
-      const command = this.safety.smooth(prediction.command, now)
-      this.applyPrediction({ ...prediction, command }, "fader")
+    const source = this.inputSource()
+    const context = this.inputContext.get(source, now)
+    if (!context || context.phase === "silence") {
+      this.sliderPlayback.clear()
+      return
     }
+    // Older recordings with isolated CC values have no continuous curve to replay.
+    for (const prediction of this.policy.predictControllers(context, bpm)) {
+      if (
+        prediction.command.type === "cc" &&
+        !this.policy.hasSliderGesture(prediction.command.controller)
+      )
+        this.applyPrediction(
+          { ...prediction, command: this.safety.smooth(prediction.command, now) },
+          "fader",
+        )
+    }
+    this.sliderPlayback.tick(
+      now,
+      source,
+      context,
+      this.mode,
+      this.settings,
+      this.manualOverrideUntil,
+      this.policy,
+      (prediction, trigger) => this.applyPrediction(prediction, trigger),
+    )
   }
 
   private applyPrediction(prediction: PolicyPrediction, trigger: string) {

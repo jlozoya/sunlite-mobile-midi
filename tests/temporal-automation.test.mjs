@@ -13,6 +13,81 @@ import { waveformFeatures } from "../dist/main/automation/waveform-analysis.js"
 import { selectTrainingExamples } from "../dist/main/automation/training-selection.js"
 import { AutomationInputContext } from "../dist/main/automation/input-context.js"
 import { recordRoutedCommands } from "../dist/main/automation/router-training.js"
+import {
+  learnSliderGestures,
+  sliderGestureValue,
+} from "../dist/main/automation/slider-gestures.js"
+
+test("dense slider curves preserve endpoints, reversals and timing through automatic playback", () =>
+  withRoot((root) => {
+    const sample = contextAt(song(), 18)
+    const examples = Array.from({ length: 101 }, (_, i) => ({
+      id: `curve-${i}`,
+      sessionId: "curve-session",
+      createdAt: i * 10,
+      features: sample.features,
+      context: sample.context,
+      bpm: 120,
+      beatWithinBar: 1,
+      command: {
+        type: "cc",
+        controller: 55,
+        value: Math.round(i <= 50 ? (i * 127) / 50 : ((100 - i) * 127) / 50),
+      },
+    }))
+    const gestures = learnSliderGestures(examples)
+    assert.equal(gestures.length, 1)
+    assert.equal(sliderGestureValue(gestures[0], 0), 0)
+    assert.equal(sliderGestureValue(gestures[0], 500), 127)
+    assert.equal(sliderGestureValue(gestures[0], 1000), 0)
+    assert.equal(
+      learnSliderGestures(examples.map((e, i) => ({ ...e, sessionId: `separate-${i}` })))
+        .length,
+      0,
+    )
+    const data = path.join(root, "automation")
+    fs.mkdirSync(data)
+    new ExamplePolicyEngine(path.join(data, "model.json")).train(examples)
+    const commands = []
+    const engine = new AutomationEngine(
+      root,
+      () => {},
+      (command) => commands.push(command),
+    )
+    const originalNow = Date.now
+    let now = 100000
+    Date.now = () => now
+    try {
+      engine.inputContext.get = () => sample.context
+      engine.setMode("auto")
+      for (let t = 0; t <= 1000; t += 100) {
+        now = 100000 + t
+        engine.predictControllers(120)
+      }
+      assert.equal(commands.length, 11)
+      assert.equal(commands[0].value, 0)
+      assert.equal(commands[5].value, 127)
+      assert.equal(
+        commands[10].value,
+        0,
+        "returning to the start is not blocked by per-value cooldown",
+      )
+      now += 100
+      engine.predictControllers(120)
+      assert.equal(commands.length, 11, "cooldown applies to the entire gesture")
+      now += 5000
+      engine.predictControllers(120)
+      engine.recordManualCommand({ type: "cc", controller: 55, value: 80 })
+      const count = commands.length
+      now += 100
+      engine.predictControllers(120)
+      assert.equal(commands.length, count)
+      assert.equal(engine.sliderPlayback.size, 0)
+    } finally {
+      Date.now = originalNow
+      engine.dispose()
+    }
+  }))
 
 test("hardware MIDI trains from Ethernet waveforms without microphone and deduplicates fan-out", () =>
   withRoot((root) => {

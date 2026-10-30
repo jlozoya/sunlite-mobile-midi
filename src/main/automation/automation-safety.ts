@@ -32,7 +32,11 @@ export class AutomationSafety {
     } else if (now - this.lastActionAt < settings.minActionIntervalMs)
       return "intervalo mínimo entre acciones"
     const at = this.lastActionTimes.get(key(command))
-    if (at !== undefined && now - at < settings.repeatActionCooldownMs)
+    if (
+      command.type !== "cc" &&
+      at !== undefined &&
+      now - at < settings.repeatActionCooldownMs
+    )
       return "acción repetida demasiado pronto"
     if (command.type === "note" || command.type === "noteon") {
       if (settings.blockedNotes.includes(command.note)) return "nota protegida"

@@ -11,6 +11,7 @@ import { MIN_TRAINING_EXAMPLES } from "../../shared/automation-learning.js"
 import { isMusicalContext } from "../../shared/musical-context.js"
 import { predictTemporal, validateTemporalModel } from "./temporal-policy.js"
 import { selectTrainingExamples } from "./training-selection.js"
+import { learnSliderGestures, selectSliderGestures } from "./slider-gestures.js"
 
 type StoredModel = {
   version: 1 | 2
@@ -145,6 +146,7 @@ function normalizeAutomaticCommand(
 export class ExamplePolicyEngine {
   private readonly modelPath: string
   private examples: AutomationTrainingExample[] = []
+  private sliderGestures = learnSliderGestures([])
   private vectors: number[][] = []
   private idle: AutomationIdleContext[] = []
   private info: AutomationModelInfo = {
@@ -294,7 +296,18 @@ export class ExamplePolicyEngine {
     })
   }
 
+  predictSliderGestures(context: MusicalContext | null) {
+    return this.temporalReady && context
+      ? selectSliderGestures(this.sliderGestures, context)
+      : []
+  }
+
+  hasSliderGesture(controller: number) {
+    return this.sliderGestures.some((gesture) => gesture.controller === controller)
+  }
+
   private cacheVectors(): void {
+    this.sliderGestures = learnSliderGestures(this.examples)
     this.vectors = this.examples.map((example) =>
       featureVector(example.features, example.beatWithinBar, example.bpm),
     )
