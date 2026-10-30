@@ -11,7 +11,7 @@ import { AppTabIcon, type AppTabId as DesktopTab } from "./components/AppTabIcon
 import { Toast } from "./components/Toast"
 import { AnimatedDisclosure } from "./components/AnimatedDisclosure"
 import { AutomationStudio } from "./automation/AutomationStudio"
-import { RekordboxWaveforms } from "./automation/RekordboxWaveforms"
+import { MobileWaveforms } from "./automation/MobileWaveforms"
 import { useRekordboxVideoCapture } from "./automation/useRekordboxVideoCapture"
 import { RouterPanel } from "./router/RouterPanel"
 import { useIsMobileView } from "./hooks/useIsMobileView"
@@ -267,12 +267,12 @@ export function App() {
 
       {isMobileView ? (
         <AnimatedDisclosure
-          summary="Waveforms de Rekordbox"
+          summary="Waveforms de los decks"
           containerProps={stylex.props(styles.mobileWaveforms)}
           buttonProps={stylex.props(styles.mobileWaveformsTrigger)}
           unmountOnExit
         >
-          <RekordboxWaveforms />
+          <MobileWaveforms key={software} />
         </AnimatedDisclosure>
       ) : null}
 
