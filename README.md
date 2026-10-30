@@ -73,8 +73,10 @@ output **Sunlite Mobile In**; optionally route virtual input **Sunlite Mobile Ou
 back to the APC hardware output for LEDs. In FreeStyler, start **Sunlite Mobile In**
 and stop the separate APC input. Learn the function once from this shared input,
 then test the app and the APC without relearning between them. Keep the router
-running: its configuration is saved, but after restarting the app (including a dev
-backend restart), click **Arrancar router** again.
+running: its configuration is saved. **Empezar entrenamiento** starts the router
+automatically when its saved configuration is valid and the routed hardware inputs
+are available. Recording waits for startup to finish; a startup failure is shown
+before recording begins. You can also use **Arrancar router** manually.
 Use Page independent mappings so a page change
 cannot silently change the learned command's meaning. Feedback requires explicit
 configuration in FreeStyler; opening the return port alone does not confirm feedback.

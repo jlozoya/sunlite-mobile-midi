@@ -40,6 +40,7 @@ import { registerRouterRoutes } from "./server/router-routes.js"
 import { registerControllerSocket, broadcast } from "./server/controller-socket.js"
 import { configureAutoUpdates } from "./electron/updates.js"
 import { configureCapture } from "./electron/capture.js"
+import { prepareTrainingRouter } from "./automation/training-router.js"
 
 let lightingSoftware: LightingSoftware = "sunlite"
 
@@ -179,15 +180,32 @@ async function startControllerServer(): Promise<ServerStatus> {
     midiBridge,
     broadcastToAll,
   })
+  let startingRouter: Promise<void> | null = null
+  const startRouter = () => {
+    startingRouter ??= routerService!
+      .start({
+        installerPath: getLoopMidiInstallerPath(),
+        // Release native handles before loopMIDI restarts its virtual ports.
+        onBeforeRestart: () => closeMidiConnection(),
+        onAfterRestart: () => {
+          refreshMidiConnection()
+        },
+      })
+      .finally(() => {
+        startingRouter = null
+      })
+    return startingRouter
+  }
   registerAutomationRoutes(appServer, {
     getEngine: () => automationEngine,
     getCapture: () => rekordboxCapture,
     getSidecar: () => prodjLinkSidecar,
+    prepareTraining: () =>
+      prepareTrainingRouter(() => routerService!.getState(), startRouter),
   })
   registerRouterRoutes(appServer, {
     routerService,
-    closeMidiConnection,
-    refreshMidiConnection,
+    startRouter,
   })
   registerControllerSocket(wss, {
     refreshMidiConnection,

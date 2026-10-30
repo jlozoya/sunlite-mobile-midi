@@ -10,10 +10,12 @@ export function registerAutomationRoutes(
     getEngine,
     getCapture,
     getSidecar,
+    prepareTraining,
   }: {
     getEngine: () => AutomationEngine | null
     getCapture: () => RekordboxWindowCapture | null
     getSidecar: () => ProDjLinkSidecar | null
+    prepareTraining?: () => Promise<void>
   },
 ) {
   appServer.get("/api/automation/status", (_request, response) => {
@@ -74,8 +76,16 @@ export function registerAutomationRoutes(
     }
   })
 
-  appServer.post("/api/automation/session/start", (request, response) => {
-    response.json(getEngine()?.startSession(request.body?.name))
+  appServer.post("/api/automation/session/start", async (request, response) => {
+    try {
+      await prepareTraining?.()
+      response.json(getEngine()?.startSession(request.body?.name))
+    } catch (error) {
+      response.status(400).json({
+        message:
+          error instanceof Error ? error.message : "No se pudo preparar el entrenamiento",
+      })
+    }
   })
 
   appServer.post("/api/automation/session/stop", (_request, response) => {

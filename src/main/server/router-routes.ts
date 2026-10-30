@@ -1,18 +1,15 @@
 import type { Express } from "express"
 import type { RouterService } from "../router-service.js"
 import { MIDI_OUTPUT_NAME, MIDI_INPUT_NAME } from "../midi/settings.js"
-import { getLoopMidiInstallerPath } from "../runtime-paths.js"
 
 export function registerRouterRoutes(
   appServer: Express,
   {
     routerService,
-    closeMidiConnection,
-    refreshMidiConnection,
+    startRouter,
   }: {
     routerService: RouterService
-    closeMidiConnection: () => void
-    refreshMidiConnection: () => unknown
+    startRouter: () => Promise<void>
   },
 ) {
   const routerReservedDevices = () => [MIDI_OUTPUT_NAME, MIDI_INPUT_NAME]
@@ -39,16 +36,7 @@ export function registerRouterRoutes(
 
   appServer.post("/api/router/start", async (_request, response) => {
     try {
-      await routerService!.start({
-        installerPath: getLoopMidiInstallerPath(),
-        // Creating a new virtual port can require restarting loopMIDI, and RtMidi
-        // crashes the process if a port disappears while it is open. Release the
-        // controller's pair first, then reopen once the bridge is back.
-        onBeforeRestart: () => closeMidiConnection(),
-        onAfterRestart: () => {
-          refreshMidiConnection()
-        },
-      })
+      await startRouter()
       response.json(routerPayload())
     } catch (error) {
       response.status(400).json({

@@ -18,6 +18,101 @@ import {
 import { WebSocket, WebSocketServer } from "ws"
 import { createMidiControllerService } from "../dist/main/midi/controller-service.js"
 import { recordRoutedCommands } from "../dist/main/automation/router-training.js"
+import { prepareTrainingRouter } from "../dist/main/automation/training-router.js"
+
+async function waitFor(condition) {
+  const deadline = Date.now() + 10000
+  while (!condition()) {
+    assert.ok(Date.now() < deadline, "timed out waiting for the expected event")
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+}
+
+test("training waits for an available saved hardware router, skips unavailable setups and reports startup errors", async (t) => {
+  const state = {
+    running: false,
+    errors: [],
+    devices: { inputs: ["APC mini"], outputs: [] },
+    config: {
+      ports: [
+        {
+          id: "physical",
+          role: "input",
+          kind: "hardware",
+          deviceName: "APC",
+          match: "contains",
+        },
+      ],
+      routes: [{ enabled: true, source: "physical" }],
+    },
+  }
+  let starts = 0,
+    sessions = 0,
+    release
+  const startup = new Promise((resolve) => {
+    release = resolve
+  })
+  const request = await serve(t, (app) =>
+    registerAutomationRoutes(app, {
+      getEngine: () => ({
+        startSession: () => {
+          sessions++
+          return { recording: true }
+        },
+      }),
+      getCapture: () => null,
+      getSidecar: () => null,
+      prepareTraining: () =>
+        prepareTrainingRouter(
+          () => state,
+          async () => {
+            starts++
+            await startup
+          },
+        ),
+    }),
+  )
+  const pending = request("/api/automation/session/start", "POST", { name: "Hardware" })
+  await waitFor(() => starts === 1)
+  assert.equal(starts, 1)
+  assert.equal(sessions, 0, "do not record until the router is ready")
+  release()
+  assert.equal((await pending).body.recording, true)
+  for (const variant of [
+    { ...state, running: true },
+    { ...state, errors: ["Invalid route"] },
+    { ...state, devices: { inputs: [], outputs: [] } },
+    { ...state, config: { ports: [], routes: [] } },
+  ])
+    await prepareTrainingRouter(
+      () => variant,
+      async () => {
+        throw Error("must not start")
+      },
+    )
+  const failedRequest = await serve(t, (app) =>
+    registerAutomationRoutes(app, {
+      getEngine: () => ({
+        startSession: () => {
+          sessions++
+        },
+      }),
+      getCapture: () => null,
+      getSidecar: () => null,
+      prepareTraining: () =>
+        prepareTrainingRouter(
+          () => state,
+          async () => {
+            throw Error("Device busy")
+          },
+        ),
+    }),
+  )
+  const failed = await failedRequest("/api/automation/session/start", "POST", {})
+  assert.equal(failed.status, 400)
+  assert.match(failed.body.message, /Device busy/)
+  assert.equal(sessions, 1)
+})
 
 test("routed hardware sliders update UI snapshots during a continuous drag without resending MIDI", async (t) => {
   const root = temporaryDirectory(t)
@@ -63,20 +158,20 @@ test("routed hardware sliders update UI snapshots during a continuous drag witho
   assert.equal(feedbackStore.cloneMidiFeedbackState().ccValues[55], 1)
   const drag = setInterval(() => deliver("physical", 80), 5)
   try {
-    await new Promise((resolve) => setTimeout(resolve, 130))
+    await waitFor(() => broadcasts.length >= 2)
     assert.ok(broadcasts.length >= 2, "publish while hardware is still moving")
   } finally {
     clearInterval(drag)
   }
   deliver("physical", 127)
-  await new Promise((resolve) => setTimeout(resolve, 60))
+  await waitFor(() => broadcasts.at(-1)?.state.ccValues[55] === 127)
   assert.equal(broadcasts.at(-1).event, "midi-feedback-state")
   assert.equal(broadcasts.at(-1).state.ccValues[55], 127)
   assert.deepEqual(sent, [], "mirroring hardware must not duplicate routed MIDI")
   assert.deepEqual(recorded, [], "hardware must not be recorded as software feedback")
   controller.refreshMidiConnection()
   controller.handleCommand({ type: "cc", controller: 56, value: 96 })
-  await new Promise((resolve) => setTimeout(resolve, 60))
+  await waitFor(() => broadcasts.at(-1)?.state.ccValues[56] === 96)
   assert.equal(sent.length, 1)
   assert.equal(broadcasts.at(-1).state.ccValues[56], 96)
   controller.closeMidiConnection()
