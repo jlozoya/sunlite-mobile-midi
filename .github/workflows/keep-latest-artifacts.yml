@@ -1,0 +1,40 @@
+name: Keep latest artifacts
+
+on:
+  workflow_run:
+    workflows: ["Windows installer"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+concurrency:
+  group: keep-latest-artifacts
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      # Only inspect API metadata. Never download or execute the triggering build.
+      - name: Keep the newest artifact for each application or platform
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_NAMES: '["sunlite-windows"]'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/artifacts?per_page=100" \
+            --paginate --slurp > "$RUNNER_TEMP/artifacts.json"
+          jq -r --argjson names "$ARTIFACT_NAMES" '
+            [.[].artifacts[] | select(.expired == false)
+             | select(.name as $name | $names | index($name))]
+            | group_by(.name) | .[]
+            | sort_by([.created_at, .id]) | reverse | .[1:][] | .id
+          ' "$RUNNER_TEMP/artifacts.json" > "$RUNNER_TEMP/obsolete-artifacts.txt"
+          while IFS= read -r artifact_id; do
+            gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$artifact_id"
+          done < "$RUNNER_TEMP/obsolete-artifacts.txt"
